@@ -126,41 +126,6 @@ TestPilot 项目旨在通过AI技术解决测试工作中的实际痛点，构�
 
 TestPilot 采用分层架构设计，结合多种先进技术实现智能化测试用例生成：
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    前端展示层                             │
-│  (Vue 3 + TypeScript + Vite                             │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                    API服务层                             │
-│  (Flask Blueprints + `RESTful` API)                     │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                   业务逻辑层                              │
-│  (CaseService + KnowledgeService + ChatService)         │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                   核心能力层                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │  LLM集成     │  │  RAG检索     │  │  幻觉检测         │ │
-│  │  (LangChain) │  │  (SQLite+    │  │  (自研算法)    │ │
-│  │              │  │   sqlite-vec)│  │              │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │  关键词提取  │  │  复杂度分析  │  │  配置中心    │ │
-│  │  (增强版)    │  │  (风险识别)  │  │  (统一管理)  │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                   数据存储层                             │
-│  (SQLite + sqlite-vec + FTS5 + 文件系统)                │
-└─────────────────────────────────────────────────────────┘
-```
-
 <img src="./pictures/图1-1-1系统总体架构图.png" alt="系统总体架构图" />
 
 ### 向量存储架构概览
@@ -349,147 +314,35 @@ LLM生成（增强提示词 + 结构化输出）
 
 ## 项目框架
 ```text
-TestPilot/
-├── 应用核心
-│   ├── app.py                    Flask 应用工厂，初始化应用上下文
-│   ├── run.py                    应用启动入口，支持开发/生产模式
-│   ├── build.bat                 Windows 构建脚本
-│   ├── build.spec                打包配置
-│   └── config/
-│       ├── settings.py           核心配置类，统一管理配置项
-│       ├── filter_keywords.json  关键词过滤配置
-│       ├── hallucination_config.json  幻觉检测配置
-│       └── knowledge_base.json   知识库配置
-│
-├── 数据层
-│   ├── models/
-│   │   ├── models.py             核心业务模型
-│   │   └── config_models.py      配置中心模型
-│   └── services/
-│       ├── case_service.py       测试用例生成服务
-│       ├── chat_service.py       AI 聊天服务
-│       ├── knowledge_service.py  知识库管理服务
-│       ├── document_service.py   文档分析服务
-│       ├── export_service.py     数据导出服务
-│       ├── stats_service.py      统计服务
-│       ├── config_service.py     配置服务
-│       └── config_center_service.py  配置中心服务
-│
-├── API 层
-│   └── blueprints/
-│       ├── cases.py              测试用例 API
-│       ├── chat.py               AI 聊天 API
-│       ├── knowledge.py          知识库 API
-│       ├── documents.py          需求文档 API
-│       ├── export.py             数据导出 API
-│       ├── stats.py              统计 API
-│       └── config_center.py      配置中心 API
-│
-├── 前端
-│   ├── templates/
-│   │   ├── base.html             基础模板
-│   │   ├── index.html            首页模板
-│   │   └── components/
-│   │       ├── cases_page.html   测试用例页面
-│   │       ├── chat_page.html    AI 聊天页面
-│   │       ├── knowledge_page.html  知识库页面
-│   │       ├── documents_page.html  需求分析页面
-│   │       └── config_center.html   配置中心页面
-│   ├── static/css/
-│   │   ├── base.css              基础样式
-│   │   ├── style.css             主样式
-│   │   ├── components.css        组件样式
-│   │   ├── pages.css             页面样式
-│   │   └── modules/              模块样式
-│   └── static/js/
-│       ├── main.js               主入口文件
-│       ├── api.js                API 调用封装
-│       ├── base.js               基础工具函数
-│       ├── cases.js              测试用例功能
-│       ├── chat.js               AI 聊天功能
-│       ├── knowledge.js          知识库功能
-│       ├── documents.js          需求分析功能
-│       ├── config_center.js      配置中心功能
-│       └── components/
-│           ├── dashboard.js       仪表板组件
-│           ├── modal.js           模态框组件
-│           ├── form.js            表单组件
-│           ├── pagination.js      分页组件
-│           ├── toast.js           提示组件
-│           └── config_status_indicator.js  配置状态指示器
-│
-├── 工具层
-│   └── utils/
-│       ├── utils_core/
-│       │   ├── logger.py          日志管理
-│       │   ├── path_helper.py     路径处理
-│       │   ├── common_utils.py    通用工具函数
-│       │   ├── error_handler.py   错误处理
-│       │   ├── json_utils.py      JSON 处理
-│       │   ├── platform_utils.py  平台适配工具
-│       │   └── remote_model_checker.py  远程模型检查
-│       ├── utils_ai_models/
-│       │   ├── get_llm.py         LLM 获取入口
-│       │   ├── embeddings.py      向量嵌入模型
-│       │   ├── embedding_manager.py  嵌入模型管理
-│       │   └── embedding_monitor.py  嵌入模型监控
-│       ├── utils_ai_quality/
-│       │   ├── hallucination_detector.py  幻觉检测器
-│       │   ├── hallucination_handler.py   幻觉处理器
-│       │   └── hallucination_reporter.py  幻觉报告器
-│       ├── utils_intelligent_retrieval/
-│       │   ├── smart_retrieval_strategy.py  多策略检索
-│       │   ├── requirement_keyword_extractor.py  关键词提取
-│       │   └── rag_keyword_config.py       RAG 关键词配置
-│       ├── utils_document_processing/
-│       │   ├── parser.py           文档解析器
-│       │   ├── document_preprocessor.py  文档预处理
-│       │   ├── smart_document_chunking.py  智能分块
-│       │   └── file_preview.py     文件预览
-│       ├── utils_business_logic/
-│       │   ├── case_id_generator.py  用例 ID 生成器
-│       │   ├── complexity_scorer.py   复杂度评分器
-│       │   ├── requirements_analyze.py  需求分析器
-│       │   └── function_cases.py     功能用例生成
-│       ├── utils_config_management/
-│       │   ├── smart_config_manager.py  智能配置管理器
-│       │   └── optimization_config.py   优化配置
-│       ├── utils_performance_monitoring/
-│       │   ├── performance_monitor.py  性能监控器
-│       │   ├── token_monitor.py       Token 使用监控
-│       │   └── cache_manager.py       缓存管理器
-│       └── utils_batch_processing/
-│           ├── batch_processor.py    批量处理器
-│           └── streaming_processor.py  流式处理器
-│
-├── 脚本
-│   ├── scripts/
-│   │   ├── init_db.py              数据库初始化脚本
-│   │   ├── init_vectordb.py        向量数据库初始化
-│   │   ├── init_config_center.py   配置中心初始化
-│   │   ├── batch_import_knowledge.py  批量导入知识库
-│   │   ├── check_knowledge_base.py    知识库检查
-│   │   ├── check_system.py            系统健康检查
-│   │   ├── check_vector_db_garbled_text.py  向量库乱码检查
-│   │   ├── clear_and_rebuild_knowledge.py   清空并重建知识库
-│   │   ├── query_config_center.py     配置中心查询工具
-│   │   └── atest_cross_platform.py    跨平台测试脚本
-│   └── install.py                 安装脚本
-│
-├── 文档
-│   ├── README.md                  项目主文档
-│   ├── README_en.md               英文文档
-│   └── docs/
-│       └── introduce.md           项目介绍文档
-│
-└── 数据存储
-    ├── testpilot.db               SQLite 数据库文件
-    ├── vector_store/              向量数据库目录
-    ├── uploads/                   上传文件存储
-    │   ├── documents/             需求文档
-    │   └── knowledge/             知识库文件
-    ├── sessions/                  Flask 会话存储
-    └── logs/                      日志文件目录
+TestPilot-vue/
+├── app.py                          Flask app 工厂、蓝图注册、前端资源分发
+├── run.py                          启动入口（后端 + 前端联调）
+├── config/
+│   ├── settings.py                 核心配置（模型、RAG、检索、实验开关）
+│   ├── filter_keywords.json        关键词配置
+│   └── hallucination_config.json   幻觉检测配置
+├── blueprints/                     API 路由层（cases/chat/documents/knowledge/stats/config）
+├── services/                       业务服务层（case/chat/document/knowledge/export/...）
+├── models/                         SQLAlchemy 模型
+├── utils/                          通用工具层（模型接入、检索、质量、文档处理等）
+├── scripts/                        初始化、检查、维护脚本
+├── tests/                          测试代码
+├── frontend/                       Vue 3 + TypeScript + Vite 前端
+│   ├── src/
+│   │   ├── api/                    前端 API 封装
+│   │   ├── components/             Vue 组件
+│   │   ├── views/                  页面视图
+│   │   ├── router/                 路由
+│   │   ├── stores/                 Pinia 状态管理
+│   │   ├── i18n/                   多语言资源（zh-CN/en）
+│   │   └── styles/                 样式体系
+│   ├── public/                     静态资源
+│   └── package.json                前端依赖与脚本
+├── uploads/                        上传文件目录（documents/knowledge）
+├── vector_store/                   SQLite 向量库目录
+├── docs/                           项目文档
+├── README.md                       中文文档
+└── README_en.md                    英文文档
 ```
 
 ## 功能特性
@@ -520,7 +373,7 @@ TestPilot/
 
 ### 知识库管理
 - **文件上传**：支持多种格式的知识文件上传
-- **向量化存储**：使用ChromaDB进行向量化存储和检索
+- **向量化存储**：基于 SQLite + sqlite-vec + FTS5 进行向量存储和检索
 - **智能检索**：多策略检索系统（语义检索、关键词检索、混合检索、上下文感知检索）
 - **关键词提取增强**：智能关键词提取，支持停用词过滤、技术术语识别、实体和短语提取
 - **检索优化**：智能重排序、查询扩展、性能监控
@@ -566,7 +419,7 @@ TestPilot/
 - **框架**：Flask 3.0+ (Python Web框架)
 - **数据库**：`SQLite` / `PostgreSQL` / `MySQL` (支持多种数据库)
 - **ORM**：SQLAlchemy (数据库ORM)
-- **向量数据库**：ChromaDB (向量存储和检索)
+- **向量数据库**：SQLite + sqlite-vec + FTS5（当前默认与推荐）
 - **AI集成**：LangChain (多模型AI集成框架)
 - **智能检索**：多策略检索系统 (语义、关键词、混合、上下文感知)
 - **关键词提取**：增强的关键词提取器 (停用词过滤、技术术语识别、实体提取)
@@ -576,11 +429,11 @@ TestPilot/
 - **异步处理**：Eventlet (异步和WebSocket支持)
 
 ### 前端技术栈
+- **框架**：Vue 3 + TypeScript + Vite
+- **状态与路由**：Pinia + vue-router + vue-i18n
 - **UI体系**：`tp-*` 设计体系 + Vue 组件化
-- **JavaScript**：原生ES6+ Modules (模块化开发)
 - **图标库**：Font Awesome 6.5 (图标支持)
 - **图表库**：Chart.js (数据可视化)
-- **模板引擎**：Jinja2 (服务端模板渲染)
 
 ### AI模型支持
 - **OpenAI**：GPT-4、GPT-3.5-turbo
@@ -625,6 +478,36 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+3.1 **初始化前端（Vue 3 + Vite）**
+```bash
+cd frontend
+npm install
+```
+
+常用前端命令：
+```bash
+# 启动 Vue 开发服务（默认 Vite）
+npm run dev
+
+# 构建生产包
+npm run build
+
+# 本地预览构建结果
+npm run preview
+```
+
+联调说明：
+- 前端通过 `VITE_FLASK_TARGET` 连接后端（配置文件：`frontend/.env.development.local`）
+- 推荐直接在项目根目录运行 `python run.py`，会自动处理后端启动与前端联调配置
+- 如需独立调试前端，可手动执行 `cd frontend && npm run dev`
+
+前端常见问题排查：
+- `npm install` 失败：先确认 Node.js 版本（建议 18+），再执行 `npm cache clean --force` 后重试
+- `npm run dev` 启动报端口占用：按终端提示更换端口，或先释放占用端口进程
+- 页面接口请求失败：检查 `frontend/.env.development.local` 中 `VITE_FLASK_TARGET` 是否指向正确后端地址
+- 页面空白/资源 404：删除 `frontend/node_modules` 后重新 `npm install`，再执行 `npm run dev`
+- 联调跨域异常：优先使用 `python run.py` 启动，确保后端 CORS 与前端目标地址一致
 
 **注意**：项目已移除 PyTorch、sentence-transformers、transformers 依赖，使用轻量级 FastEmbed (ONNX)。
 
@@ -1512,7 +1395,7 @@ git push origin feature/your-feature-name
 - [Flask](https://flask.palletsprojects.com/) - Python Web框架
 - TestPilot Design System (`tp-*`) - 前端 UI 样式与组件约定
 - [LangChain](https://langchain.com/) - AI应用开发框架
-- [ChromaDB](https://www.trychroma.com/) - 向量数据库
+- [sqlite-vec](https://github.com/asg017/sqlite-vec) - SQLite 向量检索扩展
 - [SQLAlchemy](https://www.sqlalchemy.org/) - Python ORM
 - [Font Awesome](https://fontawesome.com/) - 图标库
 - 自研幻觉检测算法 - 多维度AI内容质量检测技术

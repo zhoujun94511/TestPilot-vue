@@ -126,44 +126,6 @@ TestPilot aims to solve real testing pain points using AI, building an intellige
 
 TestPilot adopts a layered architecture combined with modern techniques:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Presentation Layer                   │
-│  (Vue 3 + TypeScript + Vite + tp-* Design System)      │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                    API Service Layer                    │
-│  (Flask Blueprints + `RESTful` API)                     │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                    Business Logic Layer                 │
-│  (CaseService + KnowledgeService + ChatService)        │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                    Core Capability Layer                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ LLM          │  │ RAG          │  │ Hallucination│ │
-│  │ Integration  │  │ Retrieval    │  │ Detection    │ │
-│  │ (LangChain)  │  │ (SQLite +    │  │ (Custom)     │ │
-│  │              │  │  sqlite-vec) │  │              │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ Keyword      │  │ Complexity   │  │ Config       │ │
-│  │ Extraction   │  │ Analysis     │  │ Center       │ │
-│  │ (Enhanced)   │  │ (Risk)       │  │ (Unified)    │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│                    Data Storage Layer                   │
-│  (SQLite + sqlite-vec + FTS5 + File System)             │
-│                  FastEmbed (ONNX/CPU)                   │
-└─────────────────────────────────────────────────────────┘
-```
-
 <img src="./pictures/图1-1-1系统总体架构图.png" alt="System Architecture Overview" />
 
 ### Vector Store Architecture
@@ -346,147 +308,35 @@ Storage (DB + vector store + file system)
 
 ## Project Structure
 ```text
-TestPilot/
-├── Application Core
-│   ├── app.py                    Flask application entry point
-│   ├── run.py                    Startup entry point
-│   ├── build.bat                 Windows build script
-│   ├── build.spec                Packaging configuration
-│   └── config/
-│       ├── settings.py           Central configuration class
-│       ├── filter_keywords.json  Keyword filtering config
-│       ├── hallucination_config.json  Hallucination detection config
-│       └── knowledge_base.json   Knowledge base config
-│
-├── Data Layer
-│   ├── models/
-│   │   ├── models.py             Core business models
-│   │   └── config_models.py      Config center models
-│   └── services/
-│       ├── case_service.py       Test case generation service
-│       ├── chat_service.py       AI chat service
-│       ├── knowledge_service.py  Knowledge base management service
-│       ├── document_service.py   Document analysis service
-│       ├── export_service.py     Data export service
-│       ├── stats_service.py      Statistics service
-│       ├── config_service.py     Configuration service
-│       └── config_center_service.py  Config center service
-│
-├── API Layer
-│   └── blueprints/
-│       ├── cases.py              Test case APIs
-│       ├── chat.py               AI chat APIs
-│       ├── knowledge.py          Knowledge base APIs
-│       ├── documents.py          Requirement document APIs
-│       ├── export.py             Data export APIs
-│       ├── stats.py              Statistics APIs
-│       └── config_center.py      Config center APIs
-│
-├── Frontend
-│   ├── templates/
-│   │   ├── base.html             Base template
-│   │   ├── index.html            Home page template
-│   │   └── components/
-│   │       ├── cases_page.html   Test case page
-│   │       ├── chat_page.html    AI chat page
-│   │       ├── knowledge_page.html  Knowledge base page
-│   │       ├── documents_page.html  Requirement analysis page
-│   │       └── config_center.html   Config center page
-│   ├── static/css/
-│   │   ├── base.css              Base styles
-│   │   ├── style.css             Main styles
-│   │   ├── components.css        Component styles
-│   │   ├── pages.css             Page styles
-│   │   └── modules/              Module styles
-│   └── static/js/
-│       ├── main.js               Main entry
-│       ├── api.js                API wrapper
-│       ├── base.js               Base utilities
-│       ├── cases.js              Test case features
-│       ├── chat.js               AI chat features
-│       ├── knowledge.js          Knowledge base features
-│       ├── documents.js          Requirement analysis features
-│       ├── config_center.js      Config center features
-│       └── components/
-│           ├── dashboard.js       Dashboard component
-│           ├── modal.js           Modal component
-│           ├── form.js            Form component
-│           ├── pagination.js      Pagination component
-│           ├── toast.js           Toast component
-│           └── config_status_indicator.js  Config status indicator
-│
-├── Utilities
-│   └── utils/
-│       ├── utils_core/
-│       │   ├── logger.py          Logging
-│       │   ├── path_helper.py     Path helpers
-│       │   ├── common_utils.py    Common utilities
-│       │   ├── error_handler.py   Error handling
-│       │   ├── json_utils.py      JSON utilities
-│       │   ├── platform_utils.py  Platform adapters
-│       │   └── remote_model_checker.py  Remote model checker
-│       ├── utils_ai_models/
-│       │   ├── get_llm.py         LLM provider entry
-│       │   ├── embeddings.py      Embedding models
-│       │   ├── embedding_manager.py  Embedding manager
-│       │   └── embedding_monitor.py  Embedding monitor
-│       ├── utils_ai_quality/
-│       │   ├── hallucination_detector.py  Hallucination detector
-│       │   ├── hallucination_handler.py   Hallucination handler
-│       │   └── hallucination_reporter.py  Hallucination reporter
-│       ├── utils_intelligent_retrieval/
-│       │   ├── smart_retrieval_strategy.py  Multi-strategy retrieval
-│       │   ├── requirement_keyword_extractor.py  Keyword extractor
-│       │   └── rag_keyword_config.py       RAG keyword config
-│       ├── utils_document_processing/
-│       │   ├── parser.py           Document parser
-│       │   ├── document_preprocessor.py  Document preprocessor
-│       │   ├── smart_document_chunking.py  Smart chunking
-│       │   └── file_preview.py     File preview
-│       ├── utils_business_logic/
-│       │   ├── case_id_generator.py  Case ID generator
-│       │   ├── complexity_scorer.py   Complexity scorer
-│       │   ├── requirements_analyze.py  Requirement analyzer
-│       │   └── function_cases.py     Function case generation
-│       ├── utils_config_management/
-│       │   ├── smart_config_manager.py  Smart config manager
-│       │   └── optimization_config.py   Optimization config
-│       ├── utils_performance_monitoring/
-│       │   ├── performance_monitor.py  Performance monitor
-│       │   ├── token_monitor.py       Token monitor
-│       │   └── cache_manager.py       Cache manager
-│       └── utils_batch_processing/
-│           ├── batch_processor.py    Batch processor
-│           └── streaming_processor.py  Streaming processor
-│
-├── Scripts
-│   ├── scripts/
-│   │   ├── init_db.py              Database init script
-│   │   ├── init_vectordb.py        Vector DB init script
-│   │   ├── init_config_center.py   Config center init script
-│   │   ├── batch_import_knowledge.py  Batch knowledge import
-│   │   ├── check_knowledge_base.py    Knowledge base check
-│   │   ├── check_system.py            System health check
-│   │   ├── check_vector_db_garbled_text.py  Vector DB garbled text check
-│   │   ├── clear_and_rebuild_knowledge.py   Clear and rebuild knowledge
-│   │   ├── query_config_center.py     Config center query tool
-│   │   └── atest_cross_platform.py    Cross-platform test script
-│   └── install.py                 Installation script
-│
-├── Docs
-│   ├── README.md                  Chinese main doc
-│   ├── README_en.md               This file
-│   └── docs/
-│       └── introduce.md           Project introduction
-│
-└── Data
-    ├── testpilot.db               SQLite database
-    ├── vector_store/              Vector database directory
-    ├── uploads/                   Uploaded files
-    │   ├── documents/             Requirement documents
-    │   └── knowledge/             Knowledge base files
-    ├── sessions/                  Flask session storage
-    └── logs/                      Log directory
+TestPilot-vue/
+├── app.py                          Flask app factory, blueprint registration, frontend asset serving
+├── run.py                          Startup entry (backend + frontend dev flow)
+├── config/
+│   ├── settings.py                 Core runtime settings (models/RAG/retrieval/flags)
+│   ├── filter_keywords.json        Keyword config
+│   └── hallucination_config.json   Hallucination detection config
+├── blueprints/                     API routes (cases/chat/documents/knowledge/stats/config)
+├── services/                       Business services (case/chat/document/knowledge/export/...)
+├── models/                         SQLAlchemy models
+├── utils/                          Utilities (model adapters, retrieval, quality, doc processing)
+├── scripts/                        Init/check/maintenance scripts
+├── tests/                          Test suites
+├── frontend/                       Vue 3 + TypeScript + Vite frontend
+│   ├── src/
+│   │   ├── api/                    API clients
+│   │   ├── components/             Vue components
+│   │   ├── views/                  Page views
+│   │   ├── router/                 Routing
+│   │   ├── stores/                 Pinia stores
+│   │   ├── i18n/                   i18n resources (zh-CN/en)
+│   │   └── styles/                 Style system
+│   ├── public/                     Static assets
+│   └── package.json                Frontend scripts/dependencies
+├── uploads/                        Uploaded files (documents/knowledge)
+├── vector_store/                   SQLite vector store directory
+├── docs/                           Project docs
+├── README.md                       Chinese README
+└── README_en.md                    English README
 ```
 
 ## Features
@@ -571,7 +421,7 @@ TestPilot/
 - **Framework**: Flask 3.0+
 - **DB**: `SQLite` / `PostgreSQL` / `MySQL`
 - **ORM**: SQLAlchemy
-- **Vector store**: SQLite + sqlite-vec + FTS5 (ChromaDB path retained only for rollback)
+- **Vector store**: SQLite + sqlite-vec + FTS5 (default and recommended)
 - **AI integration**: LangChain
 - **Smart retrieval**: multi-strategy retrieval system
 - **Keyword extraction**: enhanced extractor
@@ -582,11 +432,11 @@ TestPilot/
 
 ### Frontend
 
+- **Framework**: Vue 3 + TypeScript + Vite
+- **State & Routing**: Pinia + vue-router + vue-i18n
 - **UI System**: `tp-*` design system + Vue componentization
-- **JS**: ES6+ modules
 - **Icons**: Font Awesome 6.5
 - **Charts**: Chart.js
-- **Templates**: Jinja2
 
 ### AI Models
 
@@ -635,6 +485,37 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+1. **Initialize frontend (Vue 3 + Vite)**
+
+```bash
+cd frontend
+npm install
+```
+
+Common frontend commands:
+```bash
+# Start Vue dev server (Vite)
+npm run dev
+
+# Build production bundle
+npm run build
+
+# Preview built assets locally
+npm run preview
+```
+
+Integration notes:
+- Frontend connects to backend via `VITE_FLASK_TARGET` in `frontend/.env.development.local`.
+- Recommended: run `python run.py` at repo root to handle backend startup and frontend target sync.
+- For frontend-only debugging, run `cd frontend && npm run dev`.
+
+Frontend troubleshooting:
+- `npm install` fails: verify Node.js version (recommended 18+), then run `npm cache clean --force` and retry.
+- `npm run dev` port already in use: switch to another port or stop the conflicting process.
+- API requests fail in UI: verify `VITE_FLASK_TARGET` in `frontend/.env.development.local`.
+- Blank page / static 404: remove `frontend/node_modules`, reinstall dependencies, and start again.
+- CORS issues during integration: prefer `python run.py` so backend CORS and frontend target stay aligned.
 
 1. **Preload embedding models (required for offline)**
 
@@ -845,7 +726,7 @@ This project is released under the [MIT License](LICENSE).
 - [Flask](https://flask.palletsprojects.com/)
 - TestPilot Design System (`tp-*`)
 - [LangChain](https://langchain.com/)
-- [ChromaDB](https://www.trychroma.com/) (historically used, now deprecated in favor of SQLite + sqlite-vec)
+- [sqlite-vec](https://github.com/asg017/sqlite-vec) (SQLite vector search extension)
 - [SQLAlchemy](https://www.sqlalchemy.org/)
 - [Font Awesome](https://fontawesome.com/)
 - In-house hallucination detection algorithms
