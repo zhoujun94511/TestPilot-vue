@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Logs & runtime state
+logs/
+sessions/
+*.log
+
+# Uploads / generated data
+uploads/
+vector_store/
+
+# Local env (do not commit secrets)
+.env
+frontend/.env.development.local
+
+# FastEmbed / HuggingFace caches (large, auto-downloadable)
+models/fastembed/
+**/.cache/fastembed/
+**/.cache/huggingface/
+
+# Frontend local caches/dependencies
+frontend/.npm-cache/
+frontend/node_modules/

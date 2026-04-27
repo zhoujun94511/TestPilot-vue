@@ -1,0 +1,211 @@
+/**
+ * i18n health check for current project structure:
+ * - compare src/i18n/<locale>/*.ts against reference locale (en)
+ * - same namespace files
+ * - same key paths and value types
+ * - exits with code 1 on mismatch
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, "..");
+const I18N_DIR = path.join(ROOT, "src", "i18n");
+const SRC_DIR = path.join(ROOT, "src");
+const REFERENCE_LOCALE = "en";
+
+function valueType(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function collectKeys(obj, prefix = "") {
+  const output = new Map();
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+    output.set(prefix || "(root)", valueType(obj));
+    return output;
+  }
+  for (const key of Object.keys(obj)) {
+    const nextPath = prefix ? `${prefix}.${key}` : key;
+    const val = obj[key];
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      const nested = collectKeys(val, nextPath);
+      for (const [k, t] of nested) output.set(k, t);
+    } else {
+      output.set(nextPath, valueType(val));
+    }
+  }
+  return output;
+}
+
+function listLocaleDirs() {
+  if (!fs.existsSync(I18N_DIR)) return {};
+  const dirs = fs
+    .readdirSync(I18N_DIR)
+    .filter((name) => fs.statSync(path.join(I18N_DIR, name)).isDirectory());
+  const map = {};
+  for (const dir of dirs) {
+    map[dir] = path.join(I18N_DIR, dir);
+  }
+  return map;
+}
+
+function listLocaleTsFiles(localeDir) {
+  if (!fs.existsSync(localeDir)) return [];
+  return fs
+    .readdirSync(localeDir)
+    .filter((name) => name.endsWith(".ts") && name !== "index.ts")
+    .sort();
+}
+
+function loadTsDefaultObject(filePath) {
+  const raw = fs.readFileSync(filePath, "utf8");
+  const normalized = raw.replace(/^\uFEFF/, "").trim();
+  const exportDefaultMatch = normalized.match(/export\s+default\s+([\s\S]*?);?\s*$/);
+  if (!exportDefaultMatch) {
+    throw new Error(`Cannot parse default export object: ${filePath}`);
+  }
+  const objectLiteral = exportDefaultMatch[1];
+  try {
+    // eslint-disable-next-line no-new-func
+    const loader = new Function(`return (${objectLiteral});`);
+    return loader();
+  } catch (error) {
+    throw new Error(`Invalid locale object in ${filePath}: ${error.message}`);
+  }
+}
+
+function listSourceFiles(dir, acc = []) {
+  if (!fs.existsSync(dir)) return acc;
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    const stat = fs.statSync(full);
+    if (stat.isDirectory()) {
+      if (name !== "i18n" && name !== "node_modules") listSourceFiles(full, acc);
+      continue;
+    }
+    if ((name.endsWith(".ts") || name.endsWith(".tsx") || name.endsWith(".vue")) && !name.endsWith(".d.ts")) {
+      acc.push(full);
+    }
+  }
+  return acc;
+}
+
+function reportPossiblyUnusedKeys(commonFiles, refDir) {
+  const allKeys = [];
+  for (const file of commonFiles) {
+    const namespace = file.replace(/\.ts$/, "");
+    const obj = loadTsDefaultObject(path.join(refDir, file));
+    const keys = collectKeys(obj);
+    for (const [keyPath] of keys) {
+      if (keyPath === "(root)") continue;
+      allKeys.push(`${namespace}.${keyPath}`);
+    }
+  }
+  const sourceFiles = listSourceFiles(SRC_DIR);
+  let sourceContent = "";
+  for (const sourceFile of sourceFiles) {
+    sourceContent += `${fs.readFileSync(sourceFile, "utf8")}\n`;
+  }
+
+  const maybeUnused = allKeys.filter((fullKey) => {
+    return !(
+      sourceContent.includes(`t('${fullKey}')`) ||
+      sourceContent.includes(`t("${fullKey}")`) ||
+      sourceContent.includes(fullKey)
+    );
+  });
+  if (!maybeUnused.length) return;
+  console.log("\n--- 可能未使用的 key（仅供参考）---");
+  maybeUnused.forEach((key) => console.log(`  ${key}`));
+}
+
+function main() {
+  const localeDirs = listLocaleDirs();
+  const locales = Object.keys(localeDirs);
+  if (!locales.length) {
+    console.error("未找到任何 i18n locale 目录。");
+    process.exit(1);
+  }
+  if (!localeDirs[REFERENCE_LOCALE]) {
+    console.error(`未找到参考语言目录: ${REFERENCE_LOCALE}`);
+    process.exit(1);
+  }
+
+  console.log(`i18n health check (reference: ${REFERENCE_LOCALE})\n`);
+
+  const errors = [];
+  const refFiles = listLocaleTsFiles(localeDirs[REFERENCE_LOCALE]);
+  let totalKeys = 0;
+
+  for (const locale of locales) {
+    if (locale === REFERENCE_LOCALE) continue;
+    const localeFiles = listLocaleTsFiles(localeDirs[locale]);
+    const missingFiles = refFiles.filter((f) => !localeFiles.includes(f));
+    const extraFiles = localeFiles.filter((f) => !refFiles.includes(f));
+    if (missingFiles.length) errors.push({ kind: "missing_file", locale, files: missingFiles });
+    if (extraFiles.length) errors.push({ kind: "extra_file", locale, files: extraFiles });
+  }
+
+  for (const file of refFiles) {
+    const namespace = file.replace(/\.ts$/, "");
+    const refPath = path.join(localeDirs[REFERENCE_LOCALE], file);
+    const refObj = loadTsDefaultObject(refPath);
+    const refKeys = collectKeys(refObj);
+    totalKeys += refKeys.size;
+
+    for (const locale of locales) {
+      if (locale === REFERENCE_LOCALE) continue;
+      const localePath = path.join(localeDirs[locale], file);
+      if (!fs.existsSync(localePath)) continue;
+      const localeObj = loadTsDefaultObject(localePath);
+      const localeKeys = collectKeys(localeObj);
+
+      for (const [keyPath, refType] of refKeys) {
+        if (!localeKeys.has(keyPath)) {
+          errors.push({ kind: "missing_key", locale, namespace, key: keyPath });
+        } else {
+          const localeType = localeKeys.get(keyPath);
+          if (localeType !== refType) {
+            errors.push({ kind: "type_mismatch", locale, namespace, key: keyPath, refType, localeType });
+          }
+        }
+      }
+
+      for (const keyPath of localeKeys.keys()) {
+        if (!refKeys.has(keyPath)) {
+          errors.push({ kind: "extra_key", locale, namespace, key: keyPath });
+        }
+      }
+    }
+  }
+
+  if (errors.length) {
+    console.log("--- 检查失败 ---\n");
+    for (const error of errors) {
+      if (error.kind === "missing_file") {
+        console.log(`[${error.locale}] 缺失文件: ${error.files.join(", ")}`);
+      } else if (error.kind === "extra_file") {
+        console.log(`[${error.locale}] 多余文件: ${error.files.join(", ")}`);
+      } else if (error.kind === "missing_key") {
+        console.log(`[${error.locale}] ${error.namespace}.${error.key} 缺失`);
+      } else if (error.kind === "extra_key") {
+        console.log(`[${error.locale}] ${error.namespace}.${error.key} 多余`);
+      } else if (error.kind === "type_mismatch") {
+        console.log(`[${error.locale}] ${error.namespace}.${error.key} 类型不一致: ${REFERENCE_LOCALE}=${error.refType}, ${error.locale}=${error.localeType}`);
+      }
+    }
+    process.exit(1);
+  }
+
+  console.log("--- 检查通过 ---");
+  console.log(`  locale 数量: ${locales.length}`);
+  console.log(`  namespace 数量: ${refFiles.length}`);
+  console.log(`  总 key 数 (参考语言): ${totalKeys}`);
+  reportPossiblyUnusedKeys(refFiles, localeDirs[REFERENCE_LOCALE]);
+  console.log("\nSummary: 成功");
+}
+
+main();

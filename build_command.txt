@@ -1,0 +1,101 @@
+========================================
+TestPilot PyInstaller 打包命令
+========================================
+
+方式一：使用 spec 文件打包（推荐）
+----------------------------------------
+pyinstaller build.spec
+
+方式二：直接使用命令行打包
+----------------------------------------
+pyinstaller ^
+    --name=TestPilot ^
+    --onefile ^
+    --console ^
+    --icon=static\pic\wavicon.ico ^
+    --add-data "templates;templates" ^
+    --add-data "static;static" ^
+    --add-data "config;config" ^
+    --hidden-import=flask ^
+    --hidden-import=flask_cors ^
+    --hidden-import=flask_session ^
+    --hidden-import=flask_sqlalchemy ^
+    --hidden-import=langchain ^
+    --hidden-import=langchain_core ^
+    --hidden-import=langchain_community ^
+    --hidden-import=langchain_openai ^
+    --hidden-import=langchain_google_genai ^
+    --hidden-import=langchain_deepseek ^
+    --hidden-import=langchain_ollama ^
+    --hidden-import=openai ^
+    --hidden-import=google.generativeai ^
+    --hidden-import=deepseek ^
+    --hidden-import=ollama ^
+    --hidden-import=fastembed ^
+    --hidden-import=onnxruntime ^
+    --hidden-import=docx ^
+    --hidden-import=openpyxl ^
+    --hidden-import=PyPDF2 ^
+    --hidden-import=yaml ^
+    --hidden-import=pandas ^
+    --hidden-import=colorlog ^
+    --hidden-import=python_dotenv ^
+    --hidden-import=requests ^
+    --hidden-import=tiktoken ^
+    --hidden-import=pydantic ^
+    --hidden-import=pydantic_settings ^
+    --exclude-module=matplotlib ^
+    --exclude-module=scipy ^
+    --exclude-module=tkinter ^
+    --exclude-module=unittest ^
+    --exclude-module=IPython ^
+    --exclude-module=jupyter ^
+    --exclude-module=notebook ^
+    run.py
+
+方式三：使用批处理脚本（最简单）
+----------------------------------------
+直接运行 build.bat 文件
+
+========================================
+打包参数说明
+========================================
+
+--name=TestPilot          : 生成的可执行文件名称
+--onefile                 : 打包成单个可执行文件
+--console                 : 保留控制台窗口（显示日志）
+--icon=...                : 应用图标路径
+--add-data                : 添加数据文件（格式：源路径;目标路径）
+--hidden-import           : 隐藏导入（PyInstaller无法自动检测的模块）
+--exclude-module          : 排除模块（减小打包体积）
+
+========================================
+打包后文件结构
+========================================
+
+dist/
+  └── TestPilot.exe       : 可执行文件
+
+build/                    : 临时构建文件（可删除）
+
+========================================
+注意事项
+========================================
+
+1. 首次打包前，建议先运行测试确保所有功能正常
+2. 打包后的 exe 文件较大（可能 200MB+），这是正常的
+3. 运行时需要确保：
+   - 有写入权限（用于创建数据库、日志等）
+   - 网络连接（如果使用远程AI模型）
+   - 必要的系统库已安装
+4. 如果遇到模块缺失错误，在 hiddenimports 中添加相应模块
+5. 如果打包体积过大，可以尝试使用 --exclude-module 排除不需要的模块
+
+========================================
+
+
+
+
+
+
+

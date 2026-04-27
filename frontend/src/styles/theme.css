@@ -1,0 +1,44 @@
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--tp-bg-page);
+  color: var(--tp-color-text-900);
+  font-family: var(--tp-font-sans);
+}
+
+/* 预留滚动条槽位，避免内容高度变化导致布局抖动 */
+html {
+  scrollbar-gutter: stable;
+}
+
+/* 兼容不支持 scrollbar-gutter 的环境 */
+@supports not (scrollbar-gutter: stable) {
+  body {
+    overflow-y: scroll;
+  }
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+a {
+  color: var(--tp-color-primary-600);
+}
+
+a:hover {
+  color: var(--tp-color-primary-700);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--tp-color-primary-600) 20%, transparent);
+}

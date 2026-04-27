@@ -1,0 +1,557 @@
+{
+  "metadata": {
+    "version": "1.1.1",
+    "last_updated": "2025-10-16",
+    "author": "QA Knowledge Base",
+    "description": "统一测试关键字配置，覆盖终端、应用类型、功能模块（大类+ref）与核心小类（分组），用于文档分析与用例生成。"
+  },
+  "endpoints": {
+    "category": "终端平台",
+    "tags": ["platform", "environment"],
+    "items": [
+      {"name": "Web", "aliases": ["浏览器端"], "risk": "medium"},
+      {"name": "iOS", "aliases": ["iPhone", "iPad"], "risk": "medium"},
+      {"name": "Android", "aliases": ["安卓"], "risk": "medium"},
+      {"name": "Server", "aliases": ["后端"], "risk": "high"},
+      {"name": "Linux", "risk": "low"},
+      {"name": "Windows", "risk": "low"},
+      {"name": "MacOS", "risk": "low"},
+      {"name": "小程序", "aliases": ["微信小程序"], "risk": "medium"},
+      {"name": "H5", "aliases": ["移动网页"], "risk": "medium"},
+      {"name": "嵌入式", "risk": "high"},
+      {"name": "IoT", "aliases": ["物联网设备"], "risk": "high"},
+      {"name": "车载系统", "risk": "high"},
+      {"name": "智能硬件", "risk": "high"}
+    ]
+  },
+  "application_types": {
+    "category": "应用类型",
+    "tags": ["industry", "business"],
+    "items": {
+      "影音娱乐": {
+        "examples": ["爱奇艺", "优酷", "腾讯视频", "Spotify", "斗鱼", "播客App"],
+        "subtypes": ["在线视频", "音乐与播客", "视频播放器", "流媒体", "直播平台"],
+        "risk": "medium"
+      },
+      "游戏": {
+        "examples": ["王者荣耀", "原神", "Steam", "任天堂Switch Online"],
+        "subtypes": ["动作", "冒险", "街机", "棋牌", "模拟", "休闲", "角色扮演", "赛车", "体育", "策略", "文字冒险", "教育类游戏"],
+        "risk": "high"
+      },
+      "社交与通讯": {
+        "examples": ["微信", "WhatsApp", "微博", "Facebook", "抖音", "小红书"],
+        "subtypes": ["社交网络", "即时通讯", "短视频", "约会平台"],
+        "risk": "high"
+      },
+      "购物与生活服务": {
+        "examples": ["淘宝", "京东", "美团", "饿了么", "闲鱼", "盒马"],
+        "subtypes": ["电子商务", "商品比价", "二手交易", "食谱", "美食", "家政服务", "装修", "园艺", "宠物"],
+        "risk": "high"
+      },
+      "工具与实用": {
+        "examples": ["Chrome", "百度地图", "搜狗输入法", "夸克浏览器", "彩云天气"],
+        "subtypes": ["效率工具", "文件管理", "安全工具", "备份与恢复", "文件同步", "个性化（壁纸/字体/主题）", "实用工具（闹钟/手电筒/指南针/测量）"],
+        "risk": "medium"
+      },
+      "新闻与阅读": {
+        "examples": ["今日头条", "网易新闻", "微信读书", "Kindle", "喜马拉雅"],
+        "subtypes": ["新闻聚合", "杂志", "电子书", "有声读物", "字典", "百科全书"],
+        "risk": "medium"
+      },
+      "金融与加密货币": {
+        "examples": ["支付宝", "微信支付", "工商银行", "东方财富", "Binance", "Coinbase", "银行App", "股票App", "比特币钱包"],
+        "subtypes": ["银行", "理财", "支付", "借贷", "保险", "证券", "加密货币钱包", "数字货币交易", "投资"],
+        "risk": "critical"
+      },
+      "教育与学习": {
+        "examples": ["Coursera", "慕课网", "多邻国", "作业帮", "宝宝巴士", "学而思", "新东方", "网易云课堂", "知乎"],
+        "subtypes": ["在线学习", "高等教育", "科学与技术", "语言学习", "编程学习", "亲子教育", "故事书", "职业培训", "K12教育"],
+        "risk": "medium"
+      },
+      "健康与健身": {
+        "examples": ["Keep", "Calm", "Headspace", "微医", "好大夫", "丁香医生", "春雨医生"],
+        "subtypes": ["健身追踪", "体育", "远程医疗", "健康档案", "疾病追踪", "饮食与营养", "心理健康", "冥想", "在线问诊", "健康管理"],
+        "risk": "high"
+      },
+      "商务与效率": {
+        "examples": ["Office", "钉钉", "飞书", "Slack", "Notion", "腾讯会议", "石墨文档", "印象笔记"],
+        "subtypes": ["办公软件", "项目管理", "会议", "CRM", "人力资源", "企业通讯", "数据分析", "文档编辑", "时间管理", "视频会议"],
+        "risk": "high"
+      },
+      "创意与设计": {
+        "examples": ["Photoshop", "Figma", "Canva", "剪映", "CapCut"],
+        "subtypes": ["绘画", "设计", "修图", "视频剪辑", "创意工具", "字体设计"],
+        "risk": "medium"
+      },
+      "出行与本地服务": {
+        "examples": ["高德地图", "滴滴出行", "12306", "Airbnb", "携程", "去哪儿", "马蜂窝"],
+        "subtypes": ["地图与导航", "出租车", "共享单车", "公共交通", "汽车服务", "停车应用", "酒店预订", "旅游攻略", "交通查询", "票务服务", "机票预订"],
+        "risk": "high"
+      },
+      "专业服务": {
+        "examples": ["电子政务App", "合同签署平台", "税务申报系统", "工业IoT监控"],
+        "subtypes": ["医疗健康", "法律咨询", "税务服务", "电子政务", "工业与制造", "能源监控"],
+        "risk": "critical"
+      },
+      "智能硬件与 IoT": {
+        "examples": ["米家", "HomeKit", "Apple Watch", "特斯拉App", "Oculus"],
+        "subtypes": ["智能家居", "穿戴设备", "车载系统", "机器人控制", "AR/VR"],
+        "risk": "high"
+      },
+      "新兴领域": {
+        "examples": ["ChatGPT", "MidJourney", "OpenSea", "Meta Horizon"],
+        "subtypes": ["AI 助手", "AI 创作", "AI 医疗", "AI 教育", "NFT 平台", "DeFi", "元宇宙"],
+        "risk": "high"
+      }
+    }
+  },
+  "functional_keywords": {
+    "category": "功能模块（大类+ref）",
+    "tags": ["feature", "module"],
+    "items": [
+      {"name": "认证与安全", "en": "authentication & security", "risk": "critical", "ref": "auth_security"},
+      {"name": "用户与组织", "en": "user & organization", "risk": "high", "ref": "user_org"},
+      {"name": "权限与角色", "en": "permissions & roles", "risk": "critical", "ref": "roles_permissions"},
+      {"name": "内容与交互", "en": "content & interaction", "risk": "high", "ref": "content_interaction"},
+      {"name": "电商交易", "en": "e-commerce", "risk": "high", "ref": "commerce"},
+      {"name": "多媒体", "en": "multimedia", "risk": "medium", "ref": "multimedia"},
+      {"name": "移动端特性", "en": "mobile features", "risk": "high", "ref": "mobile"},
+      {"name": "后端服务", "en": "backend services", "risk": "critical", "ref": "backend"},
+      {"name": "IoT 与硬件", "en": "iot & hardware", "risk": "high", "ref": "iot"},
+      {"name": "游戏功能", "en": "game features", "risk": "high", "ref": "gaming"},
+      {"name": "金融功能", "en": "finance features", "risk": "critical", "ref": "finance"},
+      {"name": "教育功能", "en": "education features", "risk": "medium", "ref": "education"},
+      {"name": "健康功能", "en": "health features", "risk": "high", "ref": "health"},
+      {"name": "出行与交通", "en": "transportation", "risk": "high", "ref": "transport"},
+      {"name": "工具与实用", "en": "utilities", "risk": "medium", "ref": "utilities"},
+      {"name": "AI 与新兴", "en": "ai & emerging", "risk": "high", "ref": "ai"},
+      {"name": "系统与平台管理", "en": "system & platform", "risk": "critical", "ref": "system"},
+      {"name": "协作与办公", "en": "collaboration & office", "risk": "high", "ref": "office"},
+      {"name": "数据与分析", "en": "data & analytics", "risk": "high", "ref": "data"},
+      {"name": "研发与运维", "en": "devops & testing", "risk": "high", "ref": "devops"},
+      {"name": "合规与安全", "en": "compliance & security", "risk": "critical", "ref": "compliance"},
+      {"name": "供应链与工业", "en": "supply chain & industrial", "risk": "critical", "ref": "industry"},
+      {"name": "政府与公共服务", "en": "government & public service", "risk": "high", "ref": "gov_public"},
+      {"name": "能源与环境", "en": "energy & environment", "risk": "critical", "ref": "energy_env"},
+      {"name": "制造与工业4.0", "en": "manufacturing & industry 4.0", "risk": "critical", "ref": "manufacturing"},
+      {"name": "航空航天与国防", "en": "aerospace & defense", "risk": "critical", "ref": "aerospace_defense"},
+      {"name": "区块链与Web3", "en": "blockchain & web3", "risk": "critical", "ref": "web3"},
+      {"name": "医疗与生命科学", "en": "medical & life science", "risk": "critical", "ref": "medical_life"},
+      {"name": "农业与食品", "en": "agriculture & food", "risk": "critical", "ref": "agriculture_food"},
+      {"name": "文化与创意产业", "en": "culture & creative", "risk": "high", "ref": "culture_creative"}
+    ],
+    "common_actions": {
+      "category": "通用功能关键字",
+      "tags": ["function", "alias", "mapping"],
+      "items": [
+        {"name": "登录", "en": "login", "aliases": ["登陆", "用户登录", "账号登录"], "risk": "high", "map_to_ref": ["auth_security"]},
+        {"name": "注册", "en": "register", "aliases": ["用户注册", "账号注册", "新用户注册"], "risk": "medium", "map_to_ref": ["auth_security", "user_org"]},
+        {"name": "支付", "en": "payment", "aliases": ["付款", "结算", "下单"], "risk": "critical", "map_to_ref": ["commerce", "finance"]},
+        {"name": "搜索", "en": "search", "aliases": ["查找", "检索"], "risk": "medium", "map_to_ref": ["content_interaction", "data"]},
+        {"name": "上传", "en": "upload", "aliases": ["文件上传", "图片上传"], "risk": "medium", "map_to_ref": ["multimedia", "utilities", "backend"]},
+        {"name": "下载", "en": "download", "aliases": ["文件下载"], "risk": "low", "map_to_ref": ["utilities", "multimedia"]},
+        {"name": "分享", "en": "share", "aliases": ["共享"], "risk": "medium", "map_to_ref": ["content_interaction", "mobile"]},
+        {"name": "权限", "en": "permission", "aliases": ["授权", "访问控制"], "risk": "high", "map_to_ref": ["roles_permissions", "compliance"]},
+        {"name": "消息", "en": "message", "aliases": ["通知", "推送"], "risk": "medium", "map_to_ref": ["content_interaction", "mobile", "backend"]},
+        {"name": "订单", "en": "order", "aliases": ["购买", "交易"], "risk": "high", "map_to_ref": ["commerce"]},
+        {"name": "评论", "en": "comment", "aliases": ["评价", "反馈"], "risk": "low", "map_to_ref": ["content_interaction"]},
+        {"name": "收藏", "en": "favorite", "aliases": ["收藏夹", "书签"], "risk": "low", "map_to_ref": ["content_interaction"]},
+        {"name": "设置", "en": "settings", "aliases": ["配置", "偏好设置"], "risk": "medium", "map_to_ref": ["system", "utilities"]},
+        {"name": "数据同步", "en": "data sync", "aliases": ["同步", "备份"], "risk": "high", "map_to_ref": ["utilities", "backend", "mobile"]},
+        {"name": "实名认证", "en": "identity verification", "aliases": ["身份验证", "KYC"], "risk": "critical", "map_to_ref": ["auth_security", "finance", "compliance"]}
+      ]
+    }
+  },
+  "core_features": {
+    "category": "核心功能小类",
+    "groups": {
+      "auth_security": [
+        {"name": "账号密码登录", "en": "username password login", "risk": "high"},
+        {"name": "手机号登录", "en": "phone number login", "risk": "high"},
+        {"name": "邮箱登录", "en": "email login", "risk": "high"},
+        {"name": "验证码登录", "en": "otp login", "risk": "high"},
+        {"name": "第三方登录", "en": "third-party login", "risk": "high"},
+        {"name": "匿名登录", "en": "guest login", "risk": "medium"},
+        {"name": "账号注册", "en": "account registration", "risk": "high"},
+        {"name": "第三方账号绑定", "en": "third-party binding", "risk": "medium"},
+        {"name": "单点登录", "en": "single sign-on", "risk": "high"},
+        {"name": "多因子认证", "en": "multi-factor authentication", "risk": "critical"},
+        {"name": "邮箱验证", "en": "email verification", "risk": "high"},
+        {"name": "短信验证", "en": "sms verification", "risk": "high"},
+        {"name": "人机校验", "en": "captcha verification", "risk": "medium"},
+        {"name": "生物识别认证", "en": "biometric authentication", "risk": "critical"},
+        {"name": "设备绑定", "en": "device binding", "risk": "high"},
+        {"name": "异常登录检测", "en": "abnormal login detection", "risk": "critical"},
+        {"name": "密码强度策略", "en": "password strength policy", "risk": "high"},
+        {"name": "会话超时控制", "en": "session timeout control", "risk": "medium"},
+        {"name": "IP 白名单", "en": "ip whitelist", "risk": "high"},
+        {"name": "IP 黑名单", "en": "ip blacklist", "risk": "high"},
+        {"name": "地理位置限制", "en": "geo-restriction", "risk": "high"},
+        {"name": "安全策略配置", "en": "security policy config", "risk": "high"}
+      ],
+      "user_org": [
+        {"name": "用户资料编辑", "en": "profile editing", "risk": "medium"},
+        {"name": "头像上传", "en": "avatar upload", "risk": "low"},
+        {"name": "昵称修改", "en": "nickname change", "risk": "low"},
+        {"name": "联系方式绑定", "en": "contact binding", "risk": "medium"},
+        {"name": "隐私设置", "en": "privacy settings", "risk": "high"},
+        {"name": "账号冻结", "en": "account suspension", "risk": "critical"},
+        {"name": "账号解冻", "en": "account reactivation", "risk": "high"},
+        {"name": "账号注销", "en": "account deletion", "risk": "critical"},
+        {"name": "组织架构管理", "en": "organization management", "risk": "high"},
+        {"name": "部门管理", "en": "department management", "risk": "medium"},
+        {"name": "成员邀请", "en": "member invitation", "risk": "medium"},
+        {"name": "成员移除", "en": "member removal", "risk": "medium"},
+        {"name": "角色分配", "en": "role assignment", "risk": "high"}
+      ],
+      "roles_permissions": [
+        {"name": "角色创建", "en": "role creation", "risk": "high"},
+        {"name": "角色编辑", "en": "role editing", "risk": "medium"},
+        {"name": "角色删除", "en": "role deletion", "risk": "medium"},
+        {"name": "权限授予", "en": "permission grant", "risk": "critical"},
+        {"name": "权限回收", "en": "permission revoke", "risk": "critical"},
+        {"name": "菜单权限", "en": "menu permission", "risk": "medium"},
+        {"name": "接口权限", "en": "api permission", "risk": "high"},
+        {"name": "数据权限", "en": "data permission", "risk": "high"},
+        {"name": "访问控制", "en": "access control", "risk": "critical"}
+      ],
+      "content_interaction": [
+        {"name": "全文搜索", "en": "full-text search", "risk": "medium"},
+        {"name": "联想与纠错", "en": "autocomplete & spell correction", "risk": "low"},
+        {"name": "搜索排序", "en": "search ranking", "risk": "medium"},
+        {"name": "话题与标签", "en": "topics & hashtags", "risk": "low"},
+        {"name": "关注/取消关注", "en": "follow/unfollow", "risk": "low"},
+        {"name": "点赞/取消点赞", "en": "like/unlike", "risk": "low"},
+        {"name": "收藏与分组", "en": "favorites & collections", "risk": "low"},
+        {"name": "评论与回复", "en": "comments & replies", "risk": "medium"},
+        {"name": "@提及/引用", "en": "mentions/quotes", "risk": "low"},
+        {"name": "私信会话", "en": "direct messaging", "risk": "medium"},
+        {"name": "系统通知中心", "en": "notification center", "risk": "medium"},
+        {"name": "动态时间线", "en": "activity feed timeline", "risk": "medium"},
+        {"name": "内容审核工作流", "en": "content moderation workflow", "risk": "critical"},
+        {"name": "举报与申诉", "en": "report & appeal", "risk": "high"}
+      ],
+      "commerce": [
+        {"name": "商品与SKU", "en": "product & sku", "risk": "high"},
+        {"name": "价格与库存", "en": "pricing & inventory", "risk": "high"},
+        {"name": "购物车操作", "en": "cart operations", "risk": "medium"},
+        {"name": "优惠券与促销", "en": "coupons & promotions", "risk": "medium"},
+        {"name": "地址与发票", "en": "address & invoicing", "risk": "high"},
+        {"name": "下单与结算", "en": "order placement & checkout", "risk": "high"},
+        {"name": "支付渠道接入", "en": "payment channels (Alipay/WeChat/ApplePay)", "risk": "critical"},
+        {"name": "订单状态流转", "en": "order lifecycle", "risk": "high"},
+        {"name": "退款与售后", "en": "refund & after-sales", "risk": "critical"},
+        {"name": "物流与运单", "en": "shipping & tracking", "risk": "high"},
+        {"name": "对账与结算", "en": "reconciliation & settlement", "risk": "critical"}
+      ],
+      "multimedia": [
+        {"name": "视频播放内核", "en": "video playback core", "risk": "medium"},
+        {"name": "音频播放引擎", "en": "audio engine", "risk": "medium"},
+        {"name": "倍速与拖拽", "en": "playback speed & seeking", "risk": "low"},
+        {"name": "字幕与CC", "en": "subtitles & closed captions", "risk": "medium"},
+        {"name": "弹幕轨道", "en": "danmaku track", "risk": "low"},
+        {"name": "直播协议", "en": "live protocols (RTMP/HLS/DASH)", "risk": "high"},
+        {"name": "低延迟直播", "en": "low latency live", "risk": "high"},
+        {"name": "上传分片与校验", "en": "chunk upload & checksum", "risk": "medium"},
+        {"name": "转码与码控", "en": "transcoding & bitrate control", "risk": "high"},
+        {"name": "缩略图与首帧", "en": "thumbnails & poster frame", "risk": "low"},
+        {"name": "DRM/版权保护", "en": "drm", "risk": "critical"}
+      ],
+      "mobile": [
+        {"name": "推送集成", "en": "push integration (APNs/FCM)", "risk": "high"},
+        {"name": "深链与通用链接", "en": "deep link & universal link", "risk": "medium"},
+        {"name": "应用内支付", "en": "in-app purchase", "risk": "critical"},
+        {"name": "权限弹窗流程", "en": "permissions prompts flow", "risk": "high"},
+        {"name": "摄像头/相册", "en": "camera & photo library", "risk": "medium"},
+        {"name": "定位与地理围栏", "en": "location & geofencing", "risk": "medium"},
+        {"name": "离线缓存策略", "en": "offline cache strategy", "risk": "medium"},
+        {"name": "崩溃收集", "en": "crash reporting", "risk": "high"},
+        {"name": "电量与前后台", "en": "battery & background modes", "risk": "medium"}
+      ],
+      "backend": [
+        {"name": "API 版本化", "en": "api versioning", "risk": "high"},
+        {"name": "鉴权与限流", "en": "auth & rate limiting", "risk": "critical"},
+        {"name": "API 网关", "en": "api gateway", "risk": "high"},
+        {"name": "数据存储分层", "en": "sql/nosql/blob", "risk": "critical"},
+        {"name": "数据库迁移", "en": "db migrations", "risk": "high"},
+        {"name": "任务调度/CRON", "en": "job scheduling/cron", "risk": "medium"},
+        {"name": "消息队列", "en": "message queue (Kafka/RabbitMQ)", "risk": "high"},
+        {"name": "缓存与TTL", "en": "caching & ttl", "risk": "medium"},
+        {"name": "容灾备份", "en": "disaster recovery (RPO/RTO)", "risk": "critical"},
+        {"name": "监控与告警", "en": "monitoring & alerting", "risk": "high"}
+      ],
+      "iot": [
+        {"name": "设备注册与配网", "en": "device provisioning", "risk": "high"},
+        {"name": "远程控制指令", "en": "remote commands", "risk": "high"},
+        {"name": "固件升级(OTA)", "en": "ota update", "risk": "critical"},
+        {"name": "蓝牙配对", "en": "bluetooth pairing", "risk": "medium"},
+        {"name": "传感器采集通道", "en": "sensor telemetry", "risk": "high"},
+        {"name": "边缘规则引擎", "en": "edge rules engine", "risk": "high"},
+        {"name": "设备影子", "en": "device shadow", "risk": "high"},
+        {"name": "告警与阈值", "en": "alerts & thresholds", "risk": "medium"}
+      ],
+      "gaming": [
+        {"name": "匹配/ELO", "en": "matchmaking/elo", "risk": "high"},
+        {"name": "房间/大厅", "en": "rooms & lobbies", "risk": "high"},
+        {"name": "联机网络同步", "en": "netcode & reconciliation", "risk": "critical"},
+        {"name": "排行榜/赛季", "en": "leaderboards & seasons", "risk": "medium"},
+        {"name": "成就与任务", "en": "achievements & quests", "risk": "medium"},
+        {"name": "反作弊", "en": "anti-cheat", "risk": "critical"},
+        {"name": "内购商店", "en": "in-game store/iap", "risk": "critical"},
+        {"name": "广告SDK", "en": "ads sdk integration", "risk": "medium"},
+        {"name": "语音聊天", "en": "voice chat", "risk": "high"}
+      ],
+      "finance": [
+        {"name": "账户与KYC", "en": "accounts & kyc", "risk": "critical"},
+        {"name": "AML 与风控规则", "en": "aml & risk rules", "risk": "critical"},
+        {"name": "转账/收款", "en": "transfer & receive", "risk": "critical"},
+        {"name": "银行/卡绑定", "en": "bank/card binding (tokenization)", "risk": "high"},
+        {"name": "3DS/SCA", "en": "3ds/sca", "risk": "critical"},
+        {"name": "理财申购与赎回", "en": "wealth subscribe/redeem", "risk": "critical"},
+        {"name": "保险保单", "en": "insurance policy", "risk": "critical"},
+        {"name": "证券下单", "en": "stock order & execution", "risk": "critical"},
+        {"name": "借贷与还款", "en": "loan & repayment", "risk": "critical"},
+        {"name": "账本/分录", "en": "ledger & double-entry", "risk": "critical"},
+        {"name": "清结算与对账", "en": "clearing & reconciliation", "risk": "critical"}
+      ],
+      "education": [
+        {"name": "课程/章节", "en": "course/modules", "risk": "medium"},
+        {"name": "作业与提交", "en": "assignments & submission", "risk": "medium"},
+        {"name": "考试与题型", "en": "exams & question types", "risk": "medium"},
+        {"name": "直播课堂", "en": "live class", "risk": "medium"},
+        {"name": "出勤与打卡", "en": "attendance & streak", "risk": "low"},
+        {"name": "评分与证书", "en": "grading & certificate", "risk": "medium"},
+        {"name": "题库导入", "en": "question bank import", "risk": "medium"},
+        {"name": "家校沟通", "en": "teacher-parent messaging", "risk": "medium"}
+      ],
+      "health": [
+        {"name": "健康档案", "en": "health records", "risk": "critical"},
+        {"name": "体征与运动", "en": "vitals & fitness", "risk": "medium"},
+        {"name": "饮食与营养", "en": "diet & nutrition", "risk": "medium"},
+        {"name": "远程问诊", "en": "telemedicine", "risk": "critical"},
+        {"name": "心理健康评估", "en": "mental health screening", "risk": "high"},
+        {"name": "急救知识库", "en": "first aid knowledge", "risk": "high"},
+        {"name": "设备与穿戴对接", "en": "wearables integration", "risk": "high"}
+      ],
+      "transport": [
+        {"name": "路线规划", "en": "route planning", "risk": "medium"},
+        {"name": "实时路况", "en": "real-time traffic", "risk": "medium"},
+        {"name": "打车匹配", "en": "ride matching", "risk": "high"},
+        {"name": "司机/乘客评分", "en": "driver/rider rating", "risk": "medium"},
+        {"name": "车票查询/预订", "en": "ticket inquiry/booking", "risk": "medium"},
+        {"name": "座位与值机", "en": "seat selection/check-in", "risk": "medium"},
+        {"name": "酒店/民宿预订", "en": "hotel/airbnb booking", "risk": "medium"},
+        {"name": "共享单车解锁", "en": "bike sharing unlock", "risk": "medium"}
+      ],
+      "utilities": [
+        {"name": "文件存储", "en": "file storage", "risk": "medium"},
+        {"name": "云同步冲突解决", "en": "cloud sync conflict", "risk": "medium"},
+        {"name": "备份计划与恢复", "en": "backup schedule & restore", "risk": "medium"},
+        {"name": "翻译/多语言", "en": "translation & i18n", "risk": "low"},
+        {"name": "OCR 识别", "en": "ocr", "risk": "medium"},
+        {"name": "密码管理器", "en": "password manager", "risk": "high"},
+        {"name": "加密与钥匙库", "en": "encryption & key vault", "risk": "critical"}
+      ],
+      "ai": [
+        {"name": "模型选择与路由", "en": "model selection & routing", "risk": "high"},
+        {"name": "提示模板", "en": "prompt templates", "risk": "medium"},
+        {"name": "上下文与记忆", "en": "context & memory", "risk": "high"},
+        {"name": "对话与工具调用", "en": "chat & tool use", "risk": "high"},
+        {"name": "安全与过滤", "en": "safety & moderation", "risk": "critical"},
+        {"name": "嵌入与向量检索", "en": "embeddings & vector search", "risk": "high"},
+        {"name": "微调与数据集", "en": "fine-tuning & datasets", "risk": "high"},
+        {"name": "模型下载与断点续传", "en": "model download & resume", "risk": "high"},
+        {"name": "使用限额与计费", "en": "quota & billing", "risk": "high"}
+      ],
+      "system": [
+        {"name": "多租户管理", "en": "multi-tenant management", "risk": "high"},
+        {"name": "版本控制/发布说明", "en": "versioning & release notes", "risk": "medium"},
+        {"name": "环境配置", "en": "environment configuration", "risk": "medium"},
+        {"name": "容器编排", "en": "container orchestration", "risk": "critical"},
+        {"name": "微服务治理", "en": "microservices governance", "risk": "critical"},
+        {"name": "负载均衡", "en": "load balancing", "risk": "high"},
+        {"name": "服务发现", "en": "service discovery", "risk": "high"},
+        {"name": "配置中心", "en": "configuration center", "risk": "high"}
+      ],
+      "office": [
+        {"name": "文档实时协作", "en": "realtime doc collaboration", "risk": "medium"},
+        {"name": "日程与会议", "en": "calendar & meetings", "risk": "medium"},
+        {"name": "任务与项目", "en": "tasks & project mgmt", "risk": "medium"},
+        {"name": "工单系统", "en": "ticketing system", "risk": "high"},
+        {"name": "审批流程", "en": "approval workflow", "risk": "high"},
+        {"name": "考勤打卡", "en": "attendance tracking", "risk": "low"},
+        {"name": "视频会议", "en": "video conferencing", "risk": "high"}
+      ],
+      "data": [
+        {"name": "数据采集与接入", "en": "ingestion/connectors", "risk": "high"},
+        {"name": "数据清洗与质量", "en": "cleansing & data quality", "risk": "medium"},
+        {"name": "建模与指标口径", "en": "modeling & metrics", "risk": "high"},
+        {"name": "数据可视化", "en": "data visualization", "risk": "medium"},
+        {"name": "报表与调度", "en": "reports & scheduling", "risk": "medium"},
+        {"name": "日志检索与关联", "en": "log search & correlation", "risk": "medium"},
+        {"name": "预测分析与时序", "en": "forecasting & time series", "risk": "high"}
+      ],
+      "devops": [
+        {"name": "CI/CD 流水线", "en": "ci/cd pipeline", "risk": "high"},
+        {"name": "代码审查", "en": "code review", "risk": "medium"},
+        {"name": "测试用例管理", "en": "test case management", "risk": "medium"},
+        {"name": "缺陷跟踪", "en": "bug tracking", "risk": "medium"},
+        {"name": "灰度发布", "en": "canary release", "risk": "high"},
+        {"name": "滚动升级", "en": "rolling update", "risk": "high"},
+        {"name": "基础设施即代码", "en": "infrastructure as code", "risk": "high"}
+      ],
+      "industry": [
+        {"name": "供应链管理", "en": "supply chain management", "risk": "critical"},
+        {"name": "仓储管理", "en": "warehouse management", "risk": "high"},
+        {"name": "生产计划/MRP", "en": "production planning/mrp", "risk": "high"},
+        {"name": "车队调度", "en": "fleet management", "risk": "high"},
+        {"name": "工时统计", "en": "workforce management", "risk": "medium"},
+        {"name": "智能抄表", "en": "smart metering", "risk": "medium"},
+        {"name": "能源监控", "en": "energy monitoring", "risk": "high"}
+      ],
+      "compliance": [
+        {"name": "合规模型与检查", "en": "compliance checks (GDPR/PCI)", "risk": "critical"},
+        {"name": "访问控制/RBAC/ABAC", "en": "rbac/abac", "risk": "critical"},
+        {"name": "审计日志留存", "en": "audit logging retention", "risk": "critical"},
+        {"name": "数据脱敏/DLP", "en": "data masking/dlp", "risk": "high"},
+        {"name": "漏洞扫描", "en": "vulnerability scanning", "risk": "critical"},
+        {"name": "入侵检测/防御", "en": "ids/ips", "risk": "critical"},
+        {"name": "防火墙策略", "en": "firewall rules", "risk": "high"},
+        {"name": "密钥与证书管理", "en": "key/cert management", "risk": "critical"}
+      ],
+      "gov_public": [
+        {"name": "政务审批流程", "en": "e-government approval", "risk": "high"},
+        {"name": "公共缴费集成", "en": "public payment", "risk": "medium"},
+        {"name": "人口信息查询", "en": "population registry", "risk": "high"},
+        {"name": "社保服务", "en": "social security services", "risk": "medium"},
+        {"name": "医保结算", "en": "health insurance settlement", "risk": "critical"},
+        {"name": "应急事件管理", "en": "emergency incident mgmt", "risk": "critical"},
+        {"name": "城市交通监控", "en": "urban traffic monitoring", "risk": "high"}
+      ],
+      "energy_env": [
+        {"name": "智能电表与采集", "en": "smart metering & readout", "risk": "high"},
+        {"name": "电网/负荷调度", "en": "grid dispatching", "risk": "critical"},
+        {"name": "风电监控", "en": "wind power monitoring", "risk": "high"},
+        {"name": "光伏运维", "en": "solar pv o&m", "risk": "high"},
+        {"name": "碳排放追踪", "en": "carbon tracking", "risk": "critical"},
+        {"name": "能源交易撮合", "en": "energy trading", "risk": "critical"},
+        {"name": "水资源管理", "en": "water resource mgmt", "risk": "high"}
+      ],
+      "manufacturing": [
+        {"name": "MES 执行", "en": "mes execution", "risk": "critical"},
+        {"name": "生产排程", "en": "production scheduling", "risk": "high"},
+        {"name": "设备预测性维护", "en": "predictive maintenance", "risk": "critical"},
+        {"name": "质量检测/SPC", "en": "quality inspection/spc", "risk": "high"},
+        {"name": "数字孪生建模", "en": "digital twin modeling", "risk": "high"},
+        {"name": "供应链优化", "en": "supply chain optimization", "risk": "critical"},
+        {"name": "工艺变更与换型", "en": "changeover management", "risk": "high"}
+      ],
+      "aerospace_defense": [
+        {"name": "飞行计划申报", "en": "flight planning", "risk": "critical"},
+        {"name": "航班/空管接口", "en": "atc integration", "risk": "critical"},
+        {"name": "维修记录与放行", "en": "maintenance logs & release", "risk": "high"},
+        {"name": "卫星遥感数据", "en": "satellite remote sensing", "risk": "critical"},
+        {"name": "无人机控制与限飞", "en": "uav control & no-fly zones", "risk": "high"},
+        {"name": "指挥控制", "en": "command & control", "risk": "critical"},
+        {"name": "战术演练仿真", "en": "tactical simulation", "risk": "critical"}
+      ],
+      "web3": [
+        {"name": "智能合约部署", "en": "smart contract deployment", "risk": "critical"},
+        {"name": "DEX 兑换", "en": "dex swap", "risk": "critical"},
+        {"name": "NFT 铸造/挂牌/交易", "en": "nft mint/list/trade", "risk": "high"},
+        {"name": "DAO 提案与投票", "en": "dao proposals/votes", "risk": "high"},
+        {"name": "跨链桥接", "en": "cross-chain bridge", "risk": "critical"},
+        {"name": "加密钱包与助记词", "en": "wallet & seed", "risk": "high"},
+        {"name": "质押与收益", "en": "staking & yield", "risk": "critical"}
+      ],
+      "medical_life": [
+        {"name": "临床试验管理", "en": "clinical trial mgmt", "risk": "critical"},
+        {"name": "受试者随机/盲法", "en": "randomization/blinding", "risk": "critical"},
+        {"name": "医疗影像/DICOM", "en": "medical imaging/dicom", "risk": "critical"},
+        {"name": "电子处方", "en": "e-prescription", "risk": "critical"},
+        {"name": "病历/EMR", "en": "patient record/emr", "risk": "critical"},
+        {"name": "LIS 检验", "en": "lis orders/results", "risk": "high"},
+        {"name": "远程监护设备", "en": "remote monitoring devices", "risk": "high"},
+        {"name": "医保理赔", "en": "insurance claim", "risk": "high"}
+      ],
+      "agriculture_food": [
+        {"name": "智慧种植与灌溉", "en": "smart farming & irrigation", "risk": "high"},
+        {"name": "土壤/气象监测", "en": "soil/weather monitoring", "risk": "medium"},
+        {"name": "农产品溯源", "en": "traceability", "risk": "critical"},
+        {"name": "畜牧标识与健康", "en": "livestock tagging/health", "risk": "high"},
+        {"name": "智慧渔业监控", "en": "smart fishery", "risk": "medium"},
+        {"name": "食品安全检测", "en": "food safety testing", "risk": "critical"},
+        {"name": "冷链温湿度", "en": "cold chain temp/humidity", "risk": "critical"}
+      ],
+      "culture_creative": [
+        {"name": "数字出版流程", "en": "digital publishing workflow", "risk": "medium"},
+        {"name": "展览与场馆排期", "en": "exhibition scheduling", "risk": "medium"},
+        {"name": "票务销售与核销", "en": "ticketing & validation", "risk": "medium"},
+        {"name": "虚拟偶像运营", "en": "virtual idol ops", "risk": "high"},
+        {"name": "DRM/版权保护", "en": "drm/licensing", "risk": "critical"},
+        {"name": "在线课程订阅", "en": "online course subscription", "risk": "medium"},
+        {"name": "创作者分成", "en": "creator monetization", "risk": "medium"}
+      ]
+    },
+    "supplemental_groups_mapped_from_code2": {
+      "category": "核心分组",
+      "mapping_rules": [
+        {"source_group": "用户管理", "map_to_ref": ["auth_security", "user_org"]},
+        {"source_group": "内容管理", "map_to_ref": ["content_interaction", "data"]},
+        {"source_group": "交易支付", "map_to_ref": ["commerce", "finance"]},
+        {"source_group": "数据分析", "map_to_ref": ["data"]}
+      ],
+      "expanded_items": [
+        {"name": "用户注册", "risk": "medium", "map_to_ref": ["auth_security", "user_org"]},
+        {"name": "用户登录", "risk": "high", "map_to_ref": ["auth_security"]},
+        {"name": "密码管理", "risk": "high", "map_to_ref": ["auth_security"]},
+        {"name": "个人资料", "risk": "medium", "map_to_ref": ["user_org"]},
+        {"name": "内容发布", "risk": "medium", "map_to_ref": ["content_interaction"]},
+        {"name": "内容审核", "risk": "high", "map_to_ref": ["content_interaction", "compliance"]},
+        {"name": "订单管理", "risk": "high", "map_to_ref": ["commerce"]},
+        {"name": "支付处理", "risk": "critical", "map_to_ref": ["commerce", "finance"]},
+        {"name": "退款处理", "risk": "high", "map_to_ref": ["commerce"]},
+        {"name": "发票管理", "risk": "medium", "map_to_ref": ["commerce"]},
+        {"name": "报表生成", "risk": "low", "map_to_ref": ["data"]},
+        {"name": "数据可视化", "risk": "low", "map_to_ref": ["data"]}
+      ]
+    }
+  },
+  "testing_keywords": {
+    "category": "测试维度",
+    "tags": ["testing", "qa", "quality"],
+    "items": [
+      {"name": "功能测试", "en": "functional testing", "iso": "ISO25010-Functional", "description": "验证软件功能是否符合需求"},
+      {"name": "接口测试", "en": "API testing", "iso": "ISO25010-Functional", "description": "验证系统间接口的正确性"},
+      {"name": "性能测试", "en": "performance testing", "iso": "ISO25010-Performance Efficiency", "description": "在特定负载下评估响应时间和吞吐量"},
+      {"name": "压力测试", "en": "stress testing", "iso": "ISO25010-Reliability", "description": "评估极限条件下的稳定性"},
+      {"name": "兼容性测试", "en": "compatibility testing", "iso": "ISO25010-Compatibility", "description": "不同设备/系统/浏览器下的兼容性"},
+      {"name": "弱网测试", "en": "network simulation", "iso": "ISO25010-Reliability", "description": "模拟高延迟/丢包等网络环境"},
+      {"name": "安全性测试", "en": "security testing", "iso": "ISO25010-Security", "description": "系统安全与数据保护验证"},
+      {"name": "合规测试", "en": "compliance testing", "iso": "ISO25010-Compliance", "description": "法规/行业标准符合性"},
+      {"name": "可用性测试", "en": "usability testing", "iso": "ISO25010-Usability", "description": "界面与流程易用性评估"},
+      {"name": "可访问性测试", "en": "accessibility testing", "iso": "ISO25010-Usability", "description": "无障碍标准（如WCAG）"},
+      {"name": "UAT", "en": "user acceptance testing", "iso": "Business Validation", "description": "业务方验收"},
+      {"name": "A/B 测试", "en": "A/B testing", "iso": "User Experience", "description": "对比实验优化体验"},
+      {"name": "回归测试", "en": "regression testing", "iso": "ISO25010-Functional", "description": "确保变更不破坏既有功能"},
+      {"name": "自动化测试", "en": "automation testing", "iso": "ISO25010-Functional/Performance", "description": "工具化批量执行"}
+    ]
+  },
+  "test_methods": {
+    "category": "测试方法论",
+    "tags": ["design", "methodology"],
+    "items": [
+      {"name": "等价类划分法", "en": "equivalence partitioning", "iso": "ISO25010-Functional", "description": "将输入数据划分为等价类进行测试"},
+      {"name": "边界值分析法", "en": "boundary value analysis", "iso": "ISO25010-Functional", "description": "重点覆盖边界/临界值"},
+      {"name": "判定表法", "en": "decision table testing", "iso": "ISO25010-Functional", "description": "用表格表达复杂逻辑组合"},
+      {"name": "因果图法", "en": "cause-effect graphing", "iso": "ISO25010-Functional", "description": "分析输入条件与输出的因果关系"},
+      {"name": "正交分析法", "en": "orthogonal array testing", "aliases": ["正交试验法"], "iso": "ISO25010-Performance Efficiency", "description": "用正交表覆盖因素组合"},
+      {"name": "场景法", "en": "scenario-based testing", "iso": "ISO25010-Usability", "description": "模拟用户真实使用路径"},
+      {"name": "状态迁移测试", "en": "state transition testing", "iso": "ISO25010-Functional / ISO25010-Reliability", "description": "基于状态/转移设计用例"},
+      {"name": "错误推测法", "en": "error guessing", "iso": "ISO25010-Reliability", "description": "基于经验推测薄弱点"},
+      {"name": "随机测试", "en": "random/monkey testing", "iso": "ISO25010-Reliability / ISO25010-Security", "description": "随机输入或操作探索缺陷"},
+      {"name": "探索性测试", "en": "exploratory testing", "iso": "ISO25010-Usability / ISO25010-Functional", "description": "并行进行学习、设计与执行"},
+      {"name": "基于风险的测试", "en": "risk-based testing", "iso": "ISO25010-Functional/Performance/Security", "description": "按风险优先级分配测试资源"}
+    ]
+  }
+}

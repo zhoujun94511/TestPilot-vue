@@ -1,0 +1,205 @@
+{
+  "export_time": "2025-01-17T17:30:00.000Z",
+  "configs": [
+    {
+      "key": "DEFAULT_COMPANY",
+      "value": "openai",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "默认AI模型提供商",
+      "is_sensitive": false
+    },
+    {
+      "key": "OPENAI_API_KEY",
+      "value": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "OpenAI API密钥",
+      "is_sensitive": true
+    },
+    {
+      "key": "OPENAI_BASE_URL",
+      "value": "https://api.openai.com/v1",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "OpenAI服务地址",
+      "is_sensitive": false
+    },
+    {
+      "key": "OPENAI_MODEL",
+      "value": "gpt-5",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "OpenAI模型名称",
+      "is_sensitive": false
+    },
+    {
+      "key": "TR_OPENAI_MAX_TOKENS",
+      "value": "8000",
+      "value_type": "int",
+      "category": "ai_model",
+      "description": "OpenAI用例生成最大Token数",
+      "is_sensitive": false
+    },
+    {
+      "key": "GPT5_VERBOSITY",
+      "value": "low",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "GPT-5详细程度",
+      "is_sensitive": false
+    },
+    {
+      "key": "GPT5_REASONING_EFFORT",
+      "value": "minimal",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "GPT-5推理努力",
+      "is_sensitive": false
+    },
+    {
+      "key": "DEEPSEEK_API_KEY",
+      "value": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "DeepSeek API密钥",
+      "is_sensitive": true
+    },
+    {
+      "key": "DEEPSEEK_BASE_URL",
+      "value": "https://api.deepseek.com/v1",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "DeepSeek服务地址",
+      "is_sensitive": false
+    },
+    {
+      "key": "DEEPSEEK_MODEL",
+      "value": "deepseek-chat",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "DeepSeek模型名称",
+      "is_sensitive": false
+    },
+    {
+      "key": "TR_DEEPSEEK_MAX_TOKENS",
+      "value": "8000",
+      "value_type": "int",
+      "category": "ai_model",
+      "description": "DeepSeek用例生成最大Token数",
+      "is_sensitive": false
+    },
+    {
+      "key": "OLLAMA_BASE_URL",
+      "value": "http://127.0.0.1:11434",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "Ollama服务地址",
+      "is_sensitive": false
+    },
+    {
+      "key": "OLLAMA_MODEL",
+      "value": "phi:2.7b",
+      "value_type": "string",
+      "category": "ai_model",
+      "description": "Ollama模型名称",
+      "is_sensitive": false
+    },
+    {
+      "key": "MAX_TOKENS",
+      "value": "4000",
+      "value_type": "int",
+      "category": "ai_model",
+      "description": "通用最大Token数",
+      "is_sensitive": false
+    },
+    {
+      "key": "MAX_CASE_NUM",
+      "value": "50",
+      "value_type": "int",
+      "category": "case_generation",
+      "description": "最大生成数量",
+      "is_sensitive": false
+    },
+    {
+      "key": "CONTENT_SIMILARITY_THRESHOLD",
+      "value": "0.8",
+      "value_type": "float",
+      "category": "case_generation",
+      "description": "内容相似度阈值",
+      "is_sensitive": false
+    },
+    {
+      "key": "ENABLE_CONTENT_DEDUP",
+      "value": "true",
+      "value_type": "bool",
+      "category": "case_generation",
+      "description": "启用内容去重",
+      "is_sensitive": false
+    },
+    {
+      "key": "CONTENT_DEDUP_BATCH_SIZE",
+      "value": "100",
+      "value_type": "int",
+      "category": "case_generation",
+      "description": "去重批次大小",
+      "is_sensitive": false
+    },
+    {
+      "key": "CHUNK_SIZE",
+      "value": "1000",
+      "value_type": "int",
+      "category": "performance",
+      "description": "处理块大小",
+      "is_sensitive": false
+    },
+    {
+      "key": "MAX_WORKERS",
+      "value": "3",
+      "value_type": "int",
+      "category": "performance",
+      "description": "最大工作线程",
+      "is_sensitive": false
+    },
+    {
+      "key": "ENABLE_PARALLEL_PROCESSING",
+      "value": "true",
+      "value_type": "bool",
+      "category": "performance",
+      "description": "启用并行处理",
+      "is_sensitive": false
+    },
+    {
+      "key": "ENABLE_STREAMING",
+      "value": "true",
+      "value_type": "bool",
+      "category": "performance",
+      "description": "启用流式处理",
+      "is_sensitive": false
+    },
+    {
+      "key": "RAG_TOP_K",
+      "value": "5",
+      "value_type": "int",
+      "category": "knowledge",
+      "description": "RAG检索结果数量",
+      "is_sensitive": false
+    },
+    {
+      "key": "RAG_SCORE_THRESHOLD",
+      "value": "0.7",
+      "value_type": "float",
+      "category": "knowledge",
+      "description": "RAG相似度阈值（统一与settings.py保持一致）",
+      "is_sensitive": false
+    },
+    {
+      "key": "MAX_MEMORY_MB",
+      "value": "500",
+      "value_type": "int",
+      "category": "file_processing",
+      "description": "最大内存使用量(MB)",
+      "is_sensitive": false
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+@import './tokens.css';
+@import './theme.css';
+@import './layout.css';
+@import './utilities.css';
+@import './components.css';
+
+html {
+  background: var(--tp-bg-page);
+}

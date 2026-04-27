@@ -1,0 +1,409 @@
+{
+  "metadata": {
+  "version": "1.2.0",
+  "last_updated": "2025-11-03",
+  "author": "TestPilot RAG Filter",
+  "description": "RAG关键词配置（包含内容过滤和关键词提取）"
+},
+  "platform_keywords": {
+  "category": "终端平台关键词",
+  "description": "基于终端平台的关键词过滤",
+  "tags": ["platform", "environment"],
+  "items": [{"name": "Web", "aliases": ["浏览器端", "网页", "网站", "web端"], "keywords": ["浏览器", "网页", "网站", "前端", "HTML", "CSS", "JavaScript", "响应式"], "risk": "medium", "weight": 4}, {"name": "iOS", "aliases": ["iPhone", "iPad", "苹果"], "keywords": ["iOS", "iPhone", "iPad", "苹果", "App Store", "Xcode", "Swift", "Objective-C"], "risk": "medium", "weight": 4}, {"name": "Android", "aliases": ["安卓", "Android"], "keywords": ["Android", "安卓", "Google Play", "Android Studio", "Java", "Kotlin"], "risk": "medium", "weight": 4}, {"name": "Server", "aliases": ["后端", "服务器"], "keywords": ["服务器", "后端", "API", "数据库", "微服务", "容器", "Docker", "Kubernetes"], "risk": "high", "weight": 8}, {"name": "小程序", "aliases": ["微信小程序", "小程序"], "keywords": ["小程序", "微信小程序", "支付宝小程序", "百度小程序", "字节跳动小程序"], "risk": "medium", "weight": 4}, {"name": "IoT", "aliases": ["物联网", "智能设备"], "keywords": ["物联网", "IoT", "智能设备", "传感器", "嵌入式", "边缘计算"], "risk": "high", "weight": 8}]
+},
+  "application_keywords": {
+  "category": "应用类型关键词",
+  "description": "基于应用类型的业务关键词过滤",
+  "tags": ["industry", "business"],
+  "items": {
+  "游戏应用": {
+  "description": "游戏相关应用关键词",
+  "examples": ["王者荣耀", "原神", "Steam", "任天堂Switch Online"],
+  "keywords": [
+  "游戏", "玩家", "角色", "关卡", "任务", "装备", "技能", "战斗", "升级", "经验",
+  "副本", "公会", "竞技", "排位", "段位", "金币", "钻石", "道具", "皮肤", "SLG",
+  "RPG", "MMO", "MOBA", "FPS", "RTS", "策略", "动作", "冒险"
+],
+  "risk": "high",
+  "weight": 8
+},
+  "金融应用": {
+  "description": "金融相关应用关键词",
+  "examples": ["支付宝", "微信支付", "工商银行", "东方财富", "Binance"],
+  "keywords": [
+  "支付", "转账", "充值", "提现", "余额", "账单", "银行卡", "信用卡", "理财", "投资",
+  "基金", "保险", "风控", "反欺诈", "合规", "审计", "KYC", "AML", "数字货币", "比特币",
+  "区块链", "钱包", "交易"
+],
+  "risk": "critical",
+  "weight": 15
+},
+  "社交应用": {
+  "description": "社交相关应用关键词",
+  "examples": ["微信", "WhatsApp", "微博", "Facebook", "抖音", "小红书"],
+  "keywords": [
+  "社交", "聊天", "朋友圈", "动态", "关注", "粉丝", "点赞", "评论", "分享", "转发",
+  "私信", "群聊", "直播", "短视频", "内容创作"
+],
+  "risk": "high",
+  "weight": 8
+},
+  "电商应用": {
+  "description": "电商相关应用关键词",
+  "examples": ["淘宝", "京东", "美团", "饿了么", "闲鱼", "盒马"],
+  "keywords": [
+  "购物", "商品", "订单", "支付", "物流", "配送", "库存", "价格", "优惠券", "促销",
+  "秒杀", "团购", "评价", "售后", "客服", "退款"
+],
+  "risk": "high",
+  "weight": 8
+},
+  "教育应用": {
+  "description": "教育相关应用关键词",
+  "examples": ["Coursera", "慕课网", "多邻国", "作业帮", "宝宝巴士"],
+  "keywords": [
+  "学习", "课程", "教育", "培训", "考试", "作业", "练习", "成绩", "证书", "技能",
+  "知识", "教学", "老师", "学生", "家长", "学校"
+],
+  "risk": "medium",
+  "weight": 4
+},
+  "健康应用": {
+  "description": "健康相关应用关键词",
+  "examples": ["Keep", "Calm", "Headspace", "微医", "好大夫"],
+  "keywords": [
+  "健康", "健身", "运动", "医疗", "医生", "问诊", "预约", "挂号", "体检", "报告",
+  "药品", "处方", "康复", "心理", "睡眠", "饮食"
+],
+  "risk": "high",
+  "weight": 8
+}
+}
+},
+  "functional_keywords": {
+  "category": "功能模块关键词",
+  "description": "基于功能模块的技术关键词过滤",
+  "tags": ["feature", "module"],
+  "items": [{"name": "认证与安全", "aliases": ["authentication", "security"], "keywords": ["登录", "注册", "认证", "授权", "权限", "安全", "加密", "解密", "密码", "验证码", "多因子认证", "生物识别", "指纹", "人脸识别", "单点登录", "SSO", "OAuth", "JWT", "Token", "会话管理"], "risk": "critical", "weight": 15}, {"name": "用户管理", "aliases": ["user management"], "keywords": ["用户", "账户", "个人资料", "头像", "昵称", "联系方式", "隐私设置", "账号冻结", "账号解冻", "账号注销", "组织架构", "部门管理", "成员管理"], "risk": "high", "weight": 8}, {"name": "支付功能", "aliases": ["payment"], "keywords": ["支付", "付款", "结算", "下单", "订单", "交易", "退款", "发票", "支付宝", "微信支付", "银行卡", "信用卡", "钱包", "余额", "充值"], "risk": "critical", "weight": 15}, {"name": "内容管理", "aliases": ["content management"], "keywords": ["内容", "文章", "图片", "视频", "音频", "文件", "上传", "下载", "编辑", "发布", "审核", "删除", "分享", "收藏", "点赞", "评论"], "risk": "medium", "weight": 4}, {"name": "搜索功能", "aliases": ["search"], "keywords": ["搜索", "查找", "检索", "筛选", "排序", "索引", "关键词", "全文搜索", "模糊搜索", "精确搜索", "联想搜索", "自动完成", "搜索建议"], "risk": "medium", "weight": 4}, {"name": "消息通知", "aliases": ["notification"], "keywords": ["消息", "通知", "推送", "提醒", "邮件", "短信", "站内信", "系统通知", "实时消息", "离线消息", "消息队列", "推送服务", "通知中心"], "risk": "medium", "weight": 4}]
+},
+  "technical_keywords": {
+  "category": "技术关键词",
+  "description": "技术相关的关键词过滤",
+  "tags": ["technical", "development"],
+  "items": [{"name": "测试相关", "keywords": ["测试", "用例", "步骤", "预期", "结果", "验证", "检查", "断言", "功能测试", "性能测试", "安全测试", "兼容性测试", "自动化测试", "单元测试", "集成测试", "系统测试", "验收测试", "回归测试"], "weight": 6}, {"name": "开发相关", "keywords": ["开发", "编程", "代码", "程序", "算法", "数据结构", "设计模式", "架构", "框架", "库", "API", "接口", "文档", "注释", "版本控制"], "weight": 5}, {"name": "数据库相关", "keywords": ["数据库", "SQL", "NoSQL", "MySQL", "PostgreSQL", "MongoDB", "Redis", "索引", "查询", "事务", "锁", "备份", "恢复", "主从", "分库分表"], "weight": 7}, {"name": "网络相关", "keywords": ["网络", "HTTP", "HTTPS", "TCP", "UDP", "IP", "DNS", "CDN", "负载均衡", "反向代理", "缓存", "压缩", "加密", "SSL", "TLS"], "weight": 6}]
+},
+  "exclude_keywords": {
+  "description": "需要排除的关键词（不相关内容）",
+  "categories": {
+  "craft_keywords": {
+  "description": "手工制作相关关键词",
+  "keywords": [
+  "针织", "编织", "毛线", "针法", "花样", "图案", "布料", "服装", "手工", "刺绣",
+  "缝纫", "纺织", "钩针", "棒针", "毛线球", "毛线团", "毛线针", "毛线钩"
+]
+},
+  "cooking_keywords": {
+  "description": "烹饪相关关键词",
+  "keywords": [
+  "烹饪", "食谱", "食材", "烘焙", "菜谱", "调料", "香料", "厨房", "厨具", "烤箱",
+  "微波炉", "炒锅", "蒸锅"
+]
+},
+  "unrelated_tech": {
+  "description": "不相关的技术关键词",
+  "keywords": ["针织机", "编织机", "纺织机", "缝纫机", "刺绣机", "毛线店", "布料店", "服装店", "手工店"]
+}
+}
+},
+  "scoring_weights": {
+  "description": "相关性评分权重配置",
+  "version": "1.1.0",
+  "weights": {
+  "keyword_match": 0.5,
+  "content_length": 0.2,
+  "domain_relevance": 0.2,
+  "risk_weight": 0.1
+},
+  "thresholds": {
+  "min_relevance_score": 0.5,
+  "content_length_threshold": 50,
+  "high_risk_threshold": 0.7,
+  "critical_risk_threshold": 0.8
+},
+  "risk_multipliers": {
+  "low": 1.0,
+  "medium": 1.2,
+  "high": 1.5,
+  "critical": 2.0
+}
+},
+  "domain_features": {
+  "description": "领域特征关键词",
+  "version": "1.1.0",
+  "features": {
+  "game_features": {
+  "description": "游戏领域特征",
+  "keywords": [
+  "游戏", "玩家", "角色", "关卡", "任务", "装备", "技能", "战斗", "升级", "经验",
+  "副本", "公会", "竞技", "排位", "段位", "金币", "钻石", "道具"
+],
+  "weight": 8
+},
+  "test_features": {
+  "description": "测试领域特征",
+  "keywords": [
+  "测试", "用例", "步骤", "预期", "结果", "验证", "检查", "断言", "场景", "数据",
+  "环境", "工具", "自动化", "回归", "性能", "安全", "兼容性"
+],
+  "weight": 6
+},
+  "business_features": {
+  "description": "业务领域特征",
+  "keywords": [
+  "用户", "订单", "支付", "商品", "库存", "物流", "客服", "售后", "会员", "积分",
+  "优惠", "促销", "营销", "运营", "数据分析", "报表", "统计"
+],
+  "weight": 7
+},
+  "tech_features": {
+  "description": "技术领域特征",
+  "keywords": [
+  "开发", "编程", "代码", "算法", "架构", "框架", "API", "接口", "数据库", "缓存",
+  "性能", "优化", "部署", "运维", "监控", "日志", "调试"
+],
+  "weight": 5
+}
+}
+},
+  "advanced_filters": {
+  "description": "高级过滤配置",
+  "version": "1.1.0",
+  "context_awareness": {
+  "description": "上下文感知过滤",
+  "enabled": true,
+  "context_window": 3,
+  "semantic_threshold": 0.7
+},
+  "dynamic_weighting": {
+  "description": "动态权重调整",
+  "enabled": true,
+  "recent_keywords_boost": 1.2,
+  "frequency_decay": 0.9
+},
+  "quality_indicators": {
+  "description": "内容质量指标",
+  "min_sentence_length": 10,
+  "max_sentence_length": 200,
+  "coherence_threshold": 0.6,
+  "readability_threshold": 0.5
+}
+},
+  "integration_config": {
+  "description": "集成配置",
+  "version": "1.1.0",
+  "knowledge_base_integration": {
+  "enabled": true,
+  "sync_interval": 3600,
+  "fallback_to_kb": true
+},
+  "performance_optimization": {
+  "cache_keywords": true,
+  "cache_ttl": 1800,
+  "batch_processing": true,
+  "max_batch_size": 100
+}
+},
+  "keyword_extraction": {
+  "description": "关键词提取配置（用于需求关键词提取）",
+  "version": "1.3.0",
+  "stop_words": {
+  "description": "中文停用词配置（已扩展，约506个词）",
+  "true_stop_words": [
+  "一向", "一直", "一般", "上午", "上报", "下午", "不", "不仅", "不光", "不只",
+  "不如", "不妨", "不少", "不必", "不管", "不论", "不过", "与", "与此同时", "且",
+  "且又", "且还", "个", "中午", "中期", "为", "为了", "为什么", "为何", "乃至",
+  "之前", "之后", "了", "事件", "事项", "于", "于是", "亮点", "什么", "什么时候",
+  "什么样", "今天", "仍", "仍旧", "仍然", "从", "从而", "他", "他人", "他们",
+  "以", "以便", "以免", "以内", "以及", "以后", "以外", "以至", "以致", "件",
+  "任一", "任何", "任务", "任意", "份", "优化", "会", "但", "但是", "何以",
+  "何以故", "何故", "何时", "作为", "你", "你们", "使用", "依然", "依照", "依赖",
+  "依赖项", "倍", "倘使", "倘若", "做", "偶尔", "催办", "公告", "关于", "其",
+  "其中", "其人", "其他", "其后", "其后续", "其它", "其次", "其间", "再次", "再者",
+  "况且", "几", "刚", "刚刚", "刚好", "刚巧", "刚才", "利用", "到", "刻",
+  "前提", "前期", "务必", "劳驾", "包含", "包含着", "包括", "即", "即使", "即便",
+  "历来", "参照", "及", "发布", "句", "另外", "只", "只有", "只要", "可否",
+  "可否能", "台", "各", "各个", "各位", "各种", "同", "同时", "后期", "后续",
+  "向", "向来", "吗", "否则", "吧", "呀", "告知", "呢", "周", "周内",
+  "周初", "周末", "和", "咯", "哇", "哈", "哦", "哪", "哪个", "哪些",
+  "哪儿", "哪家", "哪怕", "哪种", "哪里", "啊", "啥", "啦", "嘛", "回",
+  "回传", "回访", "因为", "因而", "在", "地", "场", "基于", "备案", "备案化",
+  "复审", "复查", "复核", "多少", "多数", "多次", "多谢", "大可", "大多", "大家",
+  "大幅", "大概", "大约", "大致", "套", "她", "她们", "好比", "如何", "如同",
+  "如果", "如若", "存档", "季", "季度", "宁可", "宁愿", "宁肯", "它", "它们",
+  "完成", "宜", "实现", "对", "对不起", "对于", "对接", "对方", "将", "少数",
+  "尽可", "尽管", "尽量", "屡次", "工作日", "工单", "工序", "已经", "常常", "平日",
+  "年", "年内", "年初", "年度", "年末", "并", "并不", "并且", "并未", "应",
+  "应当", "异常", "归档", "归档化", "归纳", "当下", "当年", "当日", "当时", "当晚",
+  "当月", "彼", "彼此", "往", "往往", "很", "很多", "得", "必须", "怎么",
+  "怎样", "总算", "您好", "愿", "我", "我们", "或", "或者", "所以", "手册",
+  "打扰", "批", "批次", "把", "抑或", "报错", "抱歉", "拜托", "指南", "按",
+  "按照", "按需", "排期", "接着", "提供", "提示", "提醒", "摘要", "摘要版", "支持",
+  "改进", "故障", "敬候", "敬请", "方案集", "旋即", "无", "无论", "无需", "无须",
+  "既", "既然", "既而", "日", "早上", "早前", "早已", "时", "时常", "明天",
+  "昨天", "是", "是否", "是否能", "晚上", "晚间", "暂且", "暂时", "更", "最",
+  "最后", "月", "月份", "月初", "月末", "有", "有时", "期", "期间", "未",
+  "未必", "末了", "末尾", "本人", "本方", "本次", "条", "条款", "条目", "极其",
+  "某", "某些", "某某", "查阅", "标准化", "样例", "核对", "核验", "根", "根据",
+  "梳理", "概述", "次", "款", "正在", "此", "此前", "此外", "此次", "此等",
+  "此类", "段", "每", "每天", "每年", "每日", "每月", "每次", "比", "比对",
+  "比照", "比较", "汇总", "汇报", "沟通", "没", "没有", "注意", "注意事项", "流转",
+  "浏览", "海涵", "涉及", "清单", "渐渐", "烦请", "然后", "然而", "片段", "版本号",
+  "特别", "现在", "甚至", "用", "由于", "的", "目前", "目标", "着", "短期",
+  "示例集", "示意", "种", "究竟", "立刻", "立即", "签收", "类", "索引", "紧接着",
+  "约束", "约莫", "约计", "纪要", "纵然", "终于", "经常", "结合", "结论", "结语",
+  "缺陷", "而", "而且", "联络", "背景", "能", "能否", "自己", "自身", "至",
+  "致谢", "节假日", "节点", "若干", "若是", "范围", "蓝图", "虽然", "补充", "被",
+  "要不", "要不是", "要不然", "要么", "要点", "要约", "规范", "议题", "该次", "详解",
+  "说明书", "请教", "诸位", "诸多", "谁", "谢谢", "跟", "轮", "较", "辛苦",
+  "过", "近日", "近期", "这", "这些", "这边", "这里", "进展", "进度", "进而",
+  "进行", "迭代", "逐步", "通告", "通常", "通报", "通联", "通过", "遍", "那",
+  "那么", "那些", "那边", "那里", "采用", "里程碑", "重点", "针对", "长期", "阅览",
+  "阶段", "附件", "附录", "除非", "随即", "随后", "难点", "需", "需求", "非",
+  "非常", "面向", "页", "须", "首先", "马上"
+],
+  "query_verbs": [
+  "请", "请问", "麻烦", "帮忙", "看看", "查询", "搜索", "查找", "获取", "提交",
+  "输入", "输出", "生成", "编写", "创建", "删除", "修改", "更新", "编辑", "整理",
+  "说明", "介绍"
+],
+  "business_words": {
+  "description": "业务词汇（不应被过滤，但可以降低权重）",
+  "keywords": [
+  "系统", "平台", "应用", "软件", "程序", "方案", "项目", "模块", "功能", "组件",
+  "页面", "接口", "服务", "版本", "配置", "环境", "流程", "文档", "记录", "日志",
+  "状态", "结果", "数据", "信息", "业务", "情况", "方式", "内容", "部分", "字段",
+  "参数", "元素", "文件", "目录", "路径", "规则", "策略", "模板", "示例", "案例",
+  "测试", "用例"
+]
+}
+},
+  "tech_terms": {
+  "description": "技术术语配置（已扩展，约1042+个词）",
+  "inherit_from_technical_keywords": true,
+  "additional_terms": [
+  "2fa", "accelerate", "accuracy", "ace editor", "activemq", "actor-critic", "adam", "adamw", "adapter", "aes",
+  "ai", "aiohttp", "airbyte", "airflow", "akka cluster", "aks", "alb", "alibi", "alibi-detect", "amundsen",
+  "android", "angular", "anova", "ansible", "ant design", "anthos", "anyio", "apache nifi", "api", "api composition",
+  "api rate limiter", "app mesh", "app runner", "appium", "application insights", "argo cd", "argocd image updater", "arima", "arize", "arrow",
+  "artifact registry", "asr", "astro", "asyncapi", "athena", "attention", "attestation", "auc", "avro", "aws",
+  "azure", "azure bicep", "azure devops", "azure ml", "azure monitor", "babel", "babylonjs", "backoff", "badger", "batch",
+  "beam", "beam search", "bertscore", "beyondcorp", "bf16", "bge", "bi-encoder", "bigquery", "bigtable", "bitbucket",
+  "blackbox exporter", "bleu", "blip", "bloom filter", "bm25", "bm25+", "bm25l", "boltdb", "bom", "bootstrap",
+  "bottlerocket", "boundary", "bpe", "bulkhead", "caddy", "canary", "canary analysis", "capacitor", "capnproto", "captum",
+  "catboost", "cd", "cdc", "cdn", "celery", "ceph", "cer", "chai", "chakra ui", "champion challenger",
+  "chaos engineering", "chaos mesh", "chunk", "chunking strategy", "ci", "ci/cd", "cidr", "circuit breaker", "clean architecture", "clickhouse",
+  "clip", "cloud armor", "cloud build", "cloud functions", "cloud run", "cloudfront", "cloudwatch", "cnn", "cockroachdb", "codebuild",
+  "codepipeline", "cohere embed", "cohere rerank", "colbert", "colpali", "columnstore", "commitlint", "concept drift", "configcat", "connect rpc",
+  "consistent hashing ring", "consistent hashing with bounded loads", "consul", "consul connect", "containerd", "context compression", "contract testing", "contriever", "conventional commits", "cortex",
+  "cosmos db", "cpp", "cqrs", "cross-encoder", "csharp", "csrf", "css", "csv", "ctc", "cypress",
+  "cython", "dagster", "dask", "dast", "data drift", "dataflow", "datahub", "dataproc", "datasets", "dbt",
+  "ddd", "deequ", "delta lake", "dense retriever", "dgraph", "diffusion", "dirichlet", "distributed lock", "dlt", "dns",
+  "doc2vec", "docker", "dom", "doris", "dpr", "draftjs", "dramatiq", "dropout", "dropwizard", "duckdb",
+  "e5", "early stopping", "ec2", "ecc", "echarts", "ecr", "ecr public", "efs", "eks", "eks fargate",
+  "elasticsearch", "elt", "embedding", "envoy", "epoch", "error budget", "esbuild", "esbuild loader", "esbuild plugin", "etcd",
+  "etcd raft", "etl", "event hubs", "event sourcing", "eventbridge", "evidently", "expo", "express", "f1", "faiss",
+  "falco", "fastapi", "fastapi routers", "fastify", "feature drift", "feature engineering pipeline", "feature flags", "feature importance", "feature store", "feature store offline",
+  "feature store online", "few-shot", "fiddler", "fido2", "fivetran", "fixture", "flash attention", "flatbuffers", "flink", "flink sql",
+  "flower", "fluent bit", "fluentd", "flutter", "fluxcd", "foundationdb", "fp16", "functions", "fusion", "gan",
+  "gat", "gcn", "gcp", "gdpr", "geglu", "gelu", "git", "github", "github actions", "gitlab",
+  "gitlab ci", "gke", "glove", "glue", "gnn", "go", "golden test", "gossip", "graalvm", "gradle",
+  "grafana", "graph neural network", "graphql", "graphql schema", "graphsage", "great expectations", "greedy decoding", "grounding dino", "grpc", "grpc-java",
+  "grpc-web", "gru", "gunicorn", "hadoop", "hamiltonian monte carlo", "hapi", "haproxy", "harbor", "hash ring", "hatch",
+  "hdfs", "helm", "heuristics", "hevo", "hexagonal", "hibernate", "hipaa", "hit@k", "hmm", "hnsw",
+  "hot standby", "hoverfly", "hsm", "html", "http", "http2", "http3", "https", "httpx", "hudi",
+  "huggingface", "hybrid search", "hypothesis", "iam", "iap", "iasta", "iceberg", "id generator", "idempotency key", "image captioning",
+  "influxdb", "informatica", "int4", "int8", "ion", "ionic", "ios", "ip", "iso27001", "istio",
+  "istio ingress", "ivf", "jaeger", "jaeger ui", "janusgraph", "java", "javascript", "jax", "jenkins", "jest",
+  "jetpack compose", "jmeter", "jooq", "json", "junit", "jwt", "k6", "k8s", "kafka", "kafka streams",
+  "keras", "kinesis", "kmeans", "kmip", "kms", "kms key rotation", "knowledge graph", "koa", "kombu", "kong",
+  "kotlin", "ksql", "ksuid", "kubeflow", "kubernetes", "kustomize", "kv cache", "kyverno", "label smoothing", "lambda",
+  "late interaction", "latency", "latency p99", "launchdarkly", "lda", "leader election", "leaky bucket", "leveldb", "lightgbm", "lime",
+  "linkerd", "lip reading", "lit", "litmus", "llava", "llm", "lmdb", "locust", "log analytics", "logical decoding",
+  "logs", "loki", "lombok", "longhorn", "loRA", "lstm", "lua filter", "luigi", "m3e", "mae",
+  "map", "mapreduce", "mapstruct", "mariadb", "markdown", "material ui", "materialize", "matplotlib", "maven", "max marginal relevance",
+  "mbo", "mcmc", "md5", "mel spectrogram", "memcached", "mesh gateway", "metabase", "meteor", "metrics", "mfa",
+  "micronaut", "milvus", "mimir", "minio", "mitre att&ck", "mixture model", "mixture of experts", "mlflow", "mlops", "mmr",
+  "mocha", "mock", "model card", "model drift", "model registry", "model spec", "moe", "mongodb", "mongoose", "monte carlo",
+  "mountebank", "mse", "msle", "mutation testing", "mybatis", "mysql", "nat", "nativewind", "nats", "ndcg",
+  "ndjson", "neo4j", "nest", "netty", "neural search", "nextjs", "nghttp3", "nginx", "nlb", "nll",
+  "nlp", "node exporter", "npm", "numba", "numpy", "nuts", "nuxt", "oauth2", "oceanbase", "ocr",
+  "oidc", "olap", "oltp", "onnx", "onnxruntime", "opa", "openapi", "openid connect", "openmetadata", "opensearch",
+  "opentelemetry", "opentelemetry sdk", "openzipkin", "oracle", "orc", "orleans", "otel collector", "otlp", "outbox pattern", "p-tuning",
+  "p95", "p99", "packer", "pact", "pandas", "parquet", "parsing expression grammar", "paxos", "pca", "peewee",
+  "peft", "peg", "perplexity", "pgbouncer", "pgpool", "php", "pinia", "pipenv", "pitest", "pixi",
+  "playwright", "playwright trace viewer", "plotly", "pm2", "pnpm", "podman", "poetry", "polars", "post training quantization", "postgresql",
+  "pr curve", "precision", "precision@k", "prefix tuning", "presto", "priority queue", "prisma", "prometheus", "prompt", "prompt prefix",
+  "prompt tuning", "property-based testing", "prophet", "prosemirror", "protobuf", "pruning", "pub/sub", "pulsar", "pulumi", "pwa",
+  "pyarrow", "pydantic", "pydantic v2", "pymc", "pytest", "python", "pytorch", "q-former", "q-learning", "qdrant",
+  "qlora", "qps", "quantization aware training", "quarkus", "quic", "quill", "quorum", "qwik", "r socket", "rabbitmq",
+  "raft", "rag", "rate limit", "ray", "ray serve", "rce", "rds", "re-ranking", "react", "react native",
+  "read replica", "recall", "recall@k", "reciprocal rank fusion", "recursive splitter", "redis", "redpanda", "redshift", "redux", "rego",
+  "relu6", "remix", "rendezvous hashing", "replug", "rerank", "rest", "restful", "rivery", "rmse", "rmsnorm",
+  "rmsprop", "rnn", "rnnt", "robot framework", "roc", "rocketmq", "rocksdb", "rollup", "rollup plugin", "rook",
+  "rope", "rouge", "route53", "rowstore", "rpc", "rq", "rqlite", "rrf", "rsa", "ruby",
+  "ruff", "rust", "rxjs", "s3", "saga", "sagemaker", "sam", "saml", "sampling", "sast",
+  "saturation", "scikit-learn", "scipy", "seaborn", "sealed secrets", "seaweedfs", "secret manager", "segment-anything", "selenium", "semantic splitter",
+  "semver", "sentence-transformers", "sentencepiece", "service entry", "service mesh", "service worker", "sgd", "sgns", "sha256", "shadow dom",
+  "shadow testing", "shap", "sharding key", "sidecar", "sidecar proxy", "siem", "sigma rules", "silu", "sklearn", "sla",
+  "sli", "sliding window", "slo", "snappy", "snapshot testing", "snowflake", "snowflake id", "soa", "soap", "soar",
+  "solidjs", "sonyflake", "sops", "spark", "sparse retrieval", "sparsity", "speculative decoding", "spiffe", "spiffee", "spiiffeid",
+  "splade", "splade v2", "split io", "spring boot", "spring cloud", "spring cloud gateway", "sqli", "sqlite", "sqlmodel", "sqlserver",
+  "sqs", "squid", "sso", "ssrf", "stable diffusion", "stan", "starlette", "starrocks", "stencil", "step functions",
+  "stitch", "storybook", "strangler pattern", "streaming", "streamsets", "stryker", "sts", "stub", "student-t", "superset",
+  "svelte", "svm", "svn", "swagger", "swc", "swift", "swiftui", "swiglu", "swin transformer", "synapse",
+  "tailwind", "talend", "tauri", "tcc", "tcp", "tekton", "temperature", "tempo", "tempo traces", "tensorflow",
+  "terraform", "testng", "text splitting", "textrank", "thanos", "threejs", "thrift", "throughput", "tidb", "tiflash",
+  "tikv", "timescaledb", "tiptap", "tls", "token bucket", "tokenization", "topk", "topp", "tortoise orm", "tpm",
+  "traces", "traefik", "transformer", "transformers", "trino", "trio", "triplet loss", "trivy", "trulens", "ts-node",
+  "ttrpc", "tts", "tyk", "typeorm", "typescript", "udp", "ulid", "unigram lm", "unittest", "unleash",
+  "uv", "uvicorn", "vae", "varnish", "vault", "vector", "vertex ai", "vertx", "video captioning", "vision transformer",
+  "vision-language", "vit", "vite", "vite plugin", "vitepress", "vitess", "vitest", "vitest ui", "vlm", "vocoder",
+  "vpc", "vpn", "vue", "vuex", "waf", "wal", "wandb", "warmup", "wasm", "weaviate",
+  "web components", "webassembly", "webauthn", "webgl", "webgpu", "webpack", "webpack dev server", "websocket", "wer", "whisper",
+  "whylogs", "window retrieval", "wiredtiger", "wiremock", "word2vec", "workload identity", "xds", "xgboost", "xml", "xss",
+  "xxe", "yaml", "yara", "yarn", "yml", "z-order", "zab", "zero-shot", "zipkin lens", "zookeeper",
+  "zstd", "zustand", "zx", "a/b 测试", "api 网关", "beta 分布", "elasticsearch 向量", "em 算法", "embedding 模型", "gamma 分布",
+  "opensearch 向量", "red 方法", "t 检验", "use 方法", "一致性", "一致性哈希", "一致性校验", "上下文窗口", "主题模型", "事件驱动",
+  "事务", "交叉熵", "人工智能", "仪表盘", "优化器", "余弦相似度", "依存句法", "依赖漏洞", "倒排索引", "假设检验",
+  "元数据", "关键词抽取", "冒烟测试", "函数调用", "分区", "分块", "分布式追踪", "分片", "分词", "副本",
+  "加密", "半监督", "单体", "单例", "单元测试", "卡方检验", "卷积神经网络", "压力测试", "反向代理", "变分推断",
+  "变更数据捕获", "召回", "召回率", "可观测性", "可视化", "合规", "向量化", "向量搜索", "向量数据库", "向量检索",
+  "吞吐", "告警", "告警模板", "命中率", "命令注入", "命名实体识别", "哈希", "回归", "回归测试", "图像分类",
+  "在线特征", "处理", "复制", "复杂度", "多头注意力", "多模态", "多活", "大语言模型", "契约测试", "姿态估计",
+  "学习率", "实例分割", "实验跟踪", "容灾", "密钥管理", "对比学习", "对称加密", "对话管理", "少样本学习", "工具调用",
+  "工厂", "幂等", "幂等键", "延迟", "异常检测", "强化学习", "循环神经网络", "微服务", "微调", "性能测试",
+  "情感分析", "感知机", "扩散模型", "指数退避", "指标", "损失函数", "接口", "推理", "提示词工程", "数据",
+  "数据中台", "数据仓库", "数据增强", "数据工程", "数据库", "数据治理", "数据清洗", "数据湖", "数据管道", "数据结构",
+  "数据网格", "数据血缘", "数据集", "文本分类", "文档分块", "断言", "方差分析", "日志收集", "时间序列", "最大边界重叠",
+  "服务", "服务发现", "服务拓扑", "服务等级目标", "机器学习", "标注", "标记", "梯度裁剪", "检查", "检索器",
+  "检索增强生成", "模型", "模型监控", "欠拟合", "正则化", "正向代理", "注册中心", "测试", "测试覆盖率", "测试金字塔",
+  "深度学习", "清洗", "渗透测试", "湖仓一体", "漂移检测", "漏洞扫描", "灰度发布", "熔断", "特征工程", "生成器",
+  "用例", "目标检测", "相似度", "知识库", "知识蒸馏", "神经元", "神经网络", "离线特征", "窗口滑动", "端到端测试",
+  "策略梯度", "策略模式", "算法", "索引", "索引构建", "线性回归", "结构化输出", "统计学", "缓存", "网格搜索",
+  "自注意力", "自然语言处理", "自监督", "舱壁", "蒙特卡洛", "蒸馏", "蓝绿部署", "观察者", "规则", "视图",
+  "触发器", "训练", "设计模式", "证书", "评估", "词向量", "词性标注", "语义分割", "语义化版本", "语义搜索",
+  "语义角色标注", "语音合成", "语音识别", "读写分离", "贝叶斯优化", "负载均衡", "负载测试", "超参数", "迁移学习", "过拟合",
+  "追踪", "逻辑回归", "重叠", "重排", "重排模型", "重试", "锁", "降级", "限流", "随机搜索",
+  "随机森林", "隔离级别", "集成测试", "雪崩", "零信任", "零停机", "零样本学习", "非对称加密", "预训练", "马尔可夫链",
+  "验证", "高可用"
+]
+},
+  "extraction_settings": {
+  "description": "关键词提取设置",
+  "min_keyword_length": 2,
+  "max_keywords": 10,
+  "enable_tech_term_bonus": true,
+  "tech_term_bonus_score": 0.5
+}
+}
+}
