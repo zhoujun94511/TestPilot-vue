@@ -3,7 +3,7 @@
 import os
 from pydantic import SecretStr
 from dotenv import load_dotenv
-from config.settings import settings
+from config.settings import resolve_deepseek_model, resolve_gemini_model, resolve_openai_model, settings
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from langchain_deepseek import ChatDeepSeek
@@ -81,7 +81,7 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
             raise ValueError(f"OpenAI API Key 配置失败: {validation_result}")
         
         logger.info(f"OpenAI API Key 来源: {source}")
-        model_name = getattr(settings, 'OPENAI_MODEL', 'gpt-5')
+        model_name = resolve_openai_model(getattr(settings, 'OPENAI_MODEL', None))
         # 统一超时配置（所有模型）
         if use_case == 'case_generation':
             timeout = getattr(settings, 'LLM_TIMEOUT_CASE_GENERATION', 300)
@@ -145,10 +145,11 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
         else:
             timeout = getattr(settings, 'LLM_TIMEOUT_DEFAULT', 120)
         
+        model_name = resolve_deepseek_model(getattr(settings, 'DEEPSEEK_MODEL', None))
         llm = ChatDeepSeek(
             api_key=SecretStr(api_key),
             base_url=getattr(settings, 'DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1'),
-            model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+            model=model_name,
             temperature=1,
             max_tokens=max_tokens,
             timeout=timeout
@@ -174,7 +175,7 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
         # max_tokens 会在 chat_service 中通过 generation_config.max_output_tokens 传递
         llm = ChatGoogleGenerativeAI(
             api_key=SecretStr(api_key),
-            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            model=resolve_gemini_model(getattr(settings, 'GEMINI_MODEL', None)),
             temperature=0.7,
             timeout=timeout
         )
@@ -188,7 +189,7 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
         logger.info(f"Qwen API Key 来源: {source}")
         # Qwen 使用 OpenAI-compatible API，通过 ChatOpenAI 接入
         base_url = getattr(settings, 'QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
-        model = os.getenv("QWEN_MODEL", "qwen-flash")
+        model = getattr(settings, 'QWEN_MODEL', None) or os.getenv("QWEN_MODEL", "qwen-flash")
         temperature = getattr(settings, 'QWEN_TEMPERATURE', 0.7)
         # 根据用例类型设置不同的超时时间：用例生成和需求分析需要更长时间
         if use_case == 'case_generation':
@@ -215,15 +216,15 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
     if use_cache:
         # 根据不同的company获取对应的模型名称
         if company == "OPENAI":
-            model_name = os.getenv('OPENAI_MODEL', 'gpt-5')
+            model_name = resolve_openai_model(getattr(settings, 'OPENAI_MODEL', None))
         elif company == "OLLAMA":
-            model_name = os.getenv('OLLAMA_MODEL', 'gemma:2b')
+            model_name = getattr(settings, 'OLLAMA_MODEL', None) or os.getenv('OLLAMA_MODEL', 'gemma:2b')
         elif company == "DEEPSEEK":
-            model_name = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+            model_name = resolve_deepseek_model(getattr(settings, 'DEEPSEEK_MODEL', None))
         elif company == "GEMINI":
-            model_name = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+            model_name = resolve_gemini_model(getattr(settings, 'GEMINI_MODEL', None))
         elif company == "QWEN":
-            model_name = os.getenv('QWEN_MODEL', 'qwen-flash')
+            model_name = getattr(settings, 'QWEN_MODEL', None) or os.getenv('QWEN_MODEL', 'qwen-flash')
         else:
             model_name = settings.MODEL
 

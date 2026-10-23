@@ -6,7 +6,7 @@
 """
 import requests
 from typing import Dict, Any, Tuple
-from config.settings import settings
+from config.settings import resolve_deepseek_model, resolve_gemini_model, resolve_openai_model, settings
 from utils.utils_core.api_error_handler import handle_api_error, get_service_name, get_api_key_with_fallback
 from utils.utils_core.logger import get_logger
 
@@ -58,7 +58,7 @@ class RemoteModelChecker:
                 return False, validation_result, {"error_type": "config", "details": validation_result}
             
             base_url = getattr(settings, 'OPENAI_BASE_URL', 'https://api.openai.com/v1')
-            model = getattr(settings, 'OPENAI_MODEL', 'gpt-5')
+            model = resolve_openai_model(getattr(settings, 'OPENAI_MODEL', None))
             
             # 构建请求头
             headers = {
@@ -67,7 +67,7 @@ class RemoteModelChecker:
             }
             
             # 构建测试请求
-            test_payload = {
+            test_payload: Dict[str, Any] = {
                 "model": model,
                 "messages": [{"role": "user", "content": "Hello"}]
             }
@@ -124,7 +124,7 @@ class RemoteModelChecker:
                 return False, validation_result, {"error_type": "config", "details": validation_result}
             
             base_url = getattr(settings, 'DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1')
-            model = getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat')
+            model = resolve_deepseek_model(getattr(settings, 'DEEPSEEK_MODEL', None))
             
             # 构建请求头
             headers = {
@@ -230,7 +230,7 @@ class RemoteModelChecker:
                 return False, validation_result, {"error_type": "config", "details": validation_result}
             
             base_url = getattr(settings, 'GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
-            model = getattr(settings, 'GEMINI_MODEL', 'gemini-2.0-flash')
+            model = resolve_gemini_model(getattr(settings, 'GEMINI_MODEL', None))
             
             # 构建请求头
             headers = {

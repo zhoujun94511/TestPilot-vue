@@ -74,17 +74,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
 from utils.utils_core.json_utils import safe_json_loads
 
-try:
-    from langchain.memory import ConversationBufferWindowMemory  # type: ignore
-except ImportError:
-    try:
-        from langchain_core.memory import ConversationBufferWindowMemory  # type: ignore
-    except ImportError:
-        from langchain.memory.buffer_window import ConversationBufferWindowMemory  # type: ignore
-
+from langchain_core.chat_history import InMemoryChatMessageHistory
 from utils.utils_ai_models.embeddings import create_vector_db
 from utils.utils_business_logic.complexity_scorer import ComplexityScorer
-from langchain_community.chat_message_histories import ChatMessageHistory  # type: ignore
 
 try:
     from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser  # type: ignore
@@ -142,6 +134,31 @@ def knowledge_retrieval(retriever, query):
         return "知识库检索失败"
 
 
+class _WindowChatMemory:
+    """保留最近 10 轮对话。"""
+
+    def __init__(self) -> None:
+        self.k = 10
+        self.return_messages = True
+        self.memory_key = "history"
+        self.chat_memory = InMemoryChatMessageHistory()
+
+    def clear(self) -> None:
+        self.chat_memory.clear()
+
+    @property
+    def memory_variables(self) -> list[str]:
+        return [self.memory_key]
+
+    def load_memory_variables(self, _inputs: Dict[str, Any]) -> Dict[str, Any]:
+        messages = self.chat_memory.messages[-self.k * 2:] if self.k > 0 else []
+        return {self.memory_key: messages}
+
+    def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> None:
+        self.chat_memory.add_user_message(str(inputs.get("input", "")))
+        self.chat_memory.add_ai_message(str(outputs.get("output", "")))
+
+
 class TestAgent:
     # 添加类变量
     TIMEOUT_SECONDS = 120  # 超时时间（秒）
@@ -160,14 +177,8 @@ class TestAgent:
         return get_llm(company)
 
     @staticmethod
-    def _init_memory():
-        # 使用新的内存管理方式，避免弃用警告
-        return ConversationBufferWindowMemory(
-            k=10,  # 保留最近10轮对话
-            chat_memory=ChatMessageHistory(),
-            return_messages=True,
-            memory_key="history"
-        )
+    def _init_memory() -> _WindowChatMemory:
+        return _WindowChatMemory()
 
     @staticmethod
     def _init_retriever():

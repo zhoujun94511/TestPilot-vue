@@ -7,7 +7,7 @@
 # 初始化配置中心（保留原有配置）
 python scripts/init_config_center.py
 
-# 重置模式（⚠️ 会清空旧数据）
+# 重置模式（会清空配置中心旧数据但保留表结构）
 python scripts/init_config_center.py --force
 """
 import sys
@@ -86,7 +86,7 @@ def init_default_configs():
                  'category': 'ai_model', 'description': 'DeepSeek API密钥', 'is_sensitive': True},
                 {'key': 'DEEPSEEK_BASE_URL', 'value': 'https://api.deepseek.com/v1', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'DeepSeek服务地址', 'is_sensitive': False},
-                {'key': 'DEEPSEEK_MODEL', 'value': 'deepseek-chat', 'value_type': 'string',
+                {'key': 'DEEPSEEK_MODEL', 'value': 'deepseek-flash', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'DeepSeek模型名称', 'is_sensitive': False},
                 {'key': 'TR_DEEPSEEK_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
                  'category': 'ai_model', 'description': 'DeepSeek用例生成最大Token数', 'is_sensitive': False},
@@ -98,7 +98,7 @@ def init_default_configs():
                  'category': 'ai_model', 'description': 'Gemini API密钥', 'is_sensitive': True},
                 {'key': 'GEMINI_BASE_URL', 'value': 'https://generativelanguage.googleapis.com/v1beta', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'Gemini服务地址', 'is_sensitive': False},
-                {'key': 'GEMINI_MODEL', 'value': 'gemini-2.0-flash', 'value_type': 'string',
+                {'key': 'GEMINI_MODEL', 'value': 'gemini-3.8-flash', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'Gemini模型名称', 'is_sensitive': False},
                 {'key': 'TR_GEMINI_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
                  'category': 'ai_model', 'description': 'Gemini用例生成最大Token数', 'is_sensitive': False},
@@ -157,12 +157,28 @@ def init_default_configs():
             ]
 
             # 插入默认配置
+            retired_models = {
+                'DEEPSEEK_MODEL': ({'deepseek-chat', 'deepseek-reasoner', 'deepseek-coder'}, 'deepseek-flash'),
+                'GEMINI_MODEL': ({
+                    'gemini-2.0-flash', 'gemini-2.0-flash-001', 'gemini-1.5-pro',
+                    'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-pro',
+                }, 'gemini-3.8-flash'),
+                'OPENAI_MODEL': ({
+                    'gpt-4-turbo', 'gpt-4-turbo-2024-04-09', 'gpt-3.5-turbo',
+                    'gpt-3.5-turbo-0125', 'gpt-4', 'gpt-4-0613',
+                }, 'gpt-5'),
+            }
             for config_data in default_configs:
                 existing_config = ConfigItem.query.filter_by(key=config_data['key']).first()
                 if not existing_config:
                     config_item = ConfigItem(**config_data)
                     db.session.add(config_item)
                     logger.info(f"添加默认配置: {config_data['key']}")
+                    continue
+                retired = retired_models.get(config_data['key'])
+                if retired and str(existing_config.value or '').strip() in retired[0]:
+                    existing_config.value = retired[1]
+                    logger.info(f"{config_data['key']} 已从停用名称更新为 {retired[1]}")
 
             db.session.commit()
             logger.info("默认配置初始化成功")

@@ -96,6 +96,7 @@ export interface CaseGenerateResult {
   enhanced_context_length?: number;
   performance_stats?: Record<string, unknown>;
   hallucination_detection?: Record<string, unknown>;
+  failed_count?: number;
   raw?: Record<string, unknown>;
 }
 
@@ -112,6 +113,7 @@ export interface CaseExportPayload {
   category?: string;
   priority?: string;
   status?: string;
+  search?: string;
   case_ids?: Array<string | number>;
 }
 
@@ -473,6 +475,7 @@ export async function generateCasesFromAnalysis(payload: CaseGenerateFromAnalysi
       cases,
       total: Number(pickCompatField(normalized, ['total'], cases.length)),
       message: String(pickCompatField(normalized, ['message'], '')),
+      failed_count: Number(pickCompatField(normalized, ['failed_count'], 0)),
       raw: normalized
     };
   } catch (error) {

@@ -9,6 +9,65 @@ from dotenv import load_dotenv
 # 加载环境变量
 load_dotenv()
 
+# deepseek-chat / deepseek-reasoner 已于 2026-07-24 下线。
+# 当前可用名是 deepseek-flash（V4.1-Flash）。仍走 /chat/completions，不开启思考模式，
+# 以免推理内容占满 max_tokens 后正文为空。
+RETIRED_DEEPSEEK_MODELS = {
+    'deepseek-chat': 'deepseek-flash',
+    'deepseek-reasoner': 'deepseek-flash',
+    'deepseek-coder': 'deepseek-flash',
+}
+
+
+def resolve_deepseek_model(model: str | None) -> str:
+    """把已下线的 DeepSeek 模型名换成当前可用模型。"""
+    name = str(model or '').strip()
+    if not name:
+        return 'deepseek-flash'
+    return RETIRED_DEEPSEEK_MODELS.get(name, name)
+
+
+# gemini-2.0-flash 已于 2026-06-01 停服，gemini-1.5 系列更早停服。
+# 官网当前要求把模型名更新为 gemini-3.8-flash。接口仍是 generativelanguage v1beta。
+RETIRED_GEMINI_MODELS = {
+    'gemini-2.0-flash': 'gemini-3.8-flash',
+    'gemini-2.0-flash-001': 'gemini-3.8-flash',
+    'gemini-2.0-flash-lite': 'gemini-3.8-flash',
+    'gemini-2.0-flash-lite-001': 'gemini-3.8-flash',
+    'gemini-1.5-pro': 'gemini-3.8-flash',
+    'gemini-1.5-flash': 'gemini-3.8-flash',
+    'gemini-1.5-flash-8b': 'gemini-3.8-flash',
+    'gemini-pro': 'gemini-3.8-flash',
+}
+
+# gpt-4-turbo 与 gpt-3.5-turbo-0125 于 2026-10-23 从 API 移除。
+# 项目里已接通的替代是 gpt-5。gpt-4o 仍可用到 2027-01-14，不在此映射里。
+RETIRED_OPENAI_MODELS = {
+    'gpt-4-turbo': 'gpt-5',
+    'gpt-4-turbo-2024-04-09': 'gpt-5',
+    'gpt-4-turbo-preview': 'gpt-5',
+    'gpt-3.5-turbo': 'gpt-5',
+    'gpt-3.5-turbo-0125': 'gpt-5',
+    'gpt-4': 'gpt-5',
+    'gpt-4-0613': 'gpt-5',
+}
+
+
+def resolve_gemini_model(model: str | None) -> str:
+    """把已停服的 Gemini 模型名换成当前可用模型。"""
+    name = str(model or '').strip()
+    if not name:
+        return 'gemini-3.8-flash'
+    return RETIRED_GEMINI_MODELS.get(name, name)
+
+
+def resolve_openai_model(model: str | None) -> str:
+    """把已从 API 移除的 OpenAI 模型名换成项目已接通的 gpt-5。"""
+    name = str(model or '').strip()
+    if not name:
+        return 'gpt-5'
+    return RETIRED_OPENAI_MODELS.get(name, name)
+
 # 项目根目录
 BASE_DIR = Path(__file__).parent.parent
 ROOT_DIR = BASE_DIR.parent
@@ -71,15 +130,15 @@ class Config:
     def _get_model(self):
         company = self.DEFAULT_COMPANY.upper() if self.DEFAULT_COMPANY else 'OPENAI'
         if company == 'OPENAI':
-            return os.getenv('OPENAI_MODEL', 'gpt-5')
+            return resolve_openai_model(getattr(self, 'OPENAI_MODEL', None))
         elif company == 'DEEPSEEK':
-            return os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+            return resolve_deepseek_model(getattr(self, 'DEEPSEEK_MODEL', None))
         elif company == 'OLLAMA':
-            return os.getenv('OLLAMA_MODEL', 'phi:2.7b')
+            return getattr(self, 'OLLAMA_MODEL', None) or os.getenv('OLLAMA_MODEL', 'phi:2.7b')
         elif company == 'GEMINI':
-            return os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+            return resolve_gemini_model(getattr(self, 'GEMINI_MODEL', None))
         elif company == 'QWEN':
-            return os.getenv('QWEN_MODEL', 'qwen-flash')
+            return getattr(self, 'QWEN_MODEL', None) or os.getenv('QWEN_MODEL', 'qwen-flash')
         else:
             return 'gpt-5'  # 默认fallback
 
@@ -95,13 +154,13 @@ class Config:
         """根据当前公司获取可用模型列表"""
         company = self.DEFAULT_COMPANY.upper() if self.DEFAULT_COMPANY else 'OPENAI'
         if company == 'OPENAI':
-            return ['gpt-3.5-turbo', 'gpt-5']
+            return ['gpt-5', 'gpt-4o']
         elif company == 'DEEPSEEK':
-            return ['deepseek-chat', 'deepseek-reasoner']
+            return ['deepseek-flash']
         elif company == 'OLLAMA':
             return ['phi:2.7b', 'llama2:7b', 'gemma:2b']
         elif company == 'GEMINI':
-            return ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
+            return ['gemini-3.8-flash']
         elif company == 'QWEN':
             return ['qwen-flash', 'qwen-plus', 'qwen-max']
         else:
@@ -184,6 +243,20 @@ class Config:
                 'QWEN_TIMEOUT': 'QWEN_TIMEOUT',
                 'MAX_TOKENS': 'MAX_TOKENS',
                 'ENABLE_EXPERIMENTAL_ACTIONS': 'ENABLE_EXPERIMENTAL_ACTIONS',
+                'GPT5_VERBOSITY': 'GPT5_VERBOSITY',
+                'GPT5_REASONING_EFFORT': 'GPT5_REASONING_EFFORT',
+                'MAX_CASE_NUM': 'MAX_CASE_NUM',
+                'CHUNK_SIZE': 'CHUNK_SIZE',
+                'MAX_WORKERS': 'MAX_WORKERS',
+                'MAX_MEMORY_MB': 'MAX_MEMORY_MB',
+                'RAG_TOP_K': 'RAG_TOP_K',
+                'RAG_SCORE_THRESHOLD': 'RAG_SCORE_THRESHOLD',
+                'ENABLE_STREAMING': 'ENABLE_STREAMING',
+                'ENABLE_HALLUCINATION_DETECTION': 'ENABLE_HALLUCINATION_DETECTION',
+                'ENABLE_VECTOR_STORE': 'ENABLE_VECTOR_STORE',
+                'ENABLE_PARALLEL': 'ENABLE_PARALLEL_PROCESSING',
+                'CONTENT_SIMILARITY_THRESHOLD': 'CONTENT_SIMILARITY_THRESHOLD',
+                'ENABLE_CONTENT_DEDUP': 'ENABLE_CONTENT_DEDUP',
             }
             
             # 从配置中心读取并更新配置
@@ -191,18 +264,36 @@ class Config:
                 value = config_center_service.get_config_value(config_key)
                 if value is not None and value != '':
                     # 对于数值类型的配置，进行类型转换
-                    if attr_name in ['MAX_TOKENS', 'TR_OPENAI_MAX_TOKENS', 'TR_DEEPSEEK_MAX_TOKENS', 'TR_GEMINI_MAX_TOKENS', 'TR_QWEN_MAX_TOKENS', 'QWEN_TIMEOUT']:
+                    if attr_name in ['MAX_TOKENS', 'TR_OPENAI_MAX_TOKENS', 'TR_DEEPSEEK_MAX_TOKENS', 'TR_GEMINI_MAX_TOKENS', 'TR_QWEN_MAX_TOKENS', 'QWEN_TIMEOUT', 'MAX_CASE_NUM', 'CHUNK_SIZE', 'MAX_WORKERS', 'MAX_MEMORY_MB', 'RAG_TOP_K']:
                         try:
                             value = int(value)
                         except (ValueError, TypeError):
                             continue
-                    elif attr_name in ['QWEN_TEMPERATURE']:
+                    elif attr_name in ['QWEN_TEMPERATURE', 'RAG_SCORE_THRESHOLD', 'CONTENT_SIMILARITY_THRESHOLD']:
                         try:
                             value = float(value)
                         except (ValueError, TypeError):
                             continue
-                    elif attr_name in ['ENABLE_EXPERIMENTAL_ACTIONS']:
-                        value = str(value).strip().lower() in ('true', '1', 'yes')
+                    elif attr_name in ['ENABLE_EXPERIMENTAL_ACTIONS', 'ENABLE_STREAMING', 'ENABLE_HALLUCINATION_DETECTION', 'ENABLE_VECTOR_STORE', 'ENABLE_PARALLEL', 'ENABLE_CONTENT_DEDUP']:
+                        value = str(value).strip().lower() in ('true', '1', 'yes', 'on', 'enabled')
+                    elif attr_name == 'DEEPSEEK_MODEL':
+                        resolved = resolve_deepseek_model(str(value))
+                        if resolved != str(value).strip():
+                            print(f"[INFO] DeepSeek 模型 {value} 已下线，改用 {resolved}")
+                            self._persist_model_name(config_center_service, 'DEEPSEEK_MODEL', resolved, 'DeepSeek模型名称')
+                        value = resolved
+                    elif attr_name == 'GEMINI_MODEL':
+                        resolved = resolve_gemini_model(str(value))
+                        if resolved != str(value).strip():
+                            print(f"[INFO] Gemini 模型 {value} 已停服，改用 {resolved}")
+                            self._persist_model_name(config_center_service, 'GEMINI_MODEL', resolved, 'Gemini模型名称')
+                        value = resolved
+                    elif attr_name == 'OPENAI_MODEL':
+                        resolved = resolve_openai_model(str(value))
+                        if resolved != str(value).strip():
+                            print(f"[INFO] OpenAI 模型 {value} 已从 API 移除，改用 {resolved}")
+                            self._persist_model_name(config_center_service, 'OPENAI_MODEL', resolved, 'OpenAI模型名称')
+                        value = resolved
                     setattr(self, attr_name, value)
             
             # 重新设置MODEL
@@ -212,17 +303,37 @@ class Config:
         except Exception as e:
             print(f"[WARN] 从配置中心加载配置失败，将使用 .env 配置: {e}")
 
+    @staticmethod
+    def _persist_model_name(config_center_service, key: str, model_name: str, fallback_description: str):
+        """把配置中心里已停用的模型名写成当前可用模型。"""
+        try:
+            from models.config_models import ConfigItem
+            item = config_center_service.session.query(ConfigItem).filter_by(key=key).first()
+            if item is None:
+                return
+            config_center_service.set_config_value(
+                key,
+                model_name,
+                item.value_type or 'string',
+                item.category or 'ai_model',
+                item.description or fallback_description,
+                bool(item.is_sensitive),
+                operator='system',
+            )
+        except Exception as exc:
+            print(f"[WARN] 写回 {key} 失败，本次仍使用 {model_name}: {exc}")
+
     # OpenAI配置
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-    OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5')
+    OPENAI_MODEL = resolve_openai_model(os.getenv('OPENAI_MODEL', 'gpt-5'))
     GPT5_VERBOSITY = os.getenv('GPT5_VERBOSITY', 'low')
     GPT5_REASONING_EFFORT = os.getenv('GPT5_REASONING_EFFORT', 'minimal')
 
     # DeepSeek配置
     DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
     DEEPSEEK_BASE_URL = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1')
-    DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+    DEEPSEEK_MODEL = resolve_deepseek_model(os.getenv('DEEPSEEK_MODEL', 'deepseek-flash'))
 
     # Ollama配置
     OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')
@@ -231,7 +342,7 @@ class Config:
     # Gemini配置
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
     GEMINI_BASE_URL = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
-    GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+    GEMINI_MODEL = resolve_gemini_model(os.getenv('GEMINI_MODEL', 'gemini-3.8-flash'))
     TR_GEMINI_MAX_TOKENS = int(os.getenv('TR_GEMINI_MAX_TOKENS', '8000'))
 
     # Qwen配置

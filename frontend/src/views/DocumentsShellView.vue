@@ -8,6 +8,9 @@
       <RouterLink class="tp-doc-tab" to="/documents/manage" active-class="is-active">
         {{ t('documents.tabs.manage') }}
       </RouterLink>
+      <RouterLink class="tp-doc-tab" to="/documents/history" active-class="is-active">
+        {{ t('documents.tabs.history') }}
+      </RouterLink>
     </div>
     <router-view />
   </section>

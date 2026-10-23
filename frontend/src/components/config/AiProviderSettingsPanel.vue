@@ -103,8 +103,8 @@ function buildDefaults(): ProviderItem[] {
       nameKey: 'configCenter.provider.OPENAI',
       apiKey: '',
       models: [
-        { id: 'gpt-4o', name: 'GPT-4o', descriptionKey: 'configCenter.providerUi.modelDescriptions.gpt4o', selected: true },
-        { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', descriptionKey: 'configCenter.providerUi.modelDescriptions.gpt4Turbo', selected: false }
+        { id: 'gpt-5', name: 'GPT-5', descriptionKey: 'configCenter.providerUi.modelDescriptions.gpt5', selected: true },
+        { id: 'gpt-4o', name: 'GPT-4o', descriptionKey: 'configCenter.providerUi.modelDescriptions.gpt4o', selected: false }
       ]
     },
     {
@@ -112,8 +112,7 @@ function buildDefaults(): ProviderItem[] {
       nameKey: 'configCenter.provider.GEMINI',
       apiKey: '',
       models: [
-        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', descriptionKey: 'configCenter.providerUi.modelDescriptions.gemini15Pro', selected: true },
-        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', descriptionKey: 'configCenter.providerUi.modelDescriptions.gemini15Flash', selected: true }
+        { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', descriptionKey: 'configCenter.providerUi.modelDescriptions.gemini38Flash', selected: true }
       ]
     },
     {
@@ -121,8 +120,7 @@ function buildDefaults(): ProviderItem[] {
       nameKey: 'configCenter.provider.DEEPSEEK',
       apiKey: '',
       models: [
-        { id: 'deepseek-chat', name: 'DeepSeek Chat', descriptionKey: 'configCenter.providerUi.modelDescriptions.deepseekChat', selected: true },
-        { id: 'deepseek-coder', name: 'DeepSeek Coder', descriptionKey: 'configCenter.providerUi.modelDescriptions.deepseekCoder', selected: false }
+        { id: 'deepseek-flash', name: 'DeepSeek Flash', descriptionKey: 'configCenter.providerUi.modelDescriptions.deepseekFlash', selected: true }
       ]
     },
     {

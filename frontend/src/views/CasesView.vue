@@ -1222,6 +1222,7 @@ function buildExportPayload() {
     if (filters.category) payload.category = filters.category;
     if (filters.priority) payload.priority = filters.priority;
     if (filters.status) payload.status = filters.status;
+    if (filters.search) payload.search = filters.search;
     return payload;
   }
 
@@ -1233,6 +1234,7 @@ function buildExportPayload() {
   if (filters.category) payload.category = filters.category;
   if (filters.priority) payload.priority = filters.priority;
   if (filters.status) payload.status = filters.status;
+  if (filters.search) payload.search = filters.search;
   return payload;
 }
 

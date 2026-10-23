@@ -12,6 +12,7 @@ export default {
     sending: '发送中',
     jumpToLatest: '有 {count} 条新消息，回到底部',
     deleteSession: '删除',
+    renameSession: '重命名',
     clearSession: '清空会话',
     insertTemplate: '插入模板',
     confirmAction: '确认动作',
@@ -80,6 +81,9 @@ export default {
     deleteSessionConfirm: '确认删除会话「{title}」吗？该操作不可恢复。',
     deleteSessionSuccess: '会话已删除',
     deleteSessionFailed: '删除会话失败',
+    renameSessionSuccess: '会话已重命名',
+    renameSessionFailed: '重命名会话失败',
+    renameSessionEmpty: '会话名称不能为空',
     experimentalToggleSuccess: '实验动作开关已更新',
     experimentalToggleFailed: '更新实验动作开关失败'
   },

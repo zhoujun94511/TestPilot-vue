@@ -298,43 +298,22 @@ class DocumentService:
                             'category': req.get('category', 'general')
                         })
 
-                # 保存需求到数据库
-                saved_requirements = []
-                db = None
-                try:
-                    from models.models import Requirement, db
-                    from pathlib import Path
-                    
-                    # 如果是文件路径，只保存文件名
-                    source_filename = None
-                    if file_path:
-                        source_filename = Path(file_path).name
-                    
-                    for req in requirements:
-                        # 检查是否已存在相同的req_id
-                        existing = Requirement.query.filter_by(req_id=req['req_id']).first()
-                        if existing:
-                            logger.warning(f"需求ID {req['req_id']} 已存在，跳过保存")
-                            continue
-                            
-                        requirement = Requirement(
-                            req_id=req['req_id'],
-                            title=req['title'],
-                            content=req['content'],
-                            type=req['type'],
-                            priority=req['priority'],
-                            status='active',
-                            source_file=source_filename
-                        )
-                        db.session.add(requirement)
-                        saved_requirements.append(req)
-                    
-                    db.session.commit()
-                    logger.info(f"成功保存{len(saved_requirements)}个需求到数据库")
-                except Exception as e:
-                    logger.error(f"保存需求到数据库失败: {str(e)}")
-                    if db is not None:
-                        db.session.rollback()
+                saved_requirements, save_error = self._persist_requirement_rows(
+                    requirements,
+                    file_path,
+                    replace_types=('functional', 'non-functional', 'business', 'technical', 'general')
+                )
+                if save_error:
+                    return {
+                        'success': False,
+                        'message': '需求分析完成，但写入数据库失败',
+                        'error': 'requirement_save_failed',
+                        'error_code': 'requirement_save_failed',
+                        'status_code': 500,
+                        'retryable': True,
+                        'requirements': requirements,
+                        'saved_requirements': []
+                    }
 
                 return {
                     'success': True,
@@ -349,22 +328,60 @@ class DocumentService:
             elif analysis_type == 'test_points':
                 # 测试点分析
                 test_points = self._extract_test_points(content, llm)
+                point_rows = self._rows_from_extracted_items(test_points, 'test_point')
+                saved_requirements, save_error = self._persist_requirement_rows(
+                    point_rows,
+                    file_path,
+                    replace_types=('test_point',)
+                )
+                if save_error:
+                    return {
+                        'success': False,
+                        'message': '测试点提取完成，但写入数据库失败',
+                        'error': 'requirement_save_failed',
+                        'error_code': 'requirement_save_failed',
+                        'status_code': 500,
+                        'retryable': True,
+                        'test_points': test_points,
+                        'saved_requirements': []
+                    }
                 return {
                     'success': True,
                     'message': f'成功提取{len(test_points)}个测试点',
                     'analysis_type': analysis_type,
                     'test_points': test_points,
+                    'requirements': point_rows,
+                    'saved_requirements': saved_requirements,
                     'tokens_used': estimated_tokens
                 }
 
             elif analysis_type == 'business_rules':
                 # 业务规则分析
                 business_rules = self._extract_business_rules(content, llm)
+                rule_rows = self._rows_from_extracted_items(business_rules, 'business_rule')
+                saved_requirements, save_error = self._persist_requirement_rows(
+                    rule_rows,
+                    file_path,
+                    replace_types=('business_rule',)
+                )
+                if save_error:
+                    return {
+                        'success': False,
+                        'message': '业务规则提取完成，但写入数据库失败',
+                        'error': 'requirement_save_failed',
+                        'error_code': 'requirement_save_failed',
+                        'status_code': 500,
+                        'retryable': True,
+                        'business_rules': business_rules,
+                        'saved_requirements': []
+                    }
                 return {
                     'success': True,
                     'message': f'成功提取{len(business_rules)}个业务规则',
                     'analysis_type': analysis_type,
                     'business_rules': business_rules,
+                    'requirements': rule_rows,
+                    'saved_requirements': saved_requirements,
                     'tokens_used': estimated_tokens
                 }
 
@@ -411,16 +428,38 @@ class DocumentService:
                 except Exception as e:
                     logger.error(f"综合分析 - 业务规则提取失败: {e}", exc_info=True)
                 
-                # 合并所有结果
-                total_items = len(requirements_result or []) + len(test_points) + len(business_rules)
-                
+                # 合并所有结果并覆盖该文档上一次的分析记录
+                requirement_rows = requirements_result or []
+                point_rows = self._rows_from_extracted_items(test_points, 'test_point')
+                rule_rows = self._rows_from_extracted_items(business_rules, 'business_rule')
+                total_items = len(requirement_rows) + len(point_rows) + len(rule_rows)
+                saved_requirements, save_error = self._persist_requirement_rows(
+                    requirement_rows + point_rows + rule_rows,
+                    file_path,
+                    replace_all=True
+                )
+                if save_error:
+                    return {
+                        'success': False,
+                        'message': '综合分析完成，但写入数据库失败',
+                        'error': 'requirement_save_failed',
+                        'error_code': 'requirement_save_failed',
+                        'status_code': 500,
+                        'retryable': True,
+                        'requirements': requirement_rows,
+                        'test_points': test_points,
+                        'business_rules': business_rules,
+                        'saved_requirements': []
+                    }
+
                 return {
                     'success': True,
-                    'message': f'综合分析完成：需求 {len(requirements_result or [])} 个，测试点 {len(test_points)} 个，业务规则 {len(business_rules)} 个',
+                    'message': f'综合分析完成：需求 {len(requirement_rows)} 个，测试点 {len(test_points)} 个，业务规则 {len(business_rules)} 个',
                     'analysis_type': analysis_type,
-                    'requirements': requirements_result or [],
+                    'requirements': requirement_rows,
                     'test_points': test_points,
                     'business_rules': business_rules,
+                    'saved_requirements': saved_requirements,
                     'summary': {
                         'requirements_count': len(requirements_result or []),
                         'test_points_count': len(test_points),
@@ -447,6 +486,78 @@ class DocumentService:
                 fallback_message='分析处理失败',
                 include_raw_error=True
             )
+
+    def _rows_from_extracted_items(self, items: List[Dict[str, Any]], row_type: str) -> List[Dict[str, Any]]:
+        """把测试点或业务规则转成可落库的需求行。"""
+        import time
+        base_timestamp = int(time.time() * 1000)
+        rows = []
+        for index, item in enumerate(items or []):
+            if not isinstance(item, dict):
+                continue
+            title = item.get('name') or item.get('title') or f'{row_type}_{index + 1}'
+            description = str(item.get('description') or item.get('content') or '').strip()
+            condition = str(item.get('condition') or '').strip()
+            content = description
+            if condition:
+                content = f'{description}\n条件: {condition}'.strip()
+            if not content:
+                content = title
+            raw_id = str(item.get('id') or item.get('req_id') or f'{row_type}_{index + 1}')
+            rows.append({
+                'req_id': f'{raw_id}_{base_timestamp + index:03d}',
+                'title': title,
+                'content': content,
+                'type': row_type,
+                'priority': self._normalize_priority(item.get('priority', 'medium')),
+                'category': item.get('type') or row_type
+            })
+        return rows
+
+    @staticmethod
+    def _persist_requirement_rows(rows: List[Dict[str, Any]], file_path: str = None, replace_types=None, replace_all: bool = False):
+        """按来源文件覆盖旧记录后再写入。空结果不删除已有数据。"""
+        from models.models import Requirement, db
+        from pathlib import Path
+
+        if not rows:
+            return [], None
+
+        source_filename = Path(file_path).name if file_path else None
+        try:
+            if source_filename:
+                query = Requirement.query.filter(Requirement.source_file == source_filename)
+                if replace_all:
+                    query.delete(synchronize_session=False)
+                elif replace_types:
+                    query.filter(Requirement.type.in_(list(replace_types))).delete(synchronize_session=False)
+
+            saved = []
+            for row in rows:
+                if not isinstance(row, dict) or not row.get('req_id'):
+                    continue
+                existing = Requirement.query.filter_by(req_id=row['req_id']).first()
+                if existing:
+                    logger.warning(f"需求ID {row['req_id']} 已存在，跳过保存")
+                    continue
+                db.session.add(Requirement(
+                    req_id=row['req_id'],
+                    title=row.get('title') or row['req_id'],
+                    content=row.get('content') or '',
+                    type=row.get('type'),
+                    priority=row.get('priority') or 'medium',
+                    status='active',
+                    source_file=source_filename
+                ))
+                saved.append(row)
+
+            db.session.commit()
+            logger.info(f"成功保存{len(saved)}个需求到数据库")
+            return saved, None
+        except Exception as exc:
+            logger.error(f"保存需求到数据库失败: {exc}")
+            db.session.rollback()
+            return [], str(exc)
 
     @staticmethod
     def _extract_test_points(content: str, llm) -> List[Dict[str, Any]]:

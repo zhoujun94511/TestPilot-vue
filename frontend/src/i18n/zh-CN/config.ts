@@ -70,6 +70,7 @@ export default {
     validationFailed: '校验未通过',
     validationRequestFailed: '校验请求失败',
     noChangesToSave: '当前没有需要保存的修改',
+    unsavedChangesTitle: '未保存的修改',
     unsavedChangesConfirm: '当前分类存在未保存的修改，切换分类后这些修改将丢失，是否继续？',
     apiKeyCleared: '{provider} API Key 已清空',
     apiKeyClearFailed: '清空 API Key 失败'

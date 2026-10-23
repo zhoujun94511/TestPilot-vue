@@ -16,6 +16,7 @@ const DocumentsHistoryView = () => import('@/views/DocumentsHistoryView.vue');
 const KnowledgeShellView = () => import('@/views/KnowledgeShellView.vue');
 const KnowledgeUploadView = () => import('@/views/KnowledgeUploadView.vue');
 const KnowledgeView = () => import('@/views/KnowledgeView.vue');
+const KnowledgeSearchView = () => import('@/views/KnowledgeSearchView.vue');
 
 function resolveBasePath(): string {
   const metaBase = document
@@ -75,6 +76,14 @@ const routes = [
             path: 'files',
             name: 'knowledge',
             component: KnowledgeView,
+            meta: {
+              titleKey: 'knowledge.page.title'
+            }
+          },
+          {
+            path: 'search',
+            name: 'knowledge-search',
+            component: KnowledgeSearchView,
             meta: {
               titleKey: 'knowledge.page.title'
             }

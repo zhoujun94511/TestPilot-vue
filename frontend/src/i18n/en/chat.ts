@@ -12,6 +12,7 @@ export default {
     sending: 'Sending',
     jumpToLatest: '{count} new messages, jump to latest',
     deleteSession: 'Delete',
+    renameSession: 'Rename',
     clearSession: 'Clear Session',
     insertTemplate: 'Insert Template',
     confirmAction: 'Confirm Action',
@@ -80,6 +81,9 @@ export default {
     deleteSessionConfirm: 'Delete session "{title}"? This action cannot be undone.',
     deleteSessionSuccess: 'Session deleted',
     deleteSessionFailed: 'Failed to delete session',
+    renameSessionSuccess: 'Session renamed',
+    renameSessionFailed: 'Failed to rename session',
+    renameSessionEmpty: 'Session name cannot be empty',
     experimentalToggleSuccess: 'Experimental actions setting updated',
     experimentalToggleFailed: 'Failed to update experimental actions setting'
   },

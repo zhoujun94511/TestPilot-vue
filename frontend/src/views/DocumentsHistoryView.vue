@@ -1,5 +1,8 @@
 <template>
   <section>
+    <div v-if="pageNotice" class="tp-risk-block tp-mb-3" :class="pageNoticeClass">
+      {{ pageNotice }}
+    </div>
     <div class="tp-doc-page-actions tp-mb-3">
       <div class="tp-flex tp-flex-wrap tp-gap-2 tp-justify-end">
         <TpButton variant="ghost" @click="router.push('/documents/manage')">
@@ -125,6 +128,13 @@ const filters = reactive({
 const historyRequirements = ref<DocumentRequirementRecord[]>([]);
 const historyRequirementsLoading = ref(false);
 const generating = ref(false);
+const pageNotice = ref('');
+const pageNoticeTone = ref<'success' | 'warning' | 'danger'>('success');
+const pageNoticeClass = computed(() => ({
+  'tp-risk-block--success': pageNoticeTone.value === 'success',
+  'tp-risk-block--warning': pageNoticeTone.value === 'warning',
+  'tp-risk-block--danger': pageNoticeTone.value === 'danger'
+}));
 const historyRequirementsError = ref('');
 const selectedRequirementIds = ref<Array<string | number>>([]);
 const selectedRequirementMap = ref<Record<string, DocumentRequirementRecord>>({});
@@ -317,11 +327,18 @@ function clearConfirmDialog() {
 
 async function executeGenerateCases(requirementsToGenerate: DocumentRequirementRecord[]) {
   generating.value = true;
+  pageNotice.value = '';
   try {
-    await generateCasesFromAnalysis({
+    const response = await generateCasesFromAnalysis({
       requirements: requirementsToGenerate
     });
-    await router.push('/cases');
+    const failedCount = Number(response.failed_count || 0);
+    pageNoticeTone.value = failedCount > 0 ? 'warning' : 'success';
+    pageNotice.value = response.message || t('documents.message.generateSuccess');
+    await router.push({ name: 'cases-manage' });
+  } catch (error) {
+    pageNoticeTone.value = 'danger';
+    pageNotice.value = error instanceof Error ? error.message : t('documents.message.generateFailed');
   } finally {
     generating.value = false;
   }

@@ -38,12 +38,15 @@ export default {
       ollamaLocal: 'Ollama（本地）'
     },
     modelDescriptions: {
-      gpt4o: '均衡质量',
-      gpt4Turbo: '稳定基准',
-      gemini15Pro: '超大上下文',
-      gemini15Flash: '快速高效',
-      deepseekChat: '编码专家',
-      deepseekCoder: '代码生成',
+      gpt5: '当前默认',
+      gpt4o: '可用至 2027-01-14',
+      gpt4Turbo: '已于 2026-10-23 从 API 移除',
+      gemini38Flash: '当前默认',
+      gemini15Pro: '已停服',
+      gemini15Flash: '已停服',
+      deepseekFlash: '当前默认，V4.1-Flash',
+      deepseekChat: '已下线，请改用 Flash',
+      deepseekCoder: '已下线，请改用 Flash',
       qwenMax: '阿里旗舰模型',
       llama3: '本地通用模型',
       mistral: '轻量快速'

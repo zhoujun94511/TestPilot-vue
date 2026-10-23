@@ -16,6 +16,22 @@ from utils.utils_core.common_utils import get_local_ip
 
 logger = get_logger(__name__)
 
+SENSITIVE_VALUE_MASK = "********"
+_SENSITIVE_KEY_PATTERN = re.compile(r"(API_KEY|SECRET|PASSWORD|ACCESS_KEY|CREDENTIAL)$", re.IGNORECASE)
+
+
+def is_sensitive_config_key(key: str, flagged: bool = False) -> bool:
+    """密钥类配置对外不能返回原文。"""
+    if flagged:
+        return True
+    return bool(_SENSITIVE_KEY_PATTERN.search(key or ""))
+
+
+def masked_secret_text(value: Any) -> str:
+    """已配置的密钥对外只显示固定掩码。"""
+    text = "" if value is None else str(value)
+    return SENSITIVE_VALUE_MASK if text.strip() else ""
+
 
 class ConfigCenterService:
     """配置中心服务类"""
@@ -56,16 +72,24 @@ class ConfigCenterService:
             if key == 'DEFAULT_COMPANY' and isinstance(value, str):
                 value = value.upper()
                 logger.info(f"DEFAULT_COMPANY 值已自动转换为大写: {value}")
-            
+
+            old_config = self.session.query(ConfigItem).filter_by(key=key).first()
+            old_value = old_config.value if old_config else None
+            sensitive = is_sensitive_config_key(
+                key,
+                bool(is_sensitive) or bool(old_config and old_config.is_sensitive),
+            )
+            if sensitive:
+                is_sensitive = True
+                incoming = "" if value is None else str(value).strip()
+                if incoming == SENSITIVE_VALUE_MASK:
+                    value = old_value if old_value and str(old_value).strip() else ""
+
             # 验证配置
             validation_result = self._validate_config(key, value, value_type)
             if not validation_result[0]:
                 return False, validation_result[1]
-            
-            # 获取旧值用于审计
-            old_config = self.session.query(ConfigItem).filter_by(key=key).first()
-            old_value = old_config.value if old_config else None
-            
+
             # 转换值为字符串存储
             str_value = self._convert_to_string(value, value_type)
             
@@ -96,7 +120,8 @@ class ConfigCenterService:
                 old_value=old_value or "",
                 new_value=str_value,
                 operation_type=operation_type,
-                operator=operator
+                operator=operator,
+                sensitive=sensitive,
             )
             
             self.session.commit()
@@ -111,7 +136,7 @@ class ConfigCenterService:
         """根据分类获取配置"""
         try:
             configs = self.session.query(ConfigItem).filter_by(category=category).all()
-            return [config.to_dict() for config in configs]
+            return [self._public_config_dict(config) for config in configs]
         except Exception as e:
             logger.error(f"获取分类配置失败: {category}, 错误: {e}")
             return []
@@ -120,7 +145,7 @@ class ConfigCenterService:
         """获取所有配置"""
         try:
             configs = self.session.query(ConfigItem).all()
-            return [config.to_dict() for config in configs]
+            return [self._public_config_dict(config) for config in configs]
         except Exception as e:
             logger.error(f"获取所有配置失败: {e}")
             return []
@@ -138,7 +163,8 @@ class ConfigCenterService:
                 old_value=config.value,
                 new_value="",
                 operation_type="delete",
-                operator=operator
+                operator=operator,
+                sensitive=is_sensitive_config_key(key, bool(config.is_sensitive)),
             )
             
             self.session.delete(config)
@@ -246,11 +272,23 @@ class ConfigCenterService:
             logs = self.session.query(ConfigAuditLog).order_by(
                 ConfigAuditLog.created_at.desc()
             ).offset(offset).limit(limit).all()
-            return [log.to_dict() for log in logs]
+            sensitive_keys = {
+                item.key
+                for item in self.session.query(ConfigItem).filter(ConfigItem.is_sensitive.is_(True)).all()
+            }
+            return [self._public_audit_dict(log, sensitive_keys) for log in logs]
         except Exception as e:
             logger.error(f"获取审计日志失败: {e}")
             return []
     
+    def validate_config_value(self, key: str, value: Any) -> Tuple[bool, str]:
+        """按配置项类型和校验规则检查单个值。"""
+        item = self.session.query(ConfigItem).filter_by(key=key).first()
+        value_type = item.value_type if item and item.value_type else 'string'
+        if self._is_unchanged_secret(key, value, item):
+            value = item.value if item else ""
+        return self._validate_config(key, value, value_type)
+
     def _validate_config(self, key: str, value: Any, value_type: str) -> Tuple[bool, str]:
         """验证配置"""
         try:
@@ -361,10 +399,53 @@ class ConfigCenterService:
         except (TypeError, ValueError):
             return str(value)
     
-    def _log_config_change(self, key: str, old_value: str, new_value: str, 
-                          operation_type: str, operator: str):
+    @staticmethod
+    def _public_config_dict(config: ConfigItem) -> Dict:
+        """列表、单条读取和导出使用的视图，密钥只保留是否已配置。"""
+        data = config.to_dict()
+        sensitive = is_sensitive_config_key(config.key, bool(config.is_sensitive))
+        configured = bool((config.value or "").strip())
+        data["configured"] = configured
+        if sensitive:
+            data["is_sensitive"] = True
+            data["value"] = SENSITIVE_VALUE_MASK if configured else ""
+        return data
+
+    def get_public_config_item(self, key: str) -> Dict:
+        """读取单个配置的对外视图。"""
+        item = self.session.query(ConfigItem).filter_by(key=key).first()
+        if not item:
+            return {
+                "key": key,
+                "value": None,
+                "configured": False,
+                "is_sensitive": is_sensitive_config_key(key),
+            }
+        return self._public_config_dict(item)
+
+    @staticmethod
+    def _is_unchanged_secret(key: str, value: Any, item: ConfigItem = None) -> bool:
+        flagged = bool(item and item.is_sensitive)
+        if not is_sensitive_config_key(key, flagged):
+            return False
+        incoming = "" if value is None else str(value).strip()
+        return incoming == SENSITIVE_VALUE_MASK
+
+    @staticmethod
+    def _public_audit_dict(log: ConfigAuditLog, sensitive_keys: set) -> Dict:
+        data = log.to_dict()
+        if is_sensitive_config_key(log.config_key) or log.config_key in sensitive_keys:
+            data["old_value"] = masked_secret_text(data.get("old_value"))
+            data["new_value"] = masked_secret_text(data.get("new_value"))
+        return data
+
+    def _log_config_change(self, key: str, old_value: str, new_value: str,
+                          operation_type: str, operator: str, sensitive: bool = False):
         """记录配置变更日志"""
         try:
+            if sensitive or is_sensitive_config_key(key):
+                old_value = masked_secret_text(old_value)
+                new_value = masked_secret_text(new_value)
             change_reason = ""
             if request and hasattr(request, 'headers'):
                 change_reason = request.headers.get('X-Change-Reason', '')

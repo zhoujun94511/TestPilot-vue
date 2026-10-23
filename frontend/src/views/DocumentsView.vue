@@ -1417,8 +1417,13 @@ async function executeGenerateCases(requirementsToGenerate: DocumentRequirementR
       requirements: requirementsToGenerate
     });
     const count = response.total ?? response.cases?.length ?? requirementsToGenerate.length;
-    showNotice('success', response.message || `${t('documents.message.generateSuccess')} (${count})`);
-    await router.push('/cases');
+    const failedCount = Number(response.failed_count || 0);
+    if (failedCount > 0) {
+      showNotice('warning', response.message || t('documents.message.generateFailed'));
+    } else {
+      showNotice('success', response.message || `${t('documents.message.generateSuccess')} (${count})`);
+    }
+    await router.push({ name: 'cases-manage' });
   } catch (error) {
     showNotice('danger', error instanceof Error ? error.message : t('documents.message.generateFailed'));
   } finally {

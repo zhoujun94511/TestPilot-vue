@@ -8,6 +8,9 @@
       <RouterLink class="tp-doc-tab" to="/knowledge/files" active-class="is-active">
         {{ t('knowledge.tabs.files') }}
       </RouterLink>
+      <RouterLink class="tp-doc-tab" to="/knowledge/search" active-class="is-active">
+        {{ t('knowledge.tabs.search') }}
+      </RouterLink>
     </div>
     <router-view />
   </section>

@@ -62,6 +62,25 @@ except ImportError:
                     self.metadata = metadata or {}
 
 
+class _DigestReader:
+    """提供 file_digest 需要的二进制读取接口。"""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def readinto(self, buf: bytearray) -> int:
+        chunk = self._raw.read(len(buf))
+        if not isinstance(chunk, (bytes, bytearray)) or not chunk:
+            return 0
+        size = len(chunk)
+        buf[:size] = chunk
+        return size
+
+    @staticmethod
+    def readable() -> bool:
+        return True
+
+
 class KnowledgeService:
     """知识库管理服务"""
 
@@ -124,12 +143,8 @@ class KnowledgeService:
                     logger.error(f"计算文件哈希失败: 不是文件或无法读取 - {file_path}")
                     return ''
                 
-                with open(path, 'rb') as f:
-                    # 分块读取大文件，避免内存溢出
-                    for byte_block in iter(lambda: f.read(4096), b''):
-                        sha256_hash.update(byte_block)
-                
-                result = sha256_hash.hexdigest()
+                with open(path, 'rb') as handle:
+                    result = hashlib.file_digest(_DigestReader(handle), 'sha256').hexdigest()
                 return result
             
             logger.error("计算文件哈希失败: 未提供文件路径或文件流")
@@ -366,6 +381,7 @@ class KnowledgeService:
     ) -> Dict[str, Any]:
         """处理知识库文件"""
         try:
+            failed_batch_count = 0
             if not os.path.exists(file_path):
                 return {
                     'success': False,
@@ -549,6 +565,7 @@ class KnowledgeService:
                     splits = valid_splits
 
             
+            failed_batch_count = 0
             if splits:
                 # 分批添加文档（从配置中获取批次大小，Windows 上需要更小的批次以避免访问冲突）
                 batch_size = settings.get_vector_db_batch_size()
@@ -677,6 +694,7 @@ class KnowledgeService:
                             
                     except Exception as batch_error:
                         logger.error(f"❌ 添加文档批次 {batch_num}/{total_batches} 失败: {batch_error}", exc_info=True)
+                        failed_batch_count += 1
                         # 记录失败的文档内容类型信息，便于调试
                         if valid_batch:
                             sample_content = valid_batch[0].page_content if hasattr(valid_batch[0], 'page_content') else None
@@ -769,6 +787,7 @@ class KnowledgeService:
                             
                     except Exception as batch_error:
                         logger.error(f"❌ 添加文档批次 {batch_num}/{total_batches} 失败: {batch_error}", exc_info=True)
+                        failed_batch_count += 1
                         # Windows 上即使失败也继续，避免整个流程中断
                         if is_windows:
                             logger.warning(f"Windows 环境下继续处理下一批次...")
@@ -822,9 +841,13 @@ class KnowledgeService:
             # 记录性能指标
             elapsed_time = self.performance_monitor.end_timer(start_time)
 
+            message = f'成功处理文档，添加了{len(document_ids)}个文档块'
+            if failed_batch_count:
+                message += f'，另有{failed_batch_count}个批次写入失败'
             return {
                 'success': True,
-                'message': f'成功处理文档，添加了{len(document_ids)}个文档块',
+                'message': message,
+                'partial': bool(failed_batch_count),
                 'document_ids': document_ids,
                 'processing_time': elapsed_time,
                 'content_length': sum(len(text) for text in texts)
@@ -905,6 +928,10 @@ class KnowledgeService:
                         'strategy': result.strategy.value,
                         'relevance_factors': result.relevance_factors
                     })
+                search_results = [
+                    item for item in search_results
+                    if float(item.get('score') or 0) >= float(score_threshold)
+                ]
                 
             else:
                 # 使用传统搜索

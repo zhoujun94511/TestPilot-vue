@@ -38,12 +38,15 @@ export default {
       ollamaLocal: 'Ollama (Local)'
     },
     modelDescriptions: {
-      gpt4o: 'Balanced quality',
-      gpt4Turbo: 'Reliable benchmark',
-      gemini15Pro: 'Massive context',
-      gemini15Flash: 'Fast and efficient',
-      deepseekChat: 'Coding specialist',
-      deepseekCoder: 'Code generation',
+      gpt5: 'Current default',
+      gpt4o: 'Available until 2027-01-14',
+      gpt4Turbo: 'Removed from the API on 2026-10-23',
+      gemini38Flash: 'Current default',
+      gemini15Pro: 'Shut down',
+      gemini15Flash: 'Shut down',
+      deepseekFlash: 'Current default, V4.1-Flash',
+      deepseekChat: 'Retired, switch to Flash',
+      deepseekCoder: 'Retired, switch to Flash',
       qwenMax: 'Alibaba flagship',
       llama3: 'Local general model',
       mistral: 'Lightweight and fast'

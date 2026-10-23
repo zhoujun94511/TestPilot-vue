@@ -324,6 +324,36 @@
         </div>
       </section>
     </div>
+
+    <section class="tp-surface tp-p-3 tp-mt-3">
+      <div class="tp-flex tp-justify-between tp-align-center tp-gap-2 tp-mb-2">
+        <div class="tp-card__title">{{ t('config.audit.title') }}</div>
+        <TpButton variant="ghost" size="sm" :loading="auditLoading" @click="loadAuditLogs">
+          {{ t('common.actions.refresh') }}
+        </TpButton>
+      </div>
+      <div v-if="auditLoading" class="tp-small">{{ t('config.audit.loading') }}</div>
+      <div v-else-if="!auditLogs.length" class="tp-small">{{ t('config.audit.empty') }}</div>
+      <div v-else class="tp-grid tp-gap-2">
+        <div v-for="log in auditLogs" :key="String(log.id || log.key) + String(log.created_at || '')" class="tp-small">
+          <strong>{{ log.key || '-' }}</strong>
+          · {{ log.action || '-' }}
+          · {{ log.operator || '-' }}
+          · {{ formatDateTime(String(log.created_at || '')) }}
+        </div>
+      </div>
+    </section>
+
+    <ConfirmDialog
+      v-model="unsavedDiscardVisible"
+      :title="t('config.message.unsavedChangesTitle')"
+      :message="t('config.message.unsavedChangesConfirm')"
+      :confirm-text="t('common.actions.confirm')"
+      :cancel-text="t('common.actions.cancel')"
+      confirm-variant="warning"
+      @confirm="onUnsavedDiscardConfirm"
+      @cancel="onUnsavedDiscardCancel"
+    />
   </section>
 </template>
 
@@ -333,6 +363,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import ActionBar from '@/components/common/ActionBar.vue';
 import BaseState from '@/components/common/BaseState.vue';
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import ConfigFormItem from '@/components/common/ConfigFormItem.vue';
 import TpButton from '@/components/ui/base/TpButton.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
@@ -342,9 +373,11 @@ import {
   exportConfig,
   getCategories,
   getCategoryConfig,
+  getConfigAuditLogs,
   importConfig,
   saveConfig,
   validateConfig,
+  type ConfigAuditLogRecord,
   type ConfigCategory,
   type ConfigItem,
   type ConfigOption
@@ -364,6 +397,8 @@ const route = useRoute();
 const appStore = useAppStore();
 
 const categories = ref<ConfigCategory[]>([]);
+const auditLogs = ref<ConfigAuditLogRecord[]>([]);
+const auditLoading = ref(false);
 const currentItems = ref<ConfigItem[]>([]);
 const selectedCategoryId = ref('');
 const baselineSnapshot = ref<Record<string, string>>({});
@@ -378,6 +413,51 @@ const validationPending = reactive<Record<string, boolean>>({});
 const banner = ref<NoticeState | null>(null);
 const bannerTimer = ref<number | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
+
+type UnsavedDiscardPending =
+  | { kind: 'selectCategory'; categoryId: string }
+  | { kind: 'reloadCategories' }
+  | { kind: 'reloadCurrentCategory' }
+  | { kind: 'importClick' };
+
+const unsavedDiscardVisible = ref(false);
+const unsavedDiscardPending = ref<UnsavedDiscardPending | null>(null);
+
+function openUnsavedDiscardDialog(pending: UnsavedDiscardPending) {
+  unsavedDiscardPending.value = pending;
+  unsavedDiscardVisible.value = true;
+}
+
+function onUnsavedDiscardCancel() {
+  unsavedDiscardPending.value = null;
+}
+
+async function runUnsavedDiscardPending() {
+  const pending = unsavedDiscardPending.value;
+  unsavedDiscardPending.value = null;
+  if (!pending) return;
+  switch (pending.kind) {
+    case 'selectCategory':
+      selectedCategoryId.value = pending.categoryId;
+      await loadCategoryItems(pending.categoryId);
+      break;
+    case 'reloadCategories':
+      await loadCategories({ preserveSelection: true });
+      break;
+    case 'reloadCurrentCategory':
+      await loadCategoryItems(selectedCategoryId.value);
+      break;
+    case 'importClick':
+      importInput.value?.click();
+      break;
+    default:
+      break;
+  }
+}
+
+function onUnsavedDiscardConfirm() {
+  void runUnsavedDiscardPending();
+}
 
 const sortedCategories = computed(() =>
   [...categories.value].sort((left, right) => {
@@ -923,8 +1003,8 @@ async function handleSelectCategory(categoryId: string) {
   if (categoryId === selectedCategoryId.value) return;
 
   if (dirtyCount.value > 0) {
-    const confirmed = window.confirm(t('config.message.unsavedChangesConfirm'));
-    if (!confirmed) return;
+    openUnsavedDiscardDialog({ kind: 'selectCategory', categoryId });
+    return;
   }
 
   selectedCategoryId.value = categoryId;
@@ -933,8 +1013,8 @@ async function handleSelectCategory(categoryId: string) {
 
 async function handleReloadCategories() {
   if (dirtyCount.value > 0) {
-    const confirmed = window.confirm(t('config.message.unsavedChangesConfirm'));
-    if (!confirmed) return;
+    openUnsavedDiscardDialog({ kind: 'reloadCategories' });
+    return;
   }
   await loadCategories({ preserveSelection: true });
 }
@@ -942,8 +1022,8 @@ async function handleReloadCategories() {
 async function handleReloadCurrentCategory() {
   if (!selectedCategoryId.value) return;
   if (dirtyCount.value > 0) {
-    const confirmed = window.confirm(t('config.message.unsavedChangesConfirm'));
-    if (!confirmed) return;
+    openUnsavedDiscardDialog({ kind: 'reloadCurrentCategory' });
+    return;
   }
   await loadCategoryItems(selectedCategoryId.value);
 }
@@ -1026,6 +1106,7 @@ async function handleSave() {
     }
 
     await loadCategoryItems(selectedCategoryId.value);
+    await loadAuditLogs();
   } catch (error) {
     showApiError(error, t('config.message.saveFailed'));
   } finally {
@@ -1060,8 +1141,8 @@ async function handleExport() {
 
 function handleImportClick() {
   if (dirtyCount.value > 0) {
-    const confirmed = window.confirm(t('config.message.unsavedChangesConfirm'));
-    if (!confirmed) return;
+    openUnsavedDiscardDialog({ kind: 'importClick' });
+    return;
   }
   importInput.value?.click();
 }
@@ -1088,6 +1169,17 @@ async function handleImportFileChange(event: Event) {
   }
 }
 
+async function loadAuditLogs() {
+  auditLoading.value = true;
+  try {
+    auditLogs.value = await getConfigAuditLogs({ limit: 8 });
+  } catch {
+    auditLogs.value = [];
+  } finally {
+    auditLoading.value = false;
+  }
+}
+
 function formatDateTime(value: string) {
   try {
     const date = new Date(value);
@@ -1110,6 +1202,7 @@ onMounted(async () => {
     selectedCategoryId.value = routeCategory;
   }
   await loadCategories({ preserveSelection: Boolean(routeCategory) });
+  await loadAuditLogs();
 });
 
 onBeforeUnmount(() => {

@@ -5,7 +5,8 @@ export default {
   },
   tabs: {
     upload: 'Document Upload',
-    manage: 'Document & Requirement Management'
+    manage: 'Document & Requirement Management',
+    history: 'Requirement History'
   },
   actions: {
     upload: 'Upload Document',

@@ -15,6 +15,36 @@ export_bp = Blueprint('export', __name__)
 export_service = ExportService()
 
 
+def _export_case_query(category, priority, status, case_ids, search):
+    """按业务 case_id 和列表筛选条件查询用例。"""
+    query = TestCase.query
+    if category:
+        query = query.filter(TestCase.category == category)
+    if priority:
+        query = query.filter(TestCase.priority == priority)
+    if status:
+        query = query.filter(TestCase.status == status)
+
+    raw_ids = []
+    if isinstance(case_ids, list):
+        raw_ids = case_ids
+    elif case_ids:
+        raw_ids = str(case_ids).split(',')
+    ids = [str(item).strip() for item in raw_ids if str(item).strip()]
+    if ids:
+        query = query.filter(TestCase.case_id.in_(ids))
+
+    term = str(search or '').strip()
+    if term:
+        query = query.filter(
+            TestCase.title.contains(term) |
+            TestCase.description.contains(term) |
+            TestCase.case_id.contains(term) |
+            TestCase.display_id.contains(term)
+        )
+    return query.order_by(TestCase.created_time.desc())
+
+
 def _infer_language_from_text(text: str) -> str:
     zh_count = len(re.findall(r'[\u4e00-\u9fff]', text or ''))
     en_count = len(re.findall(r'[A-Za-z]', text or ''))
@@ -73,51 +103,15 @@ def export_cases_excel():
             priority = data.get('priority')
             status = data.get('status')
             case_ids = data.get('case_ids')  # 可以是列表或逗号分隔的字符串
+            search = data.get('search')
         else:
             category = request.args.get('category')
             priority = request.args.get('priority')
             status = request.args.get('status')
             case_ids = request.args.get('case_ids')
+            search = request.args.get('search')
 
-        # 处理case_ids参数
-        if case_ids:
-            if isinstance(case_ids, list):
-                # 支持数字ID和字符串ID
-                case_id_list = []
-                for case_id in case_ids:
-                    if str(case_id).isdigit():
-                        case_id_list.append(int(case_id))
-                    else:
-                        # 字符串ID，直接使用
-                        case_id_list.append(case_id)
-            else:
-                # 处理逗号分隔的字符串
-                case_id_list = []
-                for case_id in str(case_ids).split(','):
-                    case_id = case_id.strip()
-                    if case_id.isdigit():
-                        case_id_list.append(int(case_id))
-                    else:
-                        case_id_list.append(case_id)
-        else:
-            case_id_list = []
-
-        # 构建查询
-        query = TestCase.query
-
-        # 添加筛选条件
-        if category:
-            query = query.filter(TestCase.category == category)
-        if priority:
-            query = query.filter(TestCase.priority == priority)
-        if status:
-            query = query.filter(TestCase.status == status)
-        if case_id_list:
-            # 统一使用case_id查询，简化逻辑
-            query = query.filter(TestCase.case_id.in_(case_id_list))
-
-        # 获取数据
-        cases = query.order_by(TestCase.created_time.desc()).all()
+        cases = _export_case_query(category, priority, status, case_ids, search).all()
 
         if not cases:
             return jsonify({
@@ -169,36 +163,15 @@ def export_cases_csv():
             priority = data.get('priority')
             status = data.get('status')
             case_ids = data.get('case_ids')
+            search = data.get('search')
         else:
             category = request.args.get('category')
             priority = request.args.get('priority')
             status = request.args.get('status')
             case_ids = request.args.get('case_ids')
+            search = request.args.get('search')
 
-        # 处理case_ids参数
-        if case_ids:
-            if isinstance(case_ids, list):
-                case_id_list = [int(case_id) for case_id in case_ids if str(case_id).isdigit()]
-            else:
-                case_id_list = [int(case_id.strip()) for case_id in str(case_ids).split(',') if case_id.strip().isdigit()]
-        else:
-            case_id_list = []
-
-        # 构建查询
-        query = TestCase.query
-
-        # 添加筛选条件
-        if category:
-            query = query.filter(TestCase.category == category)
-        if priority:
-            query = query.filter(TestCase.priority == priority)
-        if status:
-            query = query.filter(TestCase.status == status)
-        if case_id_list:
-            query = query.filter(TestCase.id.in_(case_id_list))
-
-        # 获取数据
-        cases = query.order_by(TestCase.created_time.desc()).all()
+        cases = _export_case_query(category, priority, status, case_ids, search).all()
 
         if not cases:
             return jsonify({
@@ -250,51 +223,15 @@ def export_cases_json():
             priority = data.get('priority')
             status = data.get('status')
             case_ids = data.get('case_ids')
+            search = data.get('search')
         else:
             category = request.args.get('category')
             priority = request.args.get('priority')
             status = request.args.get('status')
             case_ids = request.args.get('case_ids')
+            search = request.args.get('search')
 
-        # 处理case_ids参数
-        if case_ids:
-            if isinstance(case_ids, list):
-                # 支持数字ID和字符串ID
-                case_id_list = []
-                for case_id in case_ids:
-                    if str(case_id).isdigit():
-                        case_id_list.append(int(case_id))
-                    else:
-                        # 字符串ID，直接使用
-                        case_id_list.append(case_id)
-            else:
-                # 处理逗号分隔的字符串
-                case_id_list = []
-                for case_id in str(case_ids).split(','):
-                    case_id = case_id.strip()
-                    if case_id.isdigit():
-                        case_id_list.append(int(case_id))
-                    else:
-                        case_id_list.append(case_id)
-        else:
-            case_id_list = []
-
-        # 构建查询
-        query = TestCase.query
-
-        # 添加筛选条件
-        if category:
-            query = query.filter(TestCase.category == category)
-        if priority:
-            query = query.filter(TestCase.priority == priority)
-        if status:
-            query = query.filter(TestCase.status == status)
-        if case_id_list:
-            # 支持数字ID和字符串ID的查询
-            query = query.filter(TestCase.case_id.in_(case_id_list))  # 使用case_id字段
-
-        # 获取数据
-        cases = query.order_by(TestCase.created_time.desc()).all()
+        cases = _export_case_query(category, priority, status, case_ids, search).all()
 
         if not cases:
             return jsonify({

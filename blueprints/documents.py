@@ -307,9 +307,12 @@ def list_documents():
 def delete_document(file_path):
     """删除文档"""
     try:
-        # file_path只是文件名，需要拼接documents目录
+        # 只接受文件名，避免 documents/ 前缀被再拼一次
         upload_folder = Path(current_app.config['UPLOAD_FOLDER'])
-        full_path = upload_folder / 'documents' / file_path
+        safe_name = Path(str(file_path or '')).name
+        if not safe_name or safe_name in {'.', '..'}:
+            raise BadRequest("非法的文件路径")
+        full_path = upload_folder / 'documents' / safe_name
         if not full_path.exists():
             return jsonify({
                 'success': False,
@@ -317,10 +320,29 @@ def delete_document(file_path):
             }), 404
 
         # 检查文件路径安全性
-        if not str(full_path.resolve()).startswith(str(upload_folder.resolve())):
+        if not str(full_path.resolve()).startswith(str((upload_folder / 'documents').resolve())):
             raise BadRequest("非法的文件路径")
 
-        full_path.unlink()
+        try:
+            full_path.unlink()
+        except OSError as exc:
+            db.session.rollback()
+            current_app.logger.error("删除文档文件失败，需求记录已保留: %s", exc)
+            return jsonify({
+                'success': False,
+                'message': '文件删除失败，需求记录已保留',
+                'error': 'FILE_DELETE_FAILED',
+                'error_code': 'FILE_DELETE_FAILED',
+                'retryable': True
+            }), 500
+
+        try:
+            Requirement.query.filter_by(source_file=safe_name).delete(synchronize_session=False)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.error("文档文件已删除，但需求记录提交失败: %s", safe_name)
+            raise
 
         return jsonify({
             'success': True,
@@ -328,12 +350,14 @@ def delete_document(file_path):
         })
 
     except BadRequest as e:
+        db.session.rollback()
         return jsonify({
             'success': False,
             'message': str(e),
             'error': 'bad_request'
         }), 400
     except Exception as e:
+        db.session.rollback()
         current_app.logger.error(f"删除文档失败: {e}")
         return jsonify({
             'success': False,

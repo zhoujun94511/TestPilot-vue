@@ -65,7 +65,6 @@ def _safe_folder_name(folder_name: str) -> str:
 
 def _save_uploaded_file(file, file_path: Path) -> None:
     """保存上传文件并确保文件可访问"""
-    import os
     import time
 
     if hasattr(file, 'seek'):
@@ -571,8 +570,18 @@ def delete_knowledge_file(file_id):
                     )
                     if not delete_result['success']:
                         current_app.logger.warning(f"向量数据库删除失败: {delete_result.get('message')}")
+                        return jsonify({
+                            'success': False,
+                            'message': '向量数据删除失败，文件记录已保留',
+                            'error': 'vector_delete_failed'
+                        }), 500
             except (ValueError, SyntaxError) as e:
                 current_app.logger.error(f"删除向量数据库文档失败: {e}")
+                return jsonify({
+                    'success': False,
+                    'message': '向量记录无法解析，文件记录已保留',
+                    'error': 'vector_delete_failed'
+                }), 500
 
         # 删除物理文件（仅限知识库目录）
         if record.file_path:

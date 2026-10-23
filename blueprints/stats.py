@@ -916,7 +916,7 @@ def get_system_status():
         start_time = time.time()
         
         try:
-            from config.settings import settings
+            from config.settings import resolve_deepseek_model, resolve_gemini_model, resolve_openai_model, settings
             llm = get_llm(settings.DEFAULT_COMPANY)
             if llm:
                 # 尝试获取模型名称
@@ -928,15 +928,15 @@ def get_system_status():
                     # 根据DEFAULT_COMPANY获取默认模型名称（统一使用大写）
                     company_upper = settings.DEFAULT_COMPANY.upper() if settings.DEFAULT_COMPANY else 'OPENAI'
                     if company_upper == 'OPENAI':
-                        ai_model_name = os.getenv('OPENAI_MODEL', 'gpt-5')
+                        ai_model_name = resolve_openai_model(getattr(settings, 'OPENAI_MODEL', None))
                     elif company_upper == 'DEEPSEEK':
-                        ai_model_name = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+                        ai_model_name = resolve_deepseek_model(getattr(settings, 'DEEPSEEK_MODEL', None))
                     elif company_upper == 'OLLAMA':
-                        ai_model_name = os.getenv('OLLAMA_MODEL', 'phi:2.7b')
+                        ai_model_name = getattr(settings, 'OLLAMA_MODEL', None) or os.getenv('OLLAMA_MODEL', 'phi:2.7b')
                     elif company_upper == 'GEMINI':
-                        ai_model_name = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+                        ai_model_name = resolve_gemini_model(getattr(settings, 'GEMINI_MODEL', None))
                     elif company_upper == 'QWEN':
-                        ai_model_name = os.getenv('QWEN_MODEL', 'qwen-flash')
+                        ai_model_name = getattr(settings, 'QWEN_MODEL', None) or os.getenv('QWEN_MODEL', 'qwen-flash')
                     else:
                         ai_model_name = '未知模型'
                 

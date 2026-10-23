@@ -140,6 +140,7 @@ export interface GenerateCasesResponse {
   cases?: Record<string, unknown>[];
   total?: number;
   message?: string;
+  failed_count?: number;
   summary?: Record<string, unknown>;
   raw?: Record<string, unknown>;
 }
@@ -402,6 +403,7 @@ export async function generateCasesFromAnalysis(payload: DocumentGenerateCasesPa
       cases: result.cases,
       total: result.total,
       message: result.message,
+      failed_count: Number(result.failed_count || 0),
       summary: isRecord(result.raw?.summary) ? result.raw.summary : undefined,
       raw: result.raw
     };

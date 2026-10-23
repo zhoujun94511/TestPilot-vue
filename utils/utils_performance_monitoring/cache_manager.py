@@ -26,7 +26,8 @@ class CacheManager:
     def _get_cache_key(data: Any) -> str:
         """生成缓存键"""
         data_str = str(data)
-        return hashlib.md5(data_str.encode()).hexdigest()
+        payload: Any = data_str.encode()
+        return hashlib.md5(payload).hexdigest()
 
     def _get_cache_path(self, cache_key: str) -> str:
         """获取缓存文件路径"""

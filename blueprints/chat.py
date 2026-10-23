@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import json
 import uuid
+from typing import Any
 from sqlalchemy import and_, func
 from datetime import datetime, timezone
 from werkzeug.exceptions import BadRequest
@@ -12,6 +13,7 @@ from flask import (
     current_app,
     session,
     has_app_context,
+    stream_with_context,
 )
 from models.models import db, ChatHistory, ChatSession
 from services.chat_service import ChatService
@@ -27,6 +29,18 @@ chat_bp = Blueprint('chat', __name__)
 
 # 初始化服务
 chat_service = ChatService()
+
+
+def _merge_generation_settings(data):
+    """顶层参数优先，其次读取前端放在 settings 里的 temperature / max_tokens。"""
+    payload = data if isinstance(data, dict) else {}
+    nested = payload.get('settings') if isinstance(payload.get('settings'), dict) else {}
+    temperature = payload.get('temperature', nested.get('temperature', 0.7))
+    max_tokens = payload.get('max_tokens', nested.get('max_tokens', getattr(config_settings, 'MAX_TOKENS', 4000)))
+    merged = dict(nested)
+    merged['temperature'] = temperature
+    merged['max_tokens'] = max_tokens
+    return merged
 
 
 def get_session_id():
@@ -136,7 +150,6 @@ def send_message():
         # 获取会话参数
         session_id = data.get('session_id') or get_session_id()
         message_type = data.get('type', 'chat')  # chat, test_case, requirement_analysis
-        temperature = data.get('temperature', 0.7)
 
         # 从前端参数读取；无向量库模式时强制关闭 RAG/知识库增强
         use_context = bool(data.get('use_context', False))
@@ -204,15 +217,14 @@ def send_message():
 
             chat_service.initialize(llm, vector_db)
 
-        # 构建设置参数
-        settings = {
-            'temperature': temperature,
-            'max_tokens': data.get('max_tokens', getattr(config_settings, 'MAX_TOKENS', 4000)),
+        # 构建设置参数。temperature / max_tokens 允许放在 settings 对象里。
+        settings = _merge_generation_settings(data)
+        settings.update({
             'use_rag': use_rag,
             'message_type': message_type,
             'use_smart_reply': bool(data.get('use_smart_reply', False)),
             'auto_suggest': bool(data.get('auto_suggest', True))
-        }
+        })
 
         # 发送消息给AI助手
         result = chat_service.send_message(
@@ -268,7 +280,7 @@ def send_stream_message():
     try:
         # 解析输入参数
         if request.method == 'GET':
-            data = {
+            data: dict[str, Any] = {
                 'message': request.args.get('message', ''),
                 'session_id': request.args.get('session_id'),
                 'type': request.args.get('type', 'chat'),
@@ -286,9 +298,10 @@ def send_stream_message():
             except Exception as e:
                 current_app.logger.warning(f"解析settings参数失败: {e}")
                 settings = {}
+            data['settings'] = settings
         else:
             data = request.get_json() or {}
-            settings = data.get('settings', {})
+            settings = data.get('settings', {}) if isinstance(data.get('settings'), dict) else {}
 
         user_message = data.get('message', '').strip()
         if not user_message:
@@ -299,10 +312,9 @@ def send_stream_message():
         use_context = bool(data.get('use_context', False))
         use_knowledge = bool(data.get('use_knowledge', False))
         use_smart_reply = bool(data.get('use_smart_reply', False))
-        temperature = data.get('temperature', 0.7)
 
+        settings = _merge_generation_settings(data)
         settings.update({
-            "temperature": temperature,
             "use_rag": data.get("use_rag", False),
             "message_type": message_type,
             "use_smart_reply": use_smart_reply,
@@ -454,36 +466,26 @@ def send_stream_message():
             except Exception as stream_error:
                 yield f"data: {json.dumps({'type': 'error', 'message': str(stream_error)}, ensure_ascii=False)}\n\n"
 
-        # 执行生成器并收集所有响应
-        response_chunks = []
-        for response_chunk in generate_response():
-            response_chunks.append(response_chunk)
-
-        # 在应用上下文中保存AI消息
-        if ai_response_content.strip():
-            try:
-                ai_message = ChatHistory(
-                    session_id=session_id,
-                    role="assistant",
-                    content=ai_response_content,
-                    message_type=message_type,
-                    created_time=datetime.now(timezone.utc),
-                    tokens_used=ai_tokens_used,
-                    model_name=ai_model_name
-                )
-                db.session.add(ai_message)
-                db.session.commit()
-                current_app.logger.info(f"AI消息已保存: session_id={session_id}")
-            except Exception as save_error:
-                current_app.logger.error(f"保存AI消息失败: {save_error}")
-
-        # 返回收集到的所有响应块
-        def final_generator():
-            for final_chunk in response_chunks:
-                yield final_chunk
+            if ai_response_content.strip():
+                try:
+                    ai_message = ChatHistory(
+                        session_id=session_id,
+                        role="assistant",
+                        content=ai_response_content,
+                        message_type=message_type,
+                        created_time=datetime.now(timezone.utc),
+                        tokens_used=ai_tokens_used,
+                        model_name=ai_model_name
+                    )
+                    db.session.add(ai_message)
+                    db.session.commit()
+                    current_app.logger.info(f"AI消息已保存: session_id={session_id}")
+                except Exception as save_error:
+                    current_app.logger.error(f"保存AI消息失败: {save_error}")
+                    db.session.rollback()
 
         return current_app.response_class(
-            final_generator(),
+            stream_with_context(generate_response()),
             mimetype="text/event-stream; charset=utf-8",
             headers={
                 "Cache-Control": "no-cache",

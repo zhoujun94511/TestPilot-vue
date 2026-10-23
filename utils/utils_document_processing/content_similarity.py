@@ -6,7 +6,7 @@
 """
 import re
 import hashlib
-from typing import List, Dict, Tuple
+from typing import Any, List, Dict, Tuple
 from difflib import SequenceMatcher
 import pandas as pd
 from utils.utils_core.logger import get_logger
@@ -98,7 +98,8 @@ class ContentSimilarityDetector:
 
         content_parts = [get_field_value(names) for names in self.FIELD_MAPPING.values()]
         normalized_content = '|'.join([self._normalize_text(part) for part in content_parts])
-        return hashlib.md5(normalized_content.encode('utf-8')).hexdigest()
+        payload: Any = normalized_content.encode('utf-8')
+        return hashlib.md5(payload).hexdigest()
 
     def calculate_similarity(self, case1: Dict, case2: Dict) -> float:
         """计算两个测试用例的相似度"""

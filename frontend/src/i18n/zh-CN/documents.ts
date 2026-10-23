@@ -5,7 +5,8 @@ export default {
   },
   tabs: {
     upload: '需求文档上传',
-    manage: '需求文档与需求管理'
+    manage: '需求文档与需求管理',
+    history: '需求历史'
   },
   actions: {
     upload: '上传文档',

@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "i18n:check": "node scripts/check-i18n.js",
     "copy:check": "node scripts/check-hardcoded-copy.js",
-    "quality:i18n": "npm run i18n:check && npm run copy:check"
+    "native-dialog:check": "node scripts/check-no-native-dialog.js",
+    "quality:i18n": "npm run i18n:check && npm run copy:check",
+    "quality:ui": "npm run native-dialog:check"
   },
   "dependencies": {
     "axios": "^1.8.4",

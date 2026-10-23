@@ -70,6 +70,7 @@ export default {
     validationFailed: 'Validation failed',
     validationRequestFailed: 'Validation request failed',
     noChangesToSave: 'No changes to save',
+    unsavedChangesTitle: 'Unsaved changes',
     unsavedChangesConfirm: 'There are unsaved changes in the current category. Switching categories will discard them. Continue?',
     apiKeyCleared: '{provider} API key cleared',
     apiKeyClearFailed: 'Failed to clear API key'

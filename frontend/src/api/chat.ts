@@ -1,4 +1,4 @@
-import http, { ApiError, del, get, post } from './http';
+import http, { ApiError, del, get, post, put } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -313,7 +313,7 @@ function buildApiBase(): string {
   return base.endsWith('/') ? base.slice(0, -1) : base;
 }
 
-async function fetchSse(url: string, body: ChatMessagePayload): Promise<AsyncGenerator<ChatStreamEvent>> {
+async function fetchSse(url: string, body: ChatMessagePayload, signal?: AbortSignal): Promise<AsyncGenerator<ChatStreamEvent>> {
   const response = await fetch(`${buildApiBase()}${url}`, {
     method: 'POST',
     headers: {
@@ -322,7 +322,8 @@ async function fetchSse(url: string, body: ChatMessagePayload): Promise<AsyncGen
       'X-Requested-With': 'XMLHttpRequest'
     },
     credentials: 'include',
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   });
 
   if (!response.ok || !response.body) {
@@ -363,8 +364,15 @@ async function fetchSse(url: string, body: ChatMessagePayload): Promise<AsyncGen
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+        }
+        if (done) {
+          buffer += decoder.decode();
+          if (buffer.trim() && !buffer.endsWith('\n\n')) {
+            buffer += '\n\n';
+          }
+        }
 
         let boundary = buffer.indexOf('\n\n');
         while (boundary !== -1) {
@@ -398,6 +406,7 @@ async function fetchSse(url: string, body: ChatMessagePayload): Promise<AsyncGen
             raw: parsed
           };
         }
+        if (done) break;
       }
     } finally {
       reader.releaseLock();
@@ -494,10 +503,13 @@ export async function cancelExperimentalAction(executionId: string, reason = '')
   }
 }
 
-export async function streamChatMessage(payload: ChatMessagePayload): Promise<AsyncGenerator<ChatStreamEvent>> {
+export async function streamChatMessage(payload: ChatMessagePayload, signal?: AbortSignal): Promise<AsyncGenerator<ChatStreamEvent>> {
   try {
-    return await fetchSse('/chat/stream', payload);
+    return await fetchSse('/chat/stream', payload, signal);
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
     coreNormalizeError(error, 'Failed to stream chat message');
   }
 }
@@ -517,6 +529,24 @@ export async function createChatSession(payload: ChatCreateSessionPayload = {}):
     };
   } catch (error) {
     coreNormalizeError(error, 'Failed to create chat session');
+  }
+}
+
+export async function updateChatSession(
+  sessionId: string,
+  payload: { title: string }
+): Promise<{ success: boolean; raw?: Record<string, unknown> }> {
+  try {
+    const response = await put<unknown>(`/chat/session/${encodeURIComponent(sessionId)}`, payload);
+    const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
+      fallbackMessage: 'Failed to update chat session'
+    });
+    return {
+      success: true,
+      raw: normalized
+    };
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to update chat session');
   }
 }
 

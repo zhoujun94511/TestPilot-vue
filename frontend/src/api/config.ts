@@ -33,6 +33,7 @@ export interface ConfigItem {
   label_key?: string;
   description_key?: string;
   is_sensitive?: boolean;
+  configured?: boolean;
   created_at?: string | null;
   updated_at?: string | null;
   options?: ConfigOption[];
@@ -263,6 +264,7 @@ export function normalizeConfigItem(raw: Record<string, unknown>): ConfigItem {
     category: raw.category != null ? String(raw.category) : undefined,
     description: raw.description != null ? String(raw.description) : undefined,
     is_sensitive: Boolean(raw.is_sensitive),
+    configured: raw.configured === true,
     created_at: raw.created_at != null ? String(raw.created_at) : undefined,
     updated_at: raw.updated_at != null ? String(raw.updated_at) : undefined,
     options,
@@ -465,8 +467,8 @@ export async function getConfigAuditLogs(params: { limit?: number; offset?: numb
     const logs = extractList<Record<string, unknown>>(payload, ['logs', 'items', 'data']);
     return logs.map((item) => ({
       id: item.id != null ? Number(item.id) : undefined,
-      key: item.key != null ? String(item.key) : undefined,
-      action: item.action != null ? String(item.action) : undefined,
+      key: pickCompatField(item, ['key', 'config_key'], undefined) != null ? String(pickCompatField(item, ['key', 'config_key'], '')) : undefined,
+      action: pickCompatField(item, ['action', 'operation_type'], undefined) != null ? String(pickCompatField(item, ['action', 'operation_type'], '')) : undefined,
       operator: item.operator != null ? String(item.operator) : undefined,
       old_value: item.old_value,
       new_value: item.new_value,

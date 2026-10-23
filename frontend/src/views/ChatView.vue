@@ -64,11 +64,38 @@
               @click="selectSession(session.session_id)"
             >
               <div class="tp-chat-session__main">
-                <div class="tp-data-title text-truncate">{{ session.title || t('chat.sessions.untitled') }}</div>
+                <input
+                  v-if="renamingSessionId === session.session_id"
+                  v-model="renameDraft"
+                  class="tp-input"
+                  :disabled="sessionLoading || sendLoading"
+                  @click.stop
+                  @keydown.enter.stop.prevent="submitRename(session.session_id)"
+                  @keydown.esc.stop.prevent="cancelRename"
+                />
+                <div v-else class="tp-data-title text-truncate">{{ session.title || t('chat.sessions.untitled') }}</div>
                 <div class="tp-small text-truncate" style="color: var(--tp-color-text-500)">{{ sessionPreview(session) }}</div>
               </div>
               <div class="tp-chat-session__actions">
                 <TpTag variant="neutral">{{ session.message_count ?? 0 }}</TpTag>
+                <TpButton
+                  v-if="renamingSessionId === session.session_id"
+                  variant="ghost"
+                  size="sm"
+                  :disabled="sessionLoading || sendLoading"
+                  @click.stop="submitRename(session.session_id)"
+                >
+                  {{ t('common.actions.save') }}
+                </TpButton>
+                <TpButton
+                  v-else
+                  variant="ghost"
+                  size="sm"
+                  :disabled="sessionLoading || sendLoading"
+                  @click.stop="startRename(session)"
+                >
+                  {{ t('chat.actions.renameSession') }}
+                </TpButton>
                 <TpButton
                   variant="ghost"
                   size="sm"
@@ -500,6 +527,8 @@ import {
   createChatSession,
   deleteChatSession,
   exportChatHistory,
+  trackQuickReplyFeedback,
+  updateChatSession,
   getChatConfig,
   getChatTemplate,
   getChatHistory,
@@ -884,6 +913,39 @@ function resetPendingAction() {
   pendingActionPlan.value = null;
   pendingActionPreview.value = null;
   deleteActionConfirmText.value = '';
+}
+
+let activeChatAbort: AbortController | null = null;
+
+function abortActiveChat() {
+  activeChatAbort?.abort();
+  activeChatAbort = null;
+}
+
+function isAbortError(error: unknown) {
+  if (activeChatAbort?.signal.aborted) return true;
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function restorePendingAction(items: Array<{ content?: string }>) {
+  resetPendingAction();
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const content = String(items[index]?.content || '');
+    const idMatch = content.match(/执行ID:\s*`([^`]+)`/);
+    if (!idMatch) continue;
+    const statusMatch = content.match(/"status"\s*:\s*"([^"]+)"/);
+    if (statusMatch?.[1] === 'needs_confirmation') {
+      pendingActionExecutionId.value = idMatch[1];
+      const toolMatch = content.match(/"tool"\s*:\s*"([^"]+)"/);
+      const toolName = toolMatch?.[1] || '';
+      pendingActionPlan.value = {
+        tool_name: toolName,
+        risk_level: toolName === 'delete_case' ? 'high' : 'low',
+        requires_confirmation: true
+      };
+    }
+    return;
+  }
 }
 
 function formatJsonPreview(value: unknown) {
@@ -1350,6 +1412,7 @@ async function loadHistory(sessionId: string, page = historyPagination.value.pag
     const response = await getChatHistory(sessionId, { page, per_page: historyPagination.value.per_page });
     if (requestSeq !== loadHistoryRequestSeq) return;
     messages.value = normalizeMessages(response.messages);
+    restorePendingAction(messages.value);
     historyPagination.value = response.pagination;
     currentSessionTitle.value = findSessionTitle(sessionId);
     if (!messages.value.length) {
@@ -1371,6 +1434,7 @@ async function loadHistory(sessionId: string, page = historyPagination.value.pag
 }
 
 async function selectSession(sessionId: string, reloadHistory = true) {
+  abortActiveChat();
   currentSessionId.value = sessionId;
   currentSessionTitle.value = findSessionTitle(sessionId);
   historyPagination.value.page = 1;
@@ -1393,6 +1457,40 @@ async function handleNewSession() {
     setNotice('success', t('chat.message.newSessionReady'));
   } catch (error) {
     setNotice('danger', error instanceof Error ? error.message : t('chat.message.createSessionFailed'));
+  }
+}
+
+const renamingSessionId = ref('');
+const renameDraft = ref('');
+
+function startRename(session: ChatSessionRecord) {
+  renamingSessionId.value = session.session_id;
+  renameDraft.value = session.title || '';
+}
+
+function cancelRename() {
+  renamingSessionId.value = '';
+  renameDraft.value = '';
+}
+
+async function submitRename(sessionId: string) {
+  const title = renameDraft.value.trim();
+  if (!title) {
+    setNotice('warning', t('chat.message.renameSessionEmpty'));
+    return;
+  }
+  try {
+    sessionLoading.value = true;
+    await updateChatSession(sessionId, { title });
+    const target = sessions.value.find((item) => item.session_id === sessionId);
+    if (target) target.title = title;
+    if (currentSessionId.value === sessionId) currentSessionTitle.value = title;
+    cancelRename();
+    setNotice('success', t('chat.message.renameSessionSuccess'));
+  } catch (error) {
+    setNotice('danger', error instanceof Error ? error.message : t('chat.message.renameSessionFailed'));
+  } finally {
+    sessionLoading.value = false;
   }
 }
 
@@ -1584,9 +1682,7 @@ async function handleSend() {
         temperature: chatConfig.value?.default_temperature
       },
       require_confirmation: true,
-      metadata: {
-        operator_role: 'admin'
-      }
+      metadata: {}
     };
 
     if (experimentalActionsEnabled.value) {
@@ -1613,7 +1709,11 @@ async function handleSend() {
       });
       await followOrNotifyNewMessage(true);
     } else if (streamEnabled.value) {
-      const stream = await streamChatMessage(requestPayload);
+      abortActiveChat();
+      const streamController = new AbortController();
+      activeChatAbort = streamController;
+      const streamSessionId = currentSessionId.value;
+      const stream = await streamChatMessage(requestPayload, streamController.signal);
       let streamText = '';
       let streamTimestamp: string | undefined;
       let streamErrored = false;
@@ -1623,6 +1723,7 @@ async function handleSend() {
       let unreadMarked = false;
 
       const scheduleFlush = (force = false) => {
+        if (currentSessionId.value !== streamSessionId) return;
         const now = Date.now();
         if (force || now - lastFlushAt >= flushIntervalMs) {
           if (streamFlushTimer !== null) {
@@ -1642,6 +1743,7 @@ async function handleSend() {
       };
 
       for await (const event of stream) {
+        if (streamController.signal.aborted || currentSessionId.value !== streamSessionId) break;
         if (event.type === 'error') {
           streamErrored = true;
           const statusCode = Number((event.raw as Record<string, unknown> | undefined)?.status_code || 0);
@@ -1707,6 +1809,10 @@ async function handleSend() {
     void loadSessions(false, 1, true);
     setNotice('success', t('chat.message.sendSuccess'));
   } catch (error) {
+    if (isAbortError(error)) {
+      pendingAssistantKey.value = '';
+      return;
+    }
     const assistantIndex = messages.value.findIndex((item) => item.key === pendingAssistantKey.value);
     const fallback = resolveSendErrorMessage(error);
     const modelInitError = isModelInitError(error);
@@ -1783,6 +1889,11 @@ async function handleCancelPendingAction() {
 async function handleSuggestionClick(suggestion: string) {
   const text = String(suggestion || '').trim();
   if (!text || sendLoading.value) return;
+  void trackQuickReplyFeedback({
+    suggestion_text: text,
+    was_clicked: true,
+    session_id: currentSessionId.value || undefined
+  }).catch(() => undefined);
   draftMessage.value = text;
   await handleSend();
 }
@@ -1912,6 +2023,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  abortActiveChat();
   if (streamFlushTimer !== null) {
     window.clearTimeout(streamFlushTimer);
     streamFlushTimer = null;

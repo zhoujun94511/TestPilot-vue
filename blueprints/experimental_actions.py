@@ -3,6 +3,7 @@
 import time
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy.exc import SQLAlchemyError
 from pydantic import ValidationError
 
 from config.settings import settings
@@ -30,6 +31,34 @@ def _ensure_enabled():
             "error": "feature_disabled",
         }), 403
     return None
+
+
+def _persist_action_chat_message(result):
+    """把确认或取消结果写入聊天记录，刷新后仍能看到。"""
+    if getattr(result, "status", "") not in ("done", "failed", "cancelled"):
+        return
+    if getattr(result, "error", None) == "confirmation_required":
+        return
+    record = ToolExecutionLog.query.filter_by(execution_id=result.execution_id).first()
+    session_id = getattr(record, "session_id", None) if record else None
+    if not session_id:
+        return
+    try:
+        from datetime import datetime, timezone
+        from models.models import db, ChatHistory
+        from services.action_message_service import build_compact_action_history_content
+
+        db.session.add(ChatHistory(
+            session_id=session_id,
+            role="system",
+            content=build_compact_action_history_content(result),
+            message_type="action",
+            created_time=datetime.now(timezone.utc),
+        ))
+        db.session.commit()
+    except (SQLAlchemyError, TypeError, ValueError):
+        from models.models import db
+        db.session.rollback()
 
 
 def _serialize_result(result):
@@ -145,6 +174,7 @@ def confirm_execution():
         }), 400
 
     result = orchestrator.confirm(execution_id=body.execution_id, metadata=body.metadata)
+    _persist_action_chat_message(result)
     return jsonify(_serialize_result(result)), (200 if result.success else 400)
 
 
@@ -169,6 +199,7 @@ def cancel_execution():
         }), 400
 
     result = orchestrator.cancel(execution_id=body.execution_id, reason=body.reason)
+    _persist_action_chat_message(result)
     return jsonify(_serialize_result(result)), (200 if result.success else 400)
 
 

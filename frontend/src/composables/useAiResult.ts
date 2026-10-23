@@ -8,6 +8,8 @@ export interface AiResultLike {
   processing_rate?: number | string | null;
   hallucination_detection?: {
     score?: number | null;
+    quality_score?: number | null;
+    avg_confidence?: number | null;
   } | null;
   summary?: {
     total_count?: number | null;
@@ -31,9 +33,15 @@ function clampConfidence(value: number) {
 }
 
 export function resolveAiResultSnapshot(source: AiResultLike | null | undefined, t: (key: string, args?: Record<string, unknown>) => string): AiResultSnapshot {
+  const detection = source?.hallucination_detection;
+  const scaledDetectionScore = [detection?.quality_score, detection?.avg_confidence]
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .map((value) => (value <= 1 ? value * 100 : value));
   const directCandidates = [
     source?.confidence,
     source?.hallucination_detection?.score,
+    ...scaledDetectionScore,
     source?.reliability_score,
     source?.score
   ].map((value) => Number(value)).filter((value) => Number.isFinite(value));

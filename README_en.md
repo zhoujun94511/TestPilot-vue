@@ -1,6 +1,6 @@
-# TestPilot - Intelligent Test Case Generation Tool
-
 <div align="center">
+
+# TestPilot - Intelligent Test Case Generation Tool
 
 ![TestPilot Logo](frontend/public/pic/favicon.ico)
 
@@ -440,9 +440,9 @@ TestPilot-vue/
 
 ### AI Models
 
-- **OpenAI**: GPT-5 (default), GPT-3.5, etc.  
-- **Google Gemini**: Gemini 2.0 Flash, Gemini Pro  
-- **DeepSeek**: DeepSeek-Chat  
+- **OpenAI**: gpt-5 (default), gpt-4o  
+- **Google Gemini**: gemini-3.8-flash  
+- **DeepSeek**: deepseek-flash (V4.1-Flash)  
 - **Qwen**: qwen-flash, qwen-plus, qwen-max  
 - **Ollama**: local models  
 - **Custom**: any OpenAI-compatible provider  
@@ -609,12 +609,12 @@ OPENAI_MODEL=gpt-5
 # Google Gemini
 DEFAULT_COMPANY=GEMINI
 GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-3.8-flash
 
 # DeepSeek
 DEFAULT_COMPANY=DEEPSEEK
 DEEPSEEK_API_KEY=your-deepseek-key
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-flash
 
 # Qwen
 DEFAULT_COMPANY=QWEN

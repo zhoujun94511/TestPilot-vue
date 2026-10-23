@@ -318,31 +318,12 @@ class CaseService:
             # 更新处理计数
             self.performance_monitor.update_processed_count(len(processed_cases))
 
-            # 幻觉检测和处理（如果启用）
-            hallucination_results = None
-            processed_cases_final = processed_cases
-            if getattr(settings, 'ENABLE_HALLUCINATION_DETECTION', True):
-                try:
-                    hallucination_results = self._detect_hallucination_in_cases(
-                        processed_cases, 
-                        requirement_text, 
-                        enhanced_context
-                    )
-                    logger.info(f"幻觉检测完成，检测到{hallucination_results['hallucination_count']}个潜在问题")
-                    
-                    # 处理检测到的幻觉
-                    if hallucination_results['hallucination_count'] > 0:
-                        processed_cases_final = self._handle_hallucination_in_cases(
-                            processed_cases,
-                            hallucination_results,
-                            requirement_text,
-                            llm
-                        )
-                        logger.info(f"幻觉处理完成，最终返回{len(processed_cases_final)}个用例")
-                        
-                except Exception as e:
-                    logger.warning(f"幻觉检测失败: {e}")
-                    hallucination_results = None
+            processed_cases_final, hallucination_results = self._apply_hallucination_guard(
+                processed_cases,
+                requirement_text,
+                enhanced_context,
+                llm
+            )
 
             # 停止性能监控并获取统计信息
             self.performance_monitor.stop_monitoring()
@@ -638,7 +619,7 @@ class CaseService:
                         'title': case_data.get('title', f'{"Test Case" if output_language == "en" else "测试用例"}_{i + 1}'),
                         'precondition': case_data.get('preconditions', case_data.get('precondition', '')),
                         'steps': case_data.get('steps', []),
-                        'expected_result': json.dumps(CaseService._process_expected_result(case_data.get('expected', case_data.get('expected_result', []))), ensure_ascii=False),
+                        'expected_result': CaseService._process_expected_result(case_data.get('expected', case_data.get('expected_result', []))),
                         'priority': self._normalize_priority(case_data.get('priority', 'P1')),
                         'category': case_data.get('category', case_data.get('test_type', 'functional')),
                         'test_method': case_data.get('test_method', ''),
@@ -1560,8 +1541,8 @@ JSON:
             'success_count': success_count
         }
 
-    @staticmethod
     def _generate_cases_batch(  # noqa: PLR0913
+            self,
             requirements_batch: List[Union[str, Dict[str, Any]]],
             batch_start_index: int,
             use_rag: bool,  # noqa: ARG001
@@ -1747,22 +1728,29 @@ JSON:
             for req_id, cases in cases_by_req.items():
                 logger.info(f"  - {req_id}: {len(cases)}个用例")
             
-            # 构建结果
+            # 构建结果，合批路径补上与单次生成相同的幻觉检测
             results = []
             for req_id, req in req_id_mapping.items():
                 cases = cases_by_req.get(req_id, [])
                 if len(cases) == 0:
                     logger.warning(f"需求 {req_id} 未生成任何用例")
-                results.append({
+                req_text = req if isinstance(req, str) else (req.get('content') or req.get('text') or '')
+                detection = None
+                if cases:
+                    cases, detection = self._apply_hallucination_guard(cases, req_text, '', llm)
+                item = {
                     'requirement_id': req_id,
                     'success': len(cases) > 0,
                     'message': f'成功生成{len(cases)}个用例' if cases else '未生成用例',
                     'cases': cases
-                })
+                }
+                if detection:
+                    item['hallucination_detection'] = detection
+                results.append(item)
             
             return {
                 'results': results,
-                'total_cases': sum(len(cases) for cases in cases_by_req.values()),
+                'total_cases': sum(len(item['cases']) for item in results),
                 'success_count': len([r for r in results if r['success']])
             }
             
@@ -1990,6 +1978,87 @@ JSON:
                 }
             }
 
+    def _apply_hallucination_guard(self, cases, requirement_text, context, llm):
+        """对一批用例做幻觉检测，并把可处理的结果写回用例。"""
+        if not cases or not getattr(settings, 'ENABLE_HALLUCINATION_DETECTION', True):
+            return cases, None
+        try:
+            detection = self._detect_hallucination_in_cases(cases, requirement_text, context or '')
+            logger.info(f"幻觉检测完成，检测到{detection.get('hallucination_count', 0)}个潜在问题")
+            final_cases = cases
+            if detection.get('hallucination_count', 0) > 0:
+                final_cases = self._handle_hallucination_in_cases(
+                    cases,
+                    detection,
+                    requirement_text,
+                    llm
+                )
+                logger.info(f"幻觉处理完成，最终返回{len(final_cases)}个用例")
+            return final_cases, detection
+        except (TypeError, ValueError, KeyError, RuntimeError, AttributeError, OSError) as exc:
+            logger.warning(f"幻觉检测失败: {exc}")
+            return cases, None
+
+    @staticmethod
+    def _apply_labeled_case_text(case: Dict[str, Any], text: str) -> bool:
+        """把“标题/步骤/预期结果/前置条件”标签文本写回结构化用例。"""
+        if not isinstance(text, str) or not text.strip() or not isinstance(case, dict):
+            return False
+        labels = {
+            '标题': 'title',
+            '步骤': 'steps',
+            '预期结果': 'expected_result',
+            '前置条件': 'precondition',
+            'Title': 'title',
+            'Steps': 'steps',
+            'Expected': 'expected_result',
+            'Precondition': 'precondition',
+        }
+        buckets = {key: [] for key in ('title', 'steps', 'expected_result', 'precondition')}
+        current_key = None
+        found = False
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            matched = None
+            value = ''
+            for label, key in labels.items():
+                for sep in (':', '：'):
+                    prefix = f'{label}{sep}'
+                    if line.startswith(prefix):
+                        matched = key
+                        value = line[len(prefix):].strip()
+                        break
+                if matched:
+                    break
+            if matched:
+                found = True
+                current_key = matched
+                if value:
+                    buckets[matched].append(value)
+                continue
+            if current_key and line:
+                buckets[current_key].append(line)
+        if not found:
+            return False
+
+        def split_items(parts):
+            items = []
+            for part in parts:
+                items.extend(item.strip() for item in re.split(r'[;；]', part) if item.strip())
+            return items
+
+        if buckets['title']:
+            case['title'] = ' '.join(buckets['title']).strip()
+        if buckets['precondition']:
+            case['precondition'] = '\n'.join(buckets['precondition']).strip()
+        steps = split_items(buckets['steps'])
+        if steps:
+            case['steps'] = steps
+        expected = split_items(buckets['expected_result'])
+        if expected:
+            case['expected_result'] = expected
+        return True
+
     def _handle_hallucination_in_cases(self, cases: List[Dict[str, Any]], 
                                      hallucination_results: Dict[str, Any],
                                      requirement_text: str,
@@ -2042,24 +2111,16 @@ JSON:
                     
                     handling_results.append(handling_result)
                     
-                    # 根据处理结果决定是否保留用例
+                    # 根据处理结果决定是否保留用例，并把可解析的修正写回字段
                     if handling_result.is_approved and handling_result.processed_content:
-                        # 尝试解析处理后的内容
-                        try:
-                            # 这里可以添加更复杂的解析逻辑
-                            # 暂时保留原始用例，但添加处理标记
-                            case['hallucination_handled'] = True
-                            case['handling_action'] = handling_result.action_taken.value
-                            case['handling_warnings'] = handling_result.warnings
-                            processed_cases.append(case)
-                        except Exception as parse_error:
-                            logger.warning(f"解析处理后的用例失败: {parse_error}")
-                            # 如果解析失败，根据处理策略决定是否保留
-                            if handling_result.action_taken.value != 'filter_out':
-                                case['hallucination_handled'] = True
-                                case['handling_action'] = 'warn_only'
-                                case['handling_warnings'] = handling_result.warnings
-                                processed_cases.append(case)
+                        applied = self._apply_labeled_case_text(case, handling_result.processed_content)
+                        case['hallucination_handled'] = True
+                        case['handling_action'] = handling_result.action_taken.value
+                        warnings = list(handling_result.warnings or [])
+                        if not applied and handling_result.action_taken.value in ('auto_correct', 'regenerate'):
+                            warnings.append('修正内容未能解析回结构化用例，已保留原文')
+                        case['handling_warnings'] = warnings
+                        processed_cases.append(case)
                     else:
                         # 用例被过滤掉
                         logger.info(f"用例 {case.get('case_id', i)} 因幻觉问题被过滤")

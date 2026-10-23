@@ -5,7 +5,8 @@ export default {
   },
   tabs: {
     upload: '知识库上传',
-    files: '知识库文件管理'
+    files: '知识库文件管理',
+    search: '知识检索'
   },
   actions: {
     upload: '上传文件',

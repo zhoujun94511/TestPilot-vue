@@ -63,7 +63,7 @@ def test_experimental_execute_confirm_and_query():
 
         confirm_resp = client.post("/api/experimental-actions/confirm", json={
             "execution_id": execution_id,
-            "metadata": {"operator_role": "admin"},
+            "metadata": {"confirmation_text": "DELETE"},
         })
         assert confirm_resp.status_code == 200
         confirm_payload = confirm_resp.get_json()

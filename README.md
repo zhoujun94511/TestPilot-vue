@@ -1,6 +1,6 @@
-# TestPilot - 智能测试用例生成工具
-
 <div align="center">
+
+# TestPilot - 智能测试用例生成工具
 
 ![TestPilot Logo](frontend/public/pic/favicon.ico)
 
@@ -436,9 +436,9 @@ TestPilot-vue/
 - **图表库**：Chart.js (数据可视化)
 
 ### AI模型支持
-- **OpenAI**：GPT-4、GPT-3.5-turbo
-- **Google Gemini**：Gemini-2.0-Flash、Gemini-Pro
-- **DeepSeek**：DeepSeek-Chat
+- **OpenAI**：gpt-5、gpt-4o
+- **Google Gemini**：gemini-3.8-flash
+- **DeepSeek**：deepseek-flash（V4.1-Flash）
 - **Qwen（通义千问）**：qwen-flash、qwen-plus、qwen-max
 - **Ollama**：本地部署模型支持
 - **自定义**：支持接入其他兼容OpenAI API的模型
@@ -815,12 +815,12 @@ OPENAI_MODEL=gpt-5
 # Google Gemini
 DEFAULT_COMPANY=GEMINI
 GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 
 # DeepSeek
 DEFAULT_COMPANY=DEEPSEEK
 DEEPSEEK_API_KEY=your-deepseek-key
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-flash
 
 # Qwen
 DEFAULT_COMPANY=QWEN

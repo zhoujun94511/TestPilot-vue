@@ -6,7 +6,10 @@ from flask import Blueprint, request, current_app
 from utils.utils_core.api_response import api_success, api_error, normalize_message_response
 from utils.utils_core.common_utils import normalize_language
 
-from services.config_center_service import config_center_service
+from services.config_center_service import (
+    SENSITIVE_VALUE_MASK,
+    config_center_service,
+)
 from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -72,13 +75,28 @@ def _config_error(code, message_key, message, status=400, message_params=None, d
     )
 
 
+def _effective_api_key(config_dict, present_keys, key):
+    """提交掩码或未提交时，用库里的原密钥做格式校验。"""
+    if key not in present_keys:
+        stored = config_center_service.get_config_value(key) or ''
+        return str(stored).strip()
+    submitted = str(config_dict.get(key) or '').strip()
+    if submitted == SENSITIVE_VALUE_MASK:
+        stored = config_center_service.get_config_value(key) or ''
+        return str(stored).strip()
+    return submitted
+
+
 def validate_ai_model_configs(configs):
     """Validate required AI model config values."""
     config_dict = {config['key']: config.get('value', '') for config in configs}
-    provider = config_dict.get('DEFAULT_COMPANY', '').upper()
+    present_keys = set(config_dict)
+    provider = str(config_dict.get('DEFAULT_COMPANY', '')).upper()
+    if 'DEFAULT_COMPANY' not in present_keys:
+        provider = str(config_center_service.get_config_value('DEFAULT_COMPANY') or provider).upper()
 
     if provider == 'OPENAI':
-        openai_key = config_dict.get('OPENAI_API_KEY', '').strip()
+        openai_key = _effective_api_key(config_dict, present_keys, 'OPENAI_API_KEY')
         if not openai_key:
             return _t(
                 'OpenAI API key is required. Please provide a valid API key or switch to another AI provider.',
@@ -91,7 +109,7 @@ def validate_ai_model_configs(configs):
             )
 
     elif provider == 'DEEPSEEK':
-        deepseek_key = config_dict.get('DEEPSEEK_API_KEY', '').strip()
+        deepseek_key = _effective_api_key(config_dict, present_keys, 'DEEPSEEK_API_KEY')
         if not deepseek_key:
             return _t(
                 'DeepSeek API key is required. Please provide a valid API key or switch to another AI provider.',
@@ -113,7 +131,7 @@ def validate_ai_model_configs(configs):
             )
 
     elif provider == 'GEMINI':
-        gemini_key = config_dict.get('GEMINI_API_KEY', '').strip()
+        gemini_key = _effective_api_key(config_dict, present_keys, 'GEMINI_API_KEY')
         if not gemini_key:
             return _t(
                 'Gemini API key is required. Please provide a valid API key or switch to another AI provider.',
@@ -127,7 +145,7 @@ def validate_ai_model_configs(configs):
             )
 
     elif provider == 'QWEN':
-        qwen_key = config_dict.get('QWEN_API_KEY', '').strip()
+        qwen_key = _effective_api_key(config_dict, present_keys, 'QWEN_API_KEY')
         if not qwen_key:
             return _t(
                 'Qwen API key is required. Please provide a valid API key or switch to another AI provider.',
@@ -190,6 +208,26 @@ def _reload_runtime_flags():
         settings.load_from_config_center()
     except Exception as reload_error:
         logger.warning('Failed to reload runtime flags: %s', reload_error)
+
+
+_AI_RUNTIME_KEYS = {
+    'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_MODEL', 'TR_OPENAI_MAX_TOKENS',
+    'DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_MODEL', 'TR_DEEPSEEK_MAX_TOKENS',
+    'OLLAMA_BASE_URL', 'OLLAMA_MODEL',
+    'GEMINI_API_KEY', 'GEMINI_BASE_URL', 'GEMINI_MODEL', 'TR_GEMINI_MAX_TOKENS',
+    'QWEN_API_KEY', 'QWEN_BASE_URL', 'QWEN_MODEL', 'QWEN_TEMPERATURE', 'TR_QWEN_MAX_TOKENS', 'QWEN_TIMEOUT',
+    'MAX_TOKENS', 'DEFAULT_COMPANY', 'GPT5_VERBOSITY', 'GPT5_REASONING_EFFORT',
+    'ENABLE_OPENAI', 'ENABLE_DEEPSEEK', 'ENABLE_OLLAMA', 'ENABLE_GEMINI', 'ENABLE_QWEN',
+}
+
+
+def _reload_after_config_change(keys, category=None):
+    """AI 相关键重载模型，其余已映射键只刷新 settings。"""
+    normalized = {str(key).upper() for key in keys if key}
+    if category == 'ai_model' or normalized & _AI_RUNTIME_KEYS:
+        _reload_ai_runtime()
+    else:
+        _reload_runtime_flags()
 
 
 @config_center_bp.route('/categories', methods=['GET'])
@@ -319,10 +357,8 @@ def update_configs_by_category(category):
                 })
 
         updated_keys = {str(item.get('key', '')) for item in data['configs'] if isinstance(item, dict)}
-        if category == 'ai_model' and updated_count > 0:
-            _reload_ai_runtime()
-        elif 'ENABLE_EXPERIMENTAL_ACTIONS' in updated_keys and updated_count > 0:
-            _reload_runtime_flags()
+        if updated_count > 0:
+            _reload_after_config_change(updated_keys, category)
 
         return _config_success(
             data={
@@ -349,9 +385,9 @@ def update_configs_by_category(category):
 def get_config_item(key):
     """Get a single config item value."""
     try:
-        value = config_center_service.get_config_value(key)
+        item = config_center_service.get_public_config_item(key)
         return _config_success(
-            data={'key': key, 'value': value},
+            data=item,
             code='CONFIG_ITEM_FETCH_SUCCESS',
             message_key='configCenter.message.itemLoaded',
             message='Configuration item loaded successfully'
@@ -391,8 +427,7 @@ def update_config_item(key):
         )
 
         if success:
-            if str(key).upper() == 'ENABLE_EXPERIMENTAL_ACTIONS':
-                _reload_runtime_flags()
+            _reload_after_config_change([key], data.get('category'))
             return _config_success(
                 code='CONFIG_ITEM_UPDATE_SUCCESS',
                 message_key='configCenter.message.itemUpdateSuccess',
@@ -427,6 +462,7 @@ def delete_config_item(key):
         )
 
         if success:
+            _reload_after_config_change([key])
             return _config_success(
                 code='CONFIG_ITEM_DELETE_SUCCESS',
                 message_key='configCenter.message.itemDeleteSuccess',
@@ -529,6 +565,7 @@ def import_configs():
         )
 
         if success:
+            _reload_ai_runtime()
             return _config_success(
                 data={'imported_count': imported_count},
                 code='CONFIG_IMPORT_SUCCESS',
@@ -591,14 +628,15 @@ def validate_config(key):
                 status=400
             )
 
+        valid, message = config_center_service.validate_config_value(key, data.get('value'))
         return _config_success(
             data={
-                'valid': True,
-                'message': 'Configuration value validated successfully'
+                'valid': bool(valid),
+                'message': message
             },
-            code='CONFIG_VALIDATE_SUCCESS',
-            message_key='config.message.validateSuccess',
-            message='Configuration value validated successfully'
+            code='CONFIG_VALIDATE_SUCCESS' if valid else 'CONFIG_VALIDATE_FAILED',
+            message_key='config.message.validateSuccess' if valid else 'configCenter.message.validationFailed',
+            message=message or ('Configuration value validated successfully' if valid else 'Configuration value is invalid')
         )
     except Exception as e:
         logger.error('Validate config failed: %s, error: %s', key, e)

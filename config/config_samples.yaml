@@ -55,7 +55,7 @@ configs:
     description: DeepSeek服务地址
     is_sensitive: false
   - key: DEEPSEEK_MODEL
-    value: deepseek-chat
+    value: deepseek-flash
     value_type: string
     category: ai_model
     description: DeepSeek模型名称

@@ -5,7 +5,8 @@ export default {
   },
   tabs: {
     upload: 'Knowledge Upload',
-    files: 'Knowledge File Management'
+    files: 'Knowledge File Management',
+    search: 'Knowledge Search'
   },
   actions: {
     upload: 'Upload File',

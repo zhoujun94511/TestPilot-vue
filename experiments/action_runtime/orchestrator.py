@@ -75,10 +75,10 @@ class ExperimentalActionOrchestrator:
     def _authorize(request: ActionRequest, plan: ActionPlan) -> tuple[bool, str]:
         if plan.risk_level != "high":
             return True, ""
-        operator_role = str((request.metadata or {}).get("operator_role", "")).strip().lower()
-        if operator_role in ("admin", "owner"):
+        # 本地单用户工具没有登录态，高风险动作只允许进入确认，不能凭请求体里的角色直接执行。
+        if request.require_confirmation and plan.requires_confirmation:
             return True, ""
-        return False, "高风险动作仅允许 admin/owner 角色执行"
+        return False, "高风险动作必须经过确认后才能执行"
 
     def _infer_plan(self, request: ActionRequest) -> ActionPlan:
         text = (request.query or "").strip().lower()
@@ -301,13 +301,21 @@ class ExperimentalActionOrchestrator:
             )
 
         if request.require_confirmation and plan.requires_confirmation:
+            preview = None
+            if plan.tool_name == "delete_case":
+                preview_args = dict(plan.args)
+                preview_args["dry_run"] = True
+                try:
+                    preview = tool_delete_case(**preview_args)
+                except Exception as preview_error:
+                    logger.warning("删除预演失败: %s", preview_error)
             result = self._build_result(
                 execution_id=execution_id,
                 success=True,
                 status="needs_confirmation",
                 message="动作需要确认",
                 plan=plan,
-                tool_output=None,
+                tool_output=preview,
                 error=None,
             )
             self._write_audit_log(
@@ -363,6 +371,18 @@ class ExperimentalActionOrchestrator:
             reason="confirmed by user",
             requires_confirmation=False,
         )
+        if plan.risk_level == "high":
+            confirmation = str((metadata or {}).get("confirmation_text", "")).strip()
+            if confirmation != "DELETE":
+                return self._build_result(
+                    execution_id=record.execution_id,
+                    success=False,
+                    status="failed",
+                    message="高风险动作需要输入 DELETE 确认",
+                    plan=plan,
+                    tool_output=None,
+                    error="confirmation_required",
+                )
         if plan.risk_level == "high" and plan.tool_name == "delete_case":
             plan.args["dry_run"] = False
         action_request = ActionRequest(

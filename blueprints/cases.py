@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 import json
+from typing import Any
 from models.models import db, TestCase
 from datetime import datetime, timezone
 from werkzeug.exceptions import BadRequest
@@ -53,8 +54,63 @@ def _resolve_case_generation_use_rag() -> bool:
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in ('true', '1', 'yes', 'on', 'enabled')
-    except Exception:
+    except (ImportError, AttributeError, TypeError, ValueError, OSError, RuntimeError):
         return False
+
+
+def _json_text(value):
+    """把列表或字典编码一次。已经是合法 JSON 的字符串保持原样。"""
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return json.dumps([], ensure_ascii=False)
+        try:
+            json.loads(text)
+            return text
+        except (json.JSONDecodeError, TypeError):
+            return json.dumps(text, ensure_ascii=False)
+    return json.dumps([] if value is None else value, ensure_ascii=False)
+
+
+def _new_test_case(case_data, requirement_id=None):
+    tags = case_data.get('tags') or []
+    if isinstance(tags, str):
+        tag_text = tags
+    else:
+        tag_text = ','.join(str(tag) for tag in tags if tag is not None)
+    return TestCase(
+        case_id=generate_case_id_from_data(case_data),
+        display_id=case_data.get('display_id') or '',
+        title=case_data.get('title', ''),
+        description=case_data.get('description', ''),
+        precondition=case_data.get('precondition', case_data.get('preconditions', '')),
+        steps=_json_text(case_data.get('steps', [])),
+        expected_result=_json_text(case_data.get('expected_result', case_data.get('expected', []))),
+        priority=case_data.get('priority', 'P2'),
+        category=case_data.get('category', case_data.get('test_type', 'functional')),
+        test_method=case_data.get('test_method', ''),
+        module=case_data.get('module', ''),
+        tags=tag_text,
+        status='draft',
+        created_by='system',
+        requirement_id=requirement_id
+    )
+
+
+def _hallucination_payload(result):
+    detection = result.get('hallucination_detection') if isinstance(result, dict) else None
+    if not isinstance(detection, dict):
+        return None
+    summary = detection.get('detection_summary') if isinstance(detection.get('detection_summary'), dict) else {}
+    quality = summary.get('quality_score')
+    score = round(float(quality) * 100, 1) if isinstance(quality, (int, float)) else None
+    return {
+        'hallucination_count': detection.get('hallucination_count', 0),
+        'hallucination_rate': detection.get('hallucination_rate'),
+        'avg_confidence': detection.get('avg_confidence'),
+        'quality_score': quality,
+        'score': score,
+    }
 
 
 @cases_bp.route('/generate', methods=['POST'])
@@ -92,35 +148,22 @@ def generate_test_cases():
             # 保存到数据库
             saved_cases = []
             for case_data in result['cases']:
-                # 使用新的ID生成服务生成唯一ID
-                case_id = generate_case_id_from_data(case_data)
-
-                test_case = TestCase(
-                    case_id=case_id,  # 使用新的ID生成服务
-                    title=case_data.get('title', ''),
-                    description=case_data.get('description', ''),
-                    precondition=case_data.get('precondition', case_data.get('preconditions', '')),
-                    steps=json.dumps(case_data.get('steps', []), ensure_ascii=False),
-                    expected_result=json.dumps(case_data.get('expected_result', case_data.get('expected', [])), ensure_ascii=False),
-                    priority=case_data.get('priority', 'P2'),  # 使用AI返回的优先级，默认为P2
-                    category=case_data.get('category', case_data.get('test_type', 'functional')),
-                    test_method=case_data.get('test_method', ''),
-                    module=case_data.get('module', ''),
-                    tags=','.join(case_data.get('tags', [])),
-                    status='draft',
-                    created_by='system'
-                )
+                test_case = _new_test_case(case_data)
                 db.session.add(test_case)
                 saved_cases.append(test_case.to_dict())
 
             db.session.commit()
 
-            return jsonify({
+            payload: dict[str, Any] = {
                 'success': True,
                 'message': f'成功生成{len(saved_cases)}个测试用例',
                 'cases': saved_cases,
                 'total': len(saved_cases)
-            })
+            }
+            hallucination = _hallucination_payload(result)
+            if hallucination:
+                payload['hallucination_detection'] = hallucination
+            return jsonify(payload)
         else:
             status_code = int(result.get('status_code') or 500)
             return jsonify({
@@ -185,23 +228,7 @@ def batch_generate_cases():
             for req_result in result['results']:
                 if req_result['success']:
                     for case_data in req_result['cases']:
-                        test_case = TestCase(
-                            case_id=generate_case_id_from_data(case_data),
-                            display_id=case_data.get('display_id', ''),
-                            title=case_data.get('title', ''),
-                            description=case_data.get('description', ''),
-                            precondition=case_data.get('precondition', case_data.get('preconditions', '')),
-                            steps=json.dumps(case_data.get('steps', []), ensure_ascii=False),
-                            expected_result=json.dumps(case_data.get('expected_result', case_data.get('expected', [])), ensure_ascii=False),
-                            priority=case_data.get('priority', 'P2'),  # 使用AI返回的优先级，默认为P2
-                            category=case_data.get('category', case_data.get('test_type', 'functional')),
-                            test_method=case_data.get('test_method', ''),
-                            module=case_data.get('module', ''),
-                            tags=','.join(case_data.get('tags', [])),
-                            status='draft',
-                            created_by='system',
-                            requirement_id=req_result.get('requirement_id')
-                        )
+                        test_case = _new_test_case(case_data, req_result.get('requirement_id'))
                         db.session.add(test_case)
                         all_saved_cases.append(test_case.to_dict())
 
@@ -210,6 +237,7 @@ def batch_generate_cases():
             return jsonify({
                 'success': True,
                 'message': f'批量生成完成，共生成{len(all_saved_cases)}个测试用例',
+                'cases': all_saved_cases,
                 'results': result['results'],
                 'total_cases': len(all_saved_cases),
                 'summary': result.get('summary', {})
@@ -268,7 +296,8 @@ def list_test_cases():
             query = query.filter(
                 TestCase.title.contains(search) |
                 TestCase.description.contains(search) |
-                TestCase.case_id.contains(search)
+                TestCase.case_id.contains(search) |
+                TestCase.display_id.contains(search)
             )
 
         # 排序和分页
@@ -357,9 +386,9 @@ def update_test_case(case_id):
         if 'precondition' in data:
             test_case.precondition = data['precondition']
         if 'steps' in data:
-            test_case.steps = json.dumps(data['steps'], ensure_ascii=False)
+            test_case.steps = _json_text(data['steps'])
         if 'expected_result' in data:
-            test_case.expected_result = data['expected_result']
+            test_case.expected_result = _json_text(data['expected_result'])
         if 'priority' in data:
             test_case.priority = data['priority']
         if 'category' in data:
@@ -518,7 +547,11 @@ def generate_cases_from_analysis():
 
         # 为每个需求生成测试用例
         all_cases = []
+        failures = []
         for req in requirements:
+            if not isinstance(req, dict):
+                failures.append({'title': '', 'message': '需求数据格式无效'})
+                continue
             result = case_service.generate_cases(
                 requirement_text=req.get('content', ''),
                 use_rag=use_rag,
@@ -528,38 +561,45 @@ def generate_cases_from_analysis():
                 llm=getattr(current_app, 'llm_case_generation', None),  # type: ignore 使用用例生成专用LLM
                 vector_db=getattr(current_app, 'vector_db', None) if use_rag else None  # type: ignore
             )
-            
-            if result['success']:
-                all_cases.extend(result['cases'])
 
-        # 保存生成的用例
+            if result.get('success') and result.get('cases'):
+                all_cases.extend(result['cases'])
+            else:
+                failures.append({
+                    'req_id': req.get('req_id'),
+                    'title': req.get('title', ''),
+                    'message': result.get('message', '生成失败') if isinstance(result, dict) else '生成失败'
+                })
+
         saved_cases = []
         for case_data in all_cases:
-            test_case = TestCase(
-                case_id=generate_case_id_from_data(case_data),
-                title=case_data.get('title', ''),
-                description=case_data.get('description', ''),
-                precondition=case_data.get('precondition', ''),
-                steps=json.dumps(case_data.get('steps', []), ensure_ascii=False),
-                expected_result=json.dumps(case_data.get('expected_result', []), ensure_ascii=False),
-                priority=case_data.get('priority', 'P2'),
-                category=case_data.get('category', 'functional'),
-                test_method=case_data.get('test_method', ''),
-                module=case_data.get('module', ''),
-                tags=','.join(case_data.get('tags', [])),
-                status='draft',
-                created_by='system'
-            )
+            test_case = _new_test_case(case_data, case_data.get('requirement_id'))
             db.session.add(test_case)
             saved_cases.append(test_case.to_dict())
 
+        if not saved_cases:
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'message': '未能生成测试用例',
+                'cases': [],
+                'total': 0,
+                'failed': failures,
+                'failed_count': len(failures)
+            }), 502
+
         db.session.commit()
+        message = f'成功生成{len(saved_cases)}个测试用例'
+        if failures:
+            message = f'{message}，{len(failures)}个需求生成失败'
 
         return jsonify({
             'success': True,
-            'message': f'成功生成{len(saved_cases)}个测试用例',
+            'message': message,
             'cases': saved_cases,
-            'total': len(saved_cases)
+            'total': len(saved_cases),
+            'failed': failures,
+            'failed_count': len(failures)
         })
 
     except BadRequest as e:
