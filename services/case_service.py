@@ -17,6 +17,14 @@ from utils.utils_performance_monitoring.performance_monitor import get_performan
 from utils.utils_core.logger import get_logger
 from utils.utils_ai_quality.hallucination_detector import create_hallucination_detector
 from utils.utils_ai_quality.hallucination_handler import create_hallucination_handler
+from utils.utils_ai_quality.faithfulness_checker import (
+    assess_quantified_claims,
+    case_allows_unmentioned,
+    contradiction_issue,
+    expected_sentences,
+    join_source_text,
+    judge_sentences,
+)
 from utils.utils_core.api_error_handler import build_model_error_result
 from utils.utils_core import error_codes as ec
 from config.settings import settings
@@ -359,7 +367,8 @@ class CaseService:
 
     def _detect_hallucination_in_cases(self, cases: List[Dict[str, Any]], 
                                      requirement_text: str, 
-                                     enhanced_context: str = None) -> Dict[str, Any]:
+                                     enhanced_context: str = None,
+                                     llm=None) -> Dict[str, Any]:
         """
         检测测试用例中的幻觉
         
@@ -398,11 +407,27 @@ class CaseService:
                 case_content += f"前置条件: {case.get('precondition', '')}"
                 case_contents.append(case_content)
             
-            # 批量检测
-            detection_results = self.hallucination_detector.batch_detect(
-                case_contents, 
-                source_documents
-            )
+            detection_results = []
+            for case, case_content in zip(cases, case_contents):
+                allow_unmentioned = case_allows_unmentioned(case)
+                result = self.hallucination_detector.detect_hallucination(
+                    case_content,
+                    source_documents,
+                    context=requirement_text,
+                    allow_unmentioned=allow_unmentioned,
+                )
+                if llm is not None and not allow_unmentioned:
+                    source_text = join_source_text(source_documents, requirement_text)
+                    judged = judge_sentences(llm, source_text, expected_sentences(case.get('expected_result')))
+                    for item in judged:
+                        result.source_verification.setdefault('claims', []).append(item)
+                        if item.get('verdict') == 'contradicted':
+                            result.issues.append(f"互相矛盾: 「{item.get('text', '')}」与原文相反")
+                            result.is_hallucination = True
+                            result.confidence = 0.6
+                            if "只改写互相矛盾的句子，保留其余步骤和预期结果" not in result.suggestions:
+                                result.suggestions.append("只改写互相矛盾的句子，保留其余步骤和预期结果")
+                detection_results.append(result)
             
             # 生成检测报告
             report = self.hallucination_detector.generate_detection_report(detection_results)
@@ -416,7 +441,9 @@ class CaseService:
                         'is_hallucination': result.is_hallucination,
                         'confidence': result.confidence,
                         'issues': result.issues,
-                        'suggestions': result.suggestions
+                        'suggestions': result.suggestions,
+                        'hints': result.source_verification.get('hints', []),
+                        'claims': result.source_verification.get('claims', []),
                     }
                 enhanced_cases.append(case)
             
@@ -1983,7 +2010,7 @@ JSON:
         if not cases or not getattr(settings, 'ENABLE_HALLUCINATION_DETECTION', True):
             return cases, None
         try:
-            detection = self._detect_hallucination_in_cases(cases, requirement_text, context or '')
+            detection = self._detect_hallucination_in_cases(cases, requirement_text, context or '', llm)
             logger.info(f"幻觉检测完成，检测到{detection.get('hallucination_count', 0)}个潜在问题")
             final_cases = cases
             if detection.get('hallucination_count', 0) > 0:
@@ -2086,6 +2113,10 @@ JSON:
                 # 检查是否有幻觉检测结果
                 detection_info = case.get('hallucination_detection')
                 if detection_info and detection_info.get('is_hallucination', False):
+                    snapshot = {
+                        key: list(case.get(key)) if isinstance(case.get(key), list) else case.get(key)
+                        for key in ('title', 'steps', 'expected_result', 'precondition')
+                    }
                     # 创建检测结果对象
                     from utils.utils_ai_quality.hallucination_detector import HallucinationResult
                     detection_result = HallucinationResult(
@@ -2119,6 +2150,27 @@ JSON:
                         warnings = list(handling_result.warnings or [])
                         if not applied and handling_result.action_taken.value in ('auto_correct', 'regenerate'):
                             warnings.append('修正内容未能解析回结构化用例，已保留原文')
+                        if applied and handling_result.action_taken.value == 'regenerate':
+                            recheck_content = (
+                                f"标题: {case.get('title', '')}\n"
+                                f"步骤: {'; '.join(case.get('steps', []) if isinstance(case.get('steps'), list) else [str(case.get('steps') or '')])}\n"
+                                f"预期结果: {case.get('expected_result', '')}\n"
+                                f"前置条件: {case.get('precondition', '')}"
+                            )
+                            still_bad = [
+                                claim for claim in assess_quantified_claims(
+                                    recheck_content,
+                                    requirement_text,
+                                    case_allows_unmentioned(case),
+                                )
+                                if claim.get('verdict') == 'contradicted'
+                            ]
+                            if still_bad:
+                                case.update(snapshot)
+                                warnings.append(
+                                    '重写后数量和单位仍与原文不一致，已保留原用例：'
+                                    + contradiction_issue(still_bad[0])
+                                )
                         case['handling_warnings'] = warnings
                         processed_cases.append(case)
                     else:

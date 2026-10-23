@@ -164,7 +164,8 @@ class ChatService:
                     hallucination_result = self.hallucination_detector.detect_hallucination(
                         ai_response, 
                         source_documents, 
-                        context=message
+                        context=message,
+                        allow_unmentioned=True,
                     )
                     
                     if hallucination_result.is_hallucination:
@@ -214,7 +215,8 @@ class ChatService:
                     'is_hallucination': hallucination_result.is_hallucination,
                     'confidence': hallucination_result.confidence,
                     'issues': hallucination_result.issues,
-                    'suggestions': hallucination_result.suggestions
+                    'suggestions': hallucination_result.suggestions,
+                    'hints': hallucination_result.source_verification.get('hints', []),
                 }
 
             return result
@@ -366,7 +368,8 @@ class ChatService:
                     hallucination_result = self.hallucination_detector.detect_hallucination(
                         full_response, 
                         source_documents, 
-                        context=message
+                        context=message,
+                        allow_unmentioned=True,
                     )
                     
                     if hallucination_result.is_hallucination:
@@ -390,7 +393,8 @@ class ChatService:
                     'is_hallucination': hallucination_result.is_hallucination,
                     'confidence': hallucination_result.confidence,
                     'issues': hallucination_result.issues,
-                    'suggestions': hallucination_result.suggestions
+                    'suggestions': hallucination_result.suggestions,
+                    'hints': hallucination_result.source_verification.get('hints', []),
                 }
             
             yield self._create_stream_event("end", end_data)

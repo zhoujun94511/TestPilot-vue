@@ -118,6 +118,8 @@ class HallucinationHandler:
         # 如果没有检测到问题，直接通过
         if not detection_result.is_hallucination:
             return HallucinationAction.WARN_ONLY
+        if any(str(issue).startswith("互相矛盾") for issue in detection_result.issues):
+            return HallucinationAction.REGENERATE
         
         # 根据置信度确定处理策略
         if confidence >= self.filter_threshold:
@@ -323,10 +325,10 @@ class HallucinationHandler:
             prompt += f"\n上下文信息：\n{context}"
         
         # 根据重试次数调整提示内容
-        if regenerate_count == 0:
-            prompt += "\n\n请生成准确、具体、有依据的内容，避免模糊表述和逻辑矛盾。"
-        else:
-            prompt += f"\n\n⚠️ 这是第{regenerate_count + 1}次重新生成，请务必生成高质量、准确的内容。避免使用模糊表述、逻辑矛盾或缺乏依据的声明。"
+        prompt += (
+            "\n\n只改写上面标成互相矛盾的句子，使其中的数量和上下文一致。"
+            "保留标题、步骤、预期结果、前置条件这些标签，不要整段重写。"
+        )
         
         return prompt
     

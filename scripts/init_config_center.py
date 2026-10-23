@@ -124,6 +124,8 @@ def init_default_configs():
                  'category': 'case_generation', 'description': '内容相似度阈值', 'is_sensitive': False},
                 {'key': 'ENABLE_CONTENT_DEDUP', 'value': 'true', 'value_type': 'bool',
                  'category': 'case_generation', 'description': '启用内容去重', 'is_sensitive': False},
+                {'key': 'ENABLE_HALLUCINATION_DETECTION', 'value': 'true', 'value_type': 'bool',
+                 'category': 'case_generation', 'description': '启用幻觉检测', 'is_sensitive': False},
                 {'key': 'ENABLE_CASE_GENERATION_RAG', 'value': 'false', 'value_type': 'bool',
                  'category': 'case_generation', 'description': '启用用例生成知识库增强', 'is_sensitive': False},
                 {'key': 'CONTENT_DEDUP_BATCH_SIZE', 'value': '100', 'value_type': 'int',
@@ -273,6 +275,9 @@ def init_validation_rules():
                 {'config_key': 'ENABLE_CONTENT_DEDUP', 'validation_type': 'enum',
                  'validation_config': {'values': [True, False, 'true', 'false', '1', '0']},
                  'error_message': '内容去重开关必须是布尔值', 'is_required': True},
+                {'config_key': 'ENABLE_HALLUCINATION_DETECTION', 'validation_type': 'enum',
+                 'validation_config': {'values': [True, False, 'true', 'false', '1', '0']},
+                 'error_message': '幻觉检测开关必须是布尔值', 'is_required': True},
                 {'config_key': 'ENABLE_CASE_GENERATION_RAG', 'validation_type': 'enum',
                  'validation_config': {'values': [True, False, 'true', 'false', '1', '0']},
                  'error_message': '用例生成知识库增强开关必须是布尔值', 'is_required': True}

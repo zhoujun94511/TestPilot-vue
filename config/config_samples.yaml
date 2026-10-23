@@ -102,6 +102,12 @@ configs:
     category: case_generation
     description: 启用内容去重
     is_sensitive: false
+  - key: ENABLE_HALLUCINATION_DETECTION
+    value: 'true'
+    value_type: bool
+    category: case_generation
+    description: 启用幻觉检测
+    is_sensitive: false
   - key: CONTENT_DEDUP_BATCH_SIZE
     value: '100'
     value_type: int

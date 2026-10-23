@@ -8,6 +8,11 @@ import re
 from typing import Dict, List, Any
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from utils.utils_ai_quality.faithfulness_checker import (
+    assess_quantified_claims,
+    contradiction_issue,
+    join_source_text,
+)
 from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -66,56 +71,39 @@ class HallucinationDetector:
     def detect_hallucination(self, 
                            generated_content: str, 
                            source_documents: List[Dict[str, Any]] = None,
-                           context: str = None) -> HallucinationResult:
+                           context: str = None,
+                           allow_unmentioned: bool = False) -> HallucinationResult:
         """
-        检测生成内容中的幻觉
-        
-        Args:
-            generated_content: AI生成的内容
-            source_documents: 源文档列表
-            context: 上下文信息
-            
-        Returns:
-            幻觉检测结果
+        检测生成内容中的幻觉。
+
+        词表、正反词和整段相似度只写入 hints。是否拦截只看带单位的数量是否和原文互相矛盾。
+        allow_unmentioned 为真时，原文没写的数量不拦截，供边界用例、负向用例和聊天使用。
         """
         try:
-            issues = []
-            
-            # 1. 模式匹配检测
-            pattern_issues = self._detect_pattern_hallucination(generated_content)
-            issues.extend(pattern_issues)
-            
-            # 2. 逻辑一致性检测
-            logic_issues = self._detect_logic_contradictions(generated_content)
-            issues.extend(logic_issues)
-            
-            # 3. 事实性验证
-            factual_issues = self._detect_factual_inconsistencies(generated_content, source_documents)
-            issues.extend(factual_issues)
-            
-            # 4. 内容一致性检查
-            consistency_issues = self._detect_content_inconsistency(generated_content, source_documents)
-            issues.extend(consistency_issues)
-            
-            # 5. 来源验证
-            source_verification = self._verify_sources(generated_content, source_documents)
-            
-            # 6. 上下文一致性检查（如果提供上下文）
+            hints = []
+            hints.extend(self._detect_pattern_hallucination(generated_content))
+            hints.extend(self._detect_logic_contradictions(generated_content))
+            hints.extend(self._detect_factual_inconsistencies(generated_content, source_documents))
+            hints.extend(self._detect_content_inconsistency(generated_content, source_documents))
             if context:
-                context_issues = self._check_context_consistency(generated_content, context)
-                issues.extend(context_issues)
-            
-            # 计算置信度
-            confidence = self._calculate_confidence(issues, generated_content)
-            
-            # 生成建议
-            suggestions = self._generate_suggestions(issues, generated_content)
-            
-            # 判断是否为幻觉
-            is_hallucination = len(issues) > 0 and confidence > self.confidence_threshold
-            
+                hints.extend(self._check_context_consistency(generated_content, context))
+
+            source_text = join_source_text(source_documents, context)
+            claims = assess_quantified_claims(generated_content, source_text, allow_unmentioned)
+            issues = [
+                contradiction_issue(claim)
+                for claim in claims
+                if claim["verdict"] == "contradicted"
+            ]
+            source_verification = self._verify_sources(generated_content, source_documents)
+            source_verification["hints"] = hints
+            source_verification["claims"] = claims
+
+            confidence = 0.6 if issues else 0.0
+            suggestions = ["只改写互相矛盾的句子，保留其余步骤和预期结果"] if issues else []
+
             return HallucinationResult(
-                is_hallucination=is_hallucination,
+                is_hallucination=bool(issues),
                 confidence=confidence,
                 issues=issues,
                 suggestions=suggestions,
@@ -289,12 +277,17 @@ class HallucinationDetector:
         
         return suggestions
 
-    def batch_detect(self, contents: List[str], source_documents: List[Dict[str, Any]] = None) -> List[HallucinationResult]:
+    def batch_detect(self, contents: List[str], source_documents: List[Dict[str, Any]] = None,
+                     allow_unmentioned: bool = False) -> List[HallucinationResult]:
         """批量检测"""
         results = []
         
         for content in contents:
-            result = self.detect_hallucination(content, source_documents)
+            result = self.detect_hallucination(
+                content,
+                source_documents,
+                allow_unmentioned=allow_unmentioned,
+            )
             results.append(result)
         
         return results
