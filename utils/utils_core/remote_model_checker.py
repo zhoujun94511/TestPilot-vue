@@ -6,7 +6,13 @@
 """
 import requests
 from typing import Dict, Any, Tuple
-from config.settings import resolve_deepseek_model, resolve_gemini_model, resolve_openai_model, settings
+from config.settings import (
+    resolve_anthropic_model,
+    resolve_deepseek_model,
+    resolve_gemini_model,
+    resolve_openai_model,
+    settings,
+)
 from utils.utils_core.api_error_handler import handle_api_error, get_service_name, get_api_key_with_fallback
 from utils.utils_core.logger import get_logger
 
@@ -46,6 +52,8 @@ class RemoteModelChecker:
             return self._check_gemini_availability()
         elif company_upper == "QWEN":
             return self._check_qwen_availability()
+        elif company_upper == "ANTHROPIC":
+            return self._check_anthropic_availability()
         else:
             return False, f"不支持的AI提供商: {company_upper}", {"error_type": "unsupported"}
     
@@ -340,7 +348,59 @@ class RemoteModelChecker:
             error_msg = f"Qwen: 检查过程中发生未知错误: {str(e)}"
             logger.error(f"❌ {error_msg}")
             return False, error_msg, {"error_type": "unknown", "can_retry": False}
-    
+
+    def _check_anthropic_availability(self) -> Tuple[bool, str, Dict[str, Any]]:
+        """检查 Claude。当前型号不传 temperature，只发 Messages API 要求的 max_tokens。"""
+        try:
+            api_key, source, validation_result = get_api_key_with_fallback("ANTHROPIC")
+            if api_key is None:
+                return False, validation_result, {"error_type": "config", "details": validation_result}
+
+            base_url = getattr(settings, 'ANTHROPIC_BASE_URL', 'https://api.anthropic.com').rstrip('/')
+            model = resolve_anthropic_model(getattr(settings, 'ANTHROPIC_MODEL', None))
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            }
+            response = requests.post(
+                f"{base_url}/v1/messages",
+                headers=headers,
+                json={
+                    "model": model,
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                },
+                timeout=self.timeout,
+            )
+            if response.status_code == 200:
+                logger.info("Anthropic 模型可用性检查通过")
+                return True, "Anthropic 模型可用", {
+                    "model": model,
+                    "base_url": base_url,
+                    "status_code": response.status_code,
+                    "key_source": source,
+                }
+            can_retry, error_msg = handle_api_error(response, "Anthropic")
+            return False, error_msg, {
+                "error_type": "api_error",
+                "status_code": response.status_code,
+                "can_retry": can_retry,
+                "details": error_msg,
+            }
+        except requests.exceptions.Timeout:
+            error_msg = "Anthropic: 请求超时。请检查网络连接或稍后重试。"
+            logger.error(error_msg)
+            return False, error_msg, {"error_type": "timeout", "can_retry": True}
+        except requests.exceptions.ConnectionError:
+            error_msg = "Anthropic: 网络连接失败。请检查网络连接和代理设置。"
+            logger.error(error_msg)
+            return False, error_msg, {"error_type": "connection", "can_retry": True}
+        except Exception as e:
+            error_msg = f"Anthropic: 检查过程中发生未知错误: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg, {"error_type": "unknown", "can_retry": False}
+
     def get_model_status_summary(self, company: str) -> Dict[str, Any]:
         """
         获取模型状态摘要

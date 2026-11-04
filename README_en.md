@@ -1,8 +1,8 @@
 <div align="center">
 
-# TestPilot - Intelligent Test Case Generation Tool
+# TestPilot - Intelligent Test Case Generation and Management Tool
 
-![TestPilot Logo](frontend/public/pic/favicon.ico)
+<img src="./frontend/public/pic/favicon-512.png" alt="TestPilot Logo" width="96" height="96" />
 
 **AI-powered intelligent test case generation and management platform**
 
@@ -17,7 +17,7 @@
 
 </div>
 
-<img src="./pictures/图1-1-1总览界面-EN.png" alt="Overview UI" />
+<img src="./pictures/002-EN-主界面.webp" alt="Home" />
 
 ## Project Overview
 
@@ -126,7 +126,7 @@ TestPilot aims to solve real testing pain points using AI, building an intellige
 
 TestPilot adopts a layered architecture combined with modern techniques:
 
-<img src="./pictures/图1-1-1系统总体架构图.png" alt="System Architecture Overview" />
+<img src="./pictures/图1-1-1系统总体架构图.webp" alt="System Architecture Overview" />
 
 ### Vector Store Architecture
 
@@ -352,8 +352,7 @@ TestPilot-vue/
 - **Keyword extraction** with stop-word filtering and tech term detection.
 - **RAG enhancement** via knowledge base retrieval.
 
-<img src="./pictures/图1-2-1测试用例生成界面-EN.png" alt="Test Case Generation UI" />
-<img src="./pictures/图1-2-2测试用例生成界面-EN.png" alt="Test Case Generation UI" />
+<img src="./pictures/005-EN-测试用例.webp" alt="Test cases" />
 
 ### Requirement Analysis
 
@@ -364,8 +363,7 @@ TestPilot-vue/
 - **Complexity evaluation** and workload estimation.
 - **Stop-word filtering** for cleaner keywords.
 
-<img src="./pictures/图1-3-1需求分析界面-EN.png" alt="Requirement Analysis UI" />
-<img src="./pictures/图1-3-2需求分析界面-EN.png" alt="Requirement Analysis UI" />
+<img src="./pictures/003-EN-需求文档.webp" alt="Requirement documents" />
 
 ### Knowledge Base Management
 
@@ -376,8 +374,7 @@ TestPilot-vue/
 - **Retrieval optimization** (re-ranking, query expansion, monitoring).
 - **Category & tag management**.
 
-<img src="./pictures/图1-4-1知识库管理界面-EN.png" alt="Knowledge Base Management UI" />
-<img src="./pictures/图1-4-2知识库管理界面-EN.png" alt="Knowledge Base Management UI" />
+<img src="./pictures/004-EN-知识库.webp" alt="Knowledge base" />
 
 ### AI Testing Assistant
 
@@ -387,7 +384,16 @@ TestPilot-vue/
 - **Templates** for common testing scenarios.
 - **Content quality checks** on AI replies.
 
-<img src="./pictures/图1-5-1智能助手界面-EN.png" alt="AI Testing Assistant UI" />
+<img src="./pictures/006-EN-AI聊天.webp" alt="AI chat" />
+
+### Experimental tools
+
+- **Rule skeleton**: deterministic cases from acceptance criteria, optional model fill-in, saved only after preview confirmation.
+- **Coverage review**: compare linked cases against a requirement and list gaps.
+- **Trace matrix**: requirements without cases, dangling requirement IDs, and unlinked cases.
+- Off by default (`ENABLE_EXPERIMENTAL_ACTIONS`); open from the sidebar when enabled.
+
+<img src="./pictures/007-EN-实验功能.webp" alt="Experimental tools" />
 
 ### Hallucination Detection
 
@@ -406,6 +412,8 @@ TestPilot-vue/
 - **Validation rules** for safety (e.g., API key format).
 - **Sensitive data protection**.
 - **Dynamic effects** without restart.
+
+<img src="./pictures/008-EN-配置中心.webp" alt="Config center" />
 
 ### Data Management
 
@@ -457,7 +465,7 @@ TestPilot-vue/
 - 2GB+ disk
 - **Important**: PyTorch is removed; we use FastEmbed (ONNX/CPU), no GPU needed.
 
-> **Note for GitHub**: `models/fastembed/` is a FastEmbed/HuggingFace model cache directory and can be large, so it should be ignored by `.gitignore` and not committed.  
+> **Note for Git**: `models/fastembed/` is a FastEmbed/HuggingFace model cache directory and can be large, so it should be ignored by `.gitignore` and not committed.  
 > - **Online**: if the cache is missing, the embedding model will be downloaded automatically on first use.  
 > - **Offline / packaged**: run `python scripts/preload_fastembed_models.py` on an online machine first and set `FASTEMBED_CACHE_DIR` if needed.
 
@@ -540,6 +548,18 @@ cp .env.example .env
 # Edit .env and fill in required values
 ```
 
+**Authentication (team / multi-user deployments — see [docs/AUTH-RBAC.md](docs/AUTH-RBAC.md))**:
+
+```bash
+AUTH_REQUIRE_AUTH=false   # set true in production / shared environments
+AUTH_REGISTER_ENABLED=false
+AUTH_REGISTER_REQUIRE_APPROVAL=true   # self-registered accounts stay inactive until an admin enables them
+AUTH_TRUST_PROXY_HEADERS=false        # enable only behind a trusted reverse proxy
+AUTH_BOOTSTRAP_SUPER_USERNAME=admin
+# Strong password recommended; if empty, first bootstrap uses TestPilot@2026 (logged as warning)
+AUTH_BOOTSTRAP_SUPER_PASSWORD=
+```
+
 **Key vector-store related config** (current default is SQLite + sqlite-vec; ChromaDB is deprecated and kept only for rollback):
 
 ```bash
@@ -562,7 +582,14 @@ FTS_CANDIDATE_K=200  # legacy; still supported for compatibility
 1. **Init relational DB**
 
 ```bash
-python scripts/init_db.py
+python scripts/init_db.py init
+# Runs RBAC migrations via create_app; empty DB gets bootstrap super_admin
+```
+
+Optional dev demo users (not shipped for production):
+
+```bash
+python scripts/seed_demo_users.py
 ```
 
 1. **Init vector DB (SQLite)**
@@ -586,6 +613,19 @@ python run.py
 1. **Open UI**
 
 Visit `http://localhost:5000` in your browser.
+
+### Reset local data
+
+Stop the backend first, then run (both commands ask for `y`):
+
+```bash
+# All rows in testpilot.db, including config center tables, users and departments; ends with VACUUM
+python scripts/init_db.py clear
+# All documents, chunks, vectors and FTS data in vector_store/vector_store.db
+python scripts/init_vectordb.py --clear-vector-db
+```
+
+On the next start the default department and bootstrap `admin` are recreated, and an empty config center falls back to `.env`. Both clear commands delete rows and keep the table structure. Before committing, delete files inside `uploads/`, `downloads/`, and `logs/` while leaving the directories in place. Those three directories are gitignored. `python scripts/init_config_center.py --force` rewrites built-in defaults (`DEFAULT_COMPANY=OPENAI`) and overrides the `.env` provider, so use it only to restore factory config.
 
 ## Configuration
 
@@ -622,8 +662,13 @@ QWEN_API_KEY=your-qwen-api-key
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MODEL=qwen-flash
 QWEN_TEMPERATURE=0.7
-TR_QWEN_MAX_TOKENS=8000
 QWEN_TIMEOUT=60
+
+# Token limits (defaults when DB has no entry; prefer Config Center)
+TR_MAX_TOKENS=8000
+MAX_TOKENS=4000
+TOKEN_MAX_PER_SESSION=50000
+TOKEN_MAX_CALLS_PER_SESSION=100
 
 # Ollama (local)
 DEFAULT_COMPANY=OLLAMA
@@ -638,9 +683,9 @@ OLLAMA_MODEL=llama2
 - **Knowledge Base**: upload docs, smart retrieval, RAG integration.
 - **AI Assistant**: testing Q&A, templates, context-aware chat.
 - **Hallucination Detection**: automatic checks, strategies, and thresholds.
-- **Config Center**: manage configs, priorities, audit logs, and sensitive fields.
+- **Config Center**: manage configs, priorities, audit trail sidebar, token limits under **AI model** (`MAX_TOKENS`, unified `TR_MAX_TOKENS`, session caps), export/import, and sensitive fields.
 
-For full details, please refer to the Chinese `README.md` sections; the feature set is identical.
+See [docs/CONFIG-CENTER.md](docs/CONFIG-CENTER.md) and [frontend/docs/TOKEN-CONFIG.md](frontend/docs/TOKEN-CONFIG.md). Full narrative remains in Chinese `README.md`; feature set is identical.
 
 ## API Documentation (High-level)
 
@@ -662,6 +707,24 @@ Main endpoints (paths are the same as in the Chinese README):
 - **Hallucination tests**: `scripts/test_chat_hallucination.py`, `scripts/run_hallucination_tests.py`
 
 Coverage includes health checks, UI, static assets, APIs, test generation, requirement analysis, knowledge base, chat, hallucination detection, config center, smart retrieval, keyword extraction, exports, statistics, and vector store behavior.
+
+Lightweight RBAC integration tests (no full LLM stack): `pytest tests/test_rbac_integration_light.py`
+
+## Authentication and RBAC
+
+Optional login and **department-scoped data** (cases, requirements, knowledge, chat, export, stats). Default **`AUTH_REQUIRE_AUTH=false`** keeps single-user anonymous mode compatible.
+
+| Topic | Details |
+|-------|---------|
+| Full doc | [docs/AUTH-RBAC.md](docs/AUTH-RBAC.md) |
+| Bootstrap super_admin | Created once when `users` is empty; default username `admin`; password from `AUTH_BOOTSTRAP_SUPER_PASSWORD` or `TestPilot@2026` |
+| Dept admin / user | **Not pre-seeded**; create via **User management** or `scripts/seed_demo_users.py` (dev only) |
+| Migrations | App start or `python scripts/init_db.py init` → `run_auth_migrations()` |
+
+For production: strong bootstrap password, `AUTH_REQUIRE_AUTH=true`, careful use of `AUTH_REGISTER_ENABLED`.
+
+<img src="./pictures/001-EN-登录注册界面.webp" alt="Sign in and register" />
+<img src="./pictures/009-EN-用户管理.webp" alt="User management" />
 
 ## Deployment Guide
 
@@ -701,14 +764,14 @@ See logs under `logs/` for detailed diagnostics.
 We welcome all contributions!
 
 - **Report issues** via GitHub Issues.
-- **Submit code** via PRs.
+- **Submit code** via Merge Requests.
 - **Improve docs** (including translations).
 - **Test & feedback** for new features.
 
 Basic workflow:
 
 ```bash
-git clone https://github.com/zhoujun94511/TestPilot-vue
+git clone https://github.com/zhoujun94511/TestPilot-vue.git
 cd TestPilot-vue
 git checkout -b feature/your-feature-name
 pip install -r requirements-dev.txt

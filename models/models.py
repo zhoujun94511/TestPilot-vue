@@ -10,6 +10,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 from config.settings import settings
+from utils.utils_core.path_display import public_file_label
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import sessionmaker
 from flask_sqlalchemy import SQLAlchemy
@@ -36,6 +37,13 @@ class RagFileRecord(db.Model):
     status = Column(String(20), default='active', comment='状态: active, deleted')
     description = Column(Text, nullable=True, comment='文件描述')
     category = Column(String(50), default='other', comment='文件分类: requirements, test_cases, business_rules, best_practices, other')
+    dept_id = Column(Integer, nullable=True, comment='所属部门')
+    owner_user_id = Column(Integer, nullable=True, comment='创建者用户 ID')
+    vector_meta_pending = Column(
+        Integer,
+        default=0,
+        comment='向量 chunk metadata 待回填: 1=待重试',
+    )
 
     def __repr__(self):
         return f'<RagFileRecord {self.file_name}>'
@@ -47,10 +55,11 @@ class RagFileRecord(db.Model):
         if self.created_time:
             created_time_iso = self.created_time.replace(tzinfo=timezone.utc).isoformat()
         
+        stored_path = self.file_path or ''
         return {
             'id': self.id,
-            'file_name': self.file_name,
-            'file_path': self.file_path,
+            'file_name': public_file_label(self.file_name or '') or self.file_name,
+            'file_path': public_file_label(stored_path) if stored_path else self.file_path,
             'file_hash': self.file_hash,
             'file_size': self.file_size,
             'file_type': self.file_type,
@@ -85,6 +94,8 @@ class TestCase(db.Model):
     requirement_id = Column(String(100), nullable=True, comment='关联需求ID')
     module = Column(String(100), nullable=True, comment='功能模块')
     test_method = Column(String(100), nullable=True, comment='测试方法')
+    dept_id = Column(Integer, nullable=True, comment='所属部门')
+    owner_user_id = Column(Integer, nullable=True, comment='创建者用户 ID')
 
     def to_dict(self):
         """转换为字典格式"""
@@ -189,6 +200,8 @@ class Requirement(db.Model):
     created_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
     updated_time = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                           onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    dept_id = Column(Integer, nullable=True, comment='所属部门')
+    owner_user_id = Column(Integer, nullable=True, comment='创建者用户 ID')
 
     def __repr__(self):
         return f'<Requirement {self.req_id}: {self.title}>'
@@ -210,7 +223,7 @@ class Requirement(db.Model):
             'type': self.type,
             'priority': self.priority,
             'status': self.status,
-            'source_file': self.source_file,
+            'source_file': public_file_label(self.source_file or '') or self.source_file,
             'created_time': created_time_iso,
             'updated_time': updated_time_iso
         }
@@ -227,6 +240,8 @@ class ChatSession(db.Model):
     updated_time = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                           onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
     is_deleted = Column(Boolean, default=False, comment='是否已删除')
+    dept_id = Column(Integer, nullable=True, comment='所属部门')
+    owner_user_id = Column(Integer, nullable=True, comment='会话属主用户 ID')
 
     def __repr__(self):
         return f'<ChatSession {self.session_id}:{self.title}>'
@@ -313,6 +328,29 @@ class ToolExecutionLog(db.Model):
             'created_time': created_time_iso
         }
 
+class LlmUsageLog(db.Model):
+    """全站 LLM Token 消耗审计（Chat / 用例生成 / 文档分析等）"""
+    __tablename__ = 'llm_usage_logs'
+    __table_args__ = (
+        db.UniqueConstraint('ref_type', 'ref_id', name='uq_llm_usage_ref'),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tokens = Column(Integer, nullable=False, default=0, comment='本次消耗 tokens')
+    input_tokens = Column(Integer, default=0, comment='输入 tokens')
+    output_tokens = Column(Integer, default=0, comment='输出 tokens')
+    model_name = Column(String(100), nullable=True, comment='模型名称')
+    source = Column(String(64), nullable=False, default='llm', comment='场景: chat, case_generation, document_analysis, agent')
+    ref_type = Column(String(32), nullable=True, comment='关联实体类型')
+    ref_id = Column(Integer, nullable=True, comment='关联实体 ID')
+    created_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='记录时间')
+    dept_id = Column(Integer, nullable=True, comment='部门（统计隔离）')
+    user_id = Column(Integer, nullable=True, comment='用户（统计隔离）')
+
+    def __repr__(self):
+        return f'<LlmUsageLog {self.source}:{self.tokens}>'
+
+
 class SystemLog(db.Model):
     """系统日志表"""
     __tablename__ = 'system_logs'
@@ -392,6 +430,7 @@ def init_database(app):
         # 必须显式导入，否则 SQLAlchemy 不会识别这些模型
         try:
             from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule
+            from models.auth_models import AuthAuditLog, Department, User, UserSession  # noqa: F401
         except ImportError as import_error:
             # 如果导入失败，记录警告但不阻止启动
             import logging
@@ -400,4 +439,12 @@ def init_database(app):
         
         # 创建所有表（包括配置中心相关表）
         db.create_all()
-        print("数据库表创建成功！")
+        try:
+            from services.auth_migrations import run_auth_migrations
+            run_auth_migrations()
+        except Exception as migration_error:
+            import logging
+            logging.getLogger(__name__).warning('认证迁移/种子失败: %s', migration_error)
+        import logging
+
+        logging.getLogger(__name__).info('数据库表创建成功')

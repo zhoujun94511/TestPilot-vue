@@ -1,4 +1,5 @@
-import { ApiError, del, get, post } from './http';
+import { publicFileLabel } from '@/lib/public-file-label';
+import { ApiError, del, get, post, put } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -38,6 +39,7 @@ export interface KnowledgeSearchResult {
   file_id?: number;
   file_name?: string;
   source?: string;
+  chunk_index?: number;
   metadata?: Record<string, unknown>;
   relevance?: string;
   raw?: Record<string, unknown>;
@@ -183,14 +185,29 @@ function normalizeFileRecord(raw: Record<string, unknown>): KnowledgeFileRecord 
   };
 }
 
+function displayFileField(value: unknown) {
+  if (value == null || value === '') return undefined;
+  const label = publicFileLabel(String(value));
+  return label || undefined;
+}
+
 function normalizeSearchResult(raw: Record<string, unknown>): KnowledgeSearchResult {
-  const metadata = isRecord(raw.metadata) ? raw.metadata : {};
+  const metadata = isRecord(raw.metadata) ? { ...raw.metadata } : {};
+  if (typeof metadata.source === 'string') metadata.source = publicFileLabel(metadata.source);
+  if (typeof metadata.file_path === 'string') metadata.file_path = publicFileLabel(metadata.file_path);
+  if (typeof metadata.file_name === 'string') metadata.file_name = publicFileLabel(metadata.file_name);
+  const fileName = displayFileField(
+    pickCompatField(raw, ['file_name'], metadata.file_name != null ? String(metadata.file_name) : undefined)
+  );
+  const source = displayFileField(
+    pickCompatField(raw, ['source'], metadata.source != null ? String(metadata.source) : undefined)
+  );
   return {
     content: String(pickCompatField(raw, ['content', 'text', 'chunk'], '')),
     score: raw.score != null ? Number(raw.score) : undefined,
     file_id: raw.file_id != null ? Number(raw.file_id) : undefined,
-    file_name: pickCompatField(raw, ['file_name'], metadata.file_name != null ? String(metadata.file_name) : undefined),
-    source: pickCompatField(raw, ['source'], metadata.source != null ? String(metadata.source) : undefined),
+    file_name: fileName,
+    source,
     metadata,
     relevance: pickCompatField(raw, ['relevance'], undefined),
     raw
@@ -363,6 +380,34 @@ export async function rebuildKnowledgeIndex(payload: KnowledgeRebuildPayload = {
     });
   } catch (error) {
     coreNormalizeError(error, 'Failed to rebuild knowledge index');
+  }
+}
+
+export interface KnowledgeFileUpdatePayload {
+  description?: string;
+  category?: string;
+}
+
+export async function updateKnowledgeFile(
+  fileId: number,
+  payload: KnowledgeFileUpdatePayload
+): Promise<KnowledgeFileRecord> {
+  try {
+    const response = await put<unknown>(`/knowledge/${fileId}`, payload);
+    const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
+      dataKeys: ['data', 'file'],
+      fallbackMessage: 'Failed to update knowledge file'
+    });
+    const raw = isRecord(normalized) ? normalized : {};
+    const merged = {
+      ...raw,
+      id: fileId,
+      description: pickCompatField(raw, ['description'], payload.description),
+      category: pickCompatField(raw, ['category'], payload.category)
+    };
+    return normalizeFileRecord(merged as Record<string, unknown>);
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to update knowledge file');
   }
 }
 

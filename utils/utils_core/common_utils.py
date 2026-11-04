@@ -200,7 +200,7 @@ def is_remote_api():
     company = settings.DEFAULT_COMPANY.upper() if settings.DEFAULT_COMPANY else "OPENAI"
 
     # 远程API列表（会产生费用）
-    remote_apis = ["DEEPSEEK", "OPENAI", "GEMINI", "QWEN"]
+    remote_apis = ["DEEPSEEK", "OPENAI", "GEMINI", "QWEN", "ANTHROPIC"]
 
     # 本地模型列表（不产生费用）
     local_models = ["OLLAMA"]

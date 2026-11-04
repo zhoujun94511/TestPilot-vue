@@ -1,8 +1,8 @@
 <div align="center">
 
-# TestPilot - 智能测试用例生成工具
+# TestPilot - 智能测试用例生成和管理工具
 
-![TestPilot Logo](frontend/public/pic/favicon.ico)
+<img src="./frontend/public/pic/favicon-512.png" alt="TestPilot Logo" width="96" height="96" />
 
 **基于AI的智能测试用例生成和管理平台**
 
@@ -13,11 +13,11 @@
 
 [中文](README.md) • [English](README_en.md)
 
-[功能特性](#功能特性) • [快速开始](#快速开始) • [部署指南](#部署指南) • [API文档](#api文档) • [贡献指南](#贡献指南)
+[功能特性](#功能特性) • [快速开始](#快速开始) • [认证与 RBAC](#认证与-rbac) • [部署指南](#部署指南) • [API文档](#api文档) • [贡献指南](#贡献指南)
 
 </div>
 
-<img src="./pictures/图1-1-1总览界面-CN.png" alt="总览界面" />
+<img src="./pictures/002-CN-主界面.webp" alt="主界面" />
 
 ## 项目简介
 
@@ -126,7 +126,7 @@ TestPilot 项目旨在通过AI技术解决测试工作中的实际痛点，构�
 
 TestPilot 采用分层架构设计，结合多种先进技术实现智能化测试用例生成：
 
-<img src="./pictures/图1-1-1系统总体架构图.png" alt="系统总体架构图" />
+<img src="./pictures/图1-1-1系统总体架构图.webp" alt="系统总体架构图" />
 
 ### 向量存储架构概览
 
@@ -260,16 +260,17 @@ LLM生成（增强提示词 + 结构化输出）
 
 #### 5.1 配置管理
 
-- **统一管理**：通过Web界面统一管理所有配置项
-- **分类组织**：按功能模块分类管理（AI模型、RAG、性能优化等）
-- **配置优先级**：配置中心 > .env 文件 > 默认值
-- **动态生效**：配置修改后立即生效，无需重启服务
+- **统一管理**：通过 Web 界面统一管理所有配置项（见 [docs/CONFIG-CENTER.md](docs/CONFIG-CENTER.md)）
+- **分类组织**：按功能模块分类（AI 模型、用例生成、知识库、性能、文件处理等）；侧栏含 **最近配置变更** 独立视图
+- **配置优先级**：配置中心 > `.env` > `config/settings.py` 默认值
+- **动态生效**：保存后即时生效（AI 词元等会重载 LLM / TokenMonitor，一般无需重启）
+- **词元集中配置**：在 **AI 模型设置 → 单次最大词元数** 维护 `MAX_TOKENS`（聊天）、`TR_MAX_TOKENS`（用例与需求分析共用）、会话熔断 `TOKEN_MAX_*`（详见 [frontend/docs/TOKEN-CONFIG.md](frontend/docs/TOKEN-CONFIG.md)）
 
 #### 5.2 安全特性
 
-- **敏感信息保护**：API密钥等敏感配置项加密存储
-- **配置验证**：自动验证配置格式和必填项
-- **审计日志**：记录所有配置变更历史，支持审计追踪
+- **敏感信息保护**：API 密钥等敏感配置项掩码/加密存储
+- **配置验证**：自动验证配置格式和必填项（`POST /api/config/validate/<key>`）
+- **审计日志**：记录配置变更；配置中心侧栏 **最近配置变更** + `GET /api/config/audit-logs`
 
 ### 6. 数据流转过程
 
@@ -335,12 +336,15 @@ TestPilot-vue/
 │   │   ├── router/                 路由
 │   │   ├── stores/                 Pinia 状态管理
 │   │   ├── i18n/                   多语言资源（zh-CN/en）
-│   │   └── styles/                 样式体系
+│   │   ├── lib/                    页面/领域 UI 类（*-ui.ts）、field-control、utils
+│   │   └── styles/                 tokens、Tailwind、chat-rich-content 等
+│   ├── docs/UI-REDESIGN-PLAN.md    前端 UI 重设计总纲（完成定义 / 非目标 / 发版流程）
+│   ├── docs/UI-MIGRATION.md        前端 UI 迁移说明（Tailwind + shadcn-vue，第 4～26 步）
 │   ├── public/                     静态资源
 │   └── package.json                前端依赖与脚本
 ├── uploads/                        上传文件目录（documents/knowledge）
 ├── vector_store/                   SQLite 向量库目录
-├── docs/                           项目文档
+├── docs/                           项目文档（含 CONFIG-CENTER、DEV-INTEGRATION）
 ├── README.md                       中文文档
 └── README_en.md                    英文文档
 ```
@@ -357,8 +361,7 @@ TestPilot-vue/
 - **关键词提取**：智能提取需求关键词，支持停用词过滤和技术术语识别
 - **RAG增强**：整合知识库检索，提升用例生成质量
 
-<img src="./pictures/图1-2-1测试用例生成界面-CN.png" alt="测试用例生成界面" />
-<img src="./pictures/图1-2-2测试用例生成界面-CN.png" alt="测试用例生成界面" />
+<img src="./pictures/005-CN-测试用例.webp" alt="测试用例" />
 
 ### 需求分析
 - **文档解析**：支持多种格式文档（TXT、DOC、PDF等）
@@ -368,8 +371,7 @@ TestPilot-vue/
 - **复杂度评估**：评估需求复杂度和测试工作量
 - **停用词过滤**：自动过滤无意义的停用词，提升关键词质量
 
-<img src="./pictures/图1-3-1需求分析界面-CN.png" alt="需求分析界面" />
-<img src="./pictures/图1-3-2需求分析界面-CN.png" alt="需求分析界面" />
+<img src="./pictures/003-CN-需求文档.webp" alt="需求文档" />
 
 ### 知识库管理
 - **文件上传**：支持多种格式的知识文件上传
@@ -379,8 +381,7 @@ TestPilot-vue/
 - **检索优化**：智能重排序、查询扩展、性能监控
 - **分类管理**：支持知识文件的分类和标签管理
 
-<img src="./pictures/图1-4-1知识库管理界面-CN.png" alt="知识库管理界面" />
-<img src="./pictures/图1-4-2知识库管理界面-CN.png" alt="知识库管理界面" />
+<img src="./pictures/004-CN-知识库.webp" alt="知识库" />
 
 ### AI测试助手
 - **智能对话**：专业的测试领域AI助手
@@ -389,7 +390,15 @@ TestPilot-vue/
 - **模板支持**：预置多种测试场景的对话模板
 - **内容质量检测**：实时检测AI回复中的幻觉和逻辑问题
 
-<img src="./pictures/图1-5-1智能助手界面-CN.png" alt="智能助手界面" />
+<img src="./pictures/006-CN-AI聊天.webp" alt="AI 聊天" />
+
+### 实验功能
+- **规则骨架**：按验收标准生成确定性用例，可选用模型补缺口，预览确认后入库
+- **验收覆盖评审**：按需求对照已关联用例，标出已覆盖项和缺口
+- **双向追溯**：列出无用例的需求、悬空需求编号和未关联用例
+- 默认关闭，由 `ENABLE_EXPERIMENTAL_ACTIONS` 控制；开启后从侧栏进入
+
+<img src="./pictures/007-CN-实验功能.webp" alt="实验功能" />
 
 ### 幻觉检测系统
 - **智能检测**：基于多维度算法检测AI生成内容中的幻觉问题
@@ -400,12 +409,15 @@ TestPilot-vue/
 - **详细报告**：生成完整的检测报告和改进建议
 
 ### 配置中心
-- **统一配置管理**：可视化的配置管理界面，支持分类管理
-- **配置优先级**：配置中心 > .env 文件 > 默认值，灵活配置管理
-- **审计日志**：完整的配置变更审计日志，追踪所有配置修改
+- **统一配置管理**：可视化界面、分类侧栏、导出/导入（见 [docs/CONFIG-CENTER.md](docs/CONFIG-CENTER.md)）
+- **配置优先级**：配置中心 > `.env` > 默认值
+- **审计日志**：侧栏 **最近配置变更** + `GET /api/config/audit-logs`
+- **词元配置**：AI 模型设置内 **单次最大词元数**（`MAX_TOKENS`、`TR_MAX_TOKENS`、会话熔断）
 - **验证规则**：智能配置验证，确保配置正确性（如API密钥格式验证）
 - **敏感信息保护**：敏感配置项加密存储，安全可靠
 - **动态生效**：配置修改实时生效，无需重启服务
+
+<img src="./pictures/008-CN-配置中心.webp" alt="配置中心" />
 
 ### 数据管理
 - **多格式导出**：支持Excel、CSV、JSON等格式导出
@@ -453,7 +465,7 @@ TestPilot-vue/
 - 2GB+ 磁盘空间
 - **重要**：项目已去 PyTorch，使用 FastEmbed (ONNX/CPU)，无需 GPU
 
-> **注意（GitHub 提交）**：`models/fastembed/` 是 FastEmbed/HuggingFace 的模型缓存目录，体积较大，默认应由 `.gitignore` 忽略，不建议提交到仓库。  
+> **注意（Git 提交）**：`models/fastembed/` 是 FastEmbed/HuggingFace 的模型缓存目录，体积较大，默认应由 `.gitignore` 忽略，不建议提交到仓库。  
 > - **联网运行**：若本机缓存缺失，首次使用 embedding 时会自动下载。  
 > - **离线/打包运行**：请在有网环境先执行 `python scripts/preload_fastembed_models.py` 预下载模型，并按需设置 `FASTEMBED_CACHE_DIR`。
 
@@ -461,7 +473,7 @@ TestPilot-vue/
 
 1. **克隆项目**
 ```bash
-git clone https://github.com/zhoujun94511/TestPilot-vue
+git clone https://github.com/zhoujun94511/TestPilot-vue.git
 cd TestPilot-vue
 ```
 
@@ -535,6 +547,37 @@ cp .env.example .env
 # 编辑 .env 文件，配置必要的环境变量
 ```
 
+**认证相关（团队/多用户部署建议阅读 [docs/AUTH-RBAC.md](docs/AUTH-RBAC.md)）**：
+
+```bash
+# 默认 false：不强制登录（单机兼容）。生产/团队环境建议 true
+AUTH_REQUIRE_AUTH=false
+AUTH_REGISTER_ENABLED=false
+# 开放注册时，新账号默认停用，管理员启用后才能登录
+AUTH_REGISTER_REQUIRE_APPROVAL=true
+# 只有部署在可信反向代理之后才开启
+AUTH_TRUST_PROXY_HEADERS=false
+# 仅 users 表为空时创建引导 super_admin，默认用户名 admin
+AUTH_BOOTSTRAP_SUPER_USERNAME=admin
+# 务必设置强密码；留空时首次启动会使用默认密码 TestPilot@2026（日志告警）
+AUTH_BOOTSTRAP_SUPER_PASSWORD=
+```
+
+6.**初始化数据库**
+```bash
+python scripts/init_db.py init
+# 或无参数：python scripts/init_db.py
+# 会通过 create_app 执行 RBAC 列迁移；空库时自动创建引导 super_admin
+```
+
+**开发可选**：创建演示部门管理员与普通用户（非出厂账号）：
+
+```bash
+python scripts/seed_demo_users.py
+```
+
+7.**（可选）启用强制登录后**：浏览器访问前端，使用引导超管登录，在 **用户管理** 中为各部门创建 admin / user；或通过 API `POST /api/auth/users`（需 super_admin / 本部门 admin）。
+
 **关键配置项**（向量存储相关，当前默认使用 SQLite + sqlite-vec，ChromaDB 已废弃，仅保留回滚兼容）：
 ```bash
 # 向量存储后端（默认 sqlite，历史上支持 sqlite/chroma，当前推荐仅使用 sqlite）
@@ -553,12 +596,7 @@ ENABLE_HYBRID_RETRIEVAL=true  # 是否启用混合检索（FTS5 + sqlite-vec）
 FTS_CANDIDATE_K=200  # FTS5 召回候选数量（默认 200，适用于 topK=5~10）
 ```
 
-6.**初始化数据库**
-```bash
-python scripts/init_db.py
-```
-
-7.**初始化向量数据库（SQLite 向量存储）**
+8.**初始化向量数据库（SQLite 向量存储）**
 
 向量数据库会在首次使用时自动初始化，但也可以手动初始化：
 
@@ -579,22 +617,41 @@ python scripts/init_vectordb.py --init-vector-db --dry-run
   - `chunk_fts`：FTS5 全文索引（虚拟表）
 - vec0 虚拟表：当前实现直接使用 `chunk_embeddings` 表 + `vec_distance_cosine` 函数，不再维护单独的虚拟表
 
-8.**初始化配置中心**（可选）
+9.**初始化配置中心**（建议，含 `TR_MAX_TOKENS` 与审计相关迁移）
 ```bash
 python scripts/init_config_center.py
 ```
 
-9.**启动应用**
+10.**启动应用**
 ```bash
 python run.py
 ```
 
-10.**访问应用**
+11.**访问应用**
 ```
 打开浏览器访问: http://localhost:5000
 ```
 
 **注意**：首次使用建议先访问配置中心配置AI模型API密钥。
+
+### 清空本地数据（提交前或重置环境）
+
+先停止后端，再执行：
+
+```bash
+# 业务库：清空 testpilot.db 全部表数据（保留表结构），含配置中心三张表和用户/部门
+python scripts/init_db.py clear
+# 向量库：清空 vector_store/vector_store.db 中的文档、chunk、向量和 FTS 索引
+python scripts/init_vectordb.py --clear-vector-db
+```
+
+| 脚本 | 清空内容 | 清空后的行为 |
+|------|----------|--------------|
+| `init_db.py clear` | 用例、需求、聊天会话与历史、工具执行审计、模型用量、系统日志、性能指标、知识文件记录、配置中心（配置项、验证规则、变更审计）、用户、登录会话、认证审计、部门 | 下次启动自动重建默认部门和引导超管 `admin`；配置中心为空时回退 `.env` |
+| `init_vectordb.py --clear-vector-db` | 全部向量数据 | 知识库检索和 RAG 无结果，需重新上传知识文件 |
+| `init_config_center.py --force` | 仅配置中心的配置项和验证规则，随后写入脚本内置默认值 | 内置默认 `DEFAULT_COMPANY=OPENAI`，会覆盖 `.env` 的提供商，只在需要恢复出厂配置时使用 |
+
+两个清空命令都会要求输入 `y` 确认，并且只删除行、保留表结构。`init_db.py clear` 结束时会执行 VACUUM 收缩数据库文件。提交前再删除 `uploads/`、`downloads/`、`logs/` 里面的文件，目录本身保留。这三项目录已写入 `.gitignore`，不会被提交。
 
 ### 离线部署完整流程
 
@@ -733,11 +790,11 @@ ENABLE_EXPERIMENTAL_ACTIONS=false
 
 ### 实验动作编排说明（低耦合、可拆卸）
 
-- 默认关闭：`ENABLE_EXPERIMENTAL_ACTIONS=false` 时不注册实验路由，不影响主业务
+- 默认关闭：`ENABLE_EXPERIMENTAL_ACTIONS=false` 时实验接口返回 403（蓝图仍注册，便于按需开启）；普通 Chat 模式不受影响
 - 独立模块：实现位于 `experiments/action_runtime`，不侵入核心业务服务
 - 安全机制：
-  - 高风险动作（如删除）先 `dry-run` 预演，再确认执行
-  - 高风险动作需要角色授权（`admin` / `owner`）
+  - 会写入库的动作先预览，确认时按已保存的预览入库，不重新调用模型
+  - 确认限于发起人或管理员
   - 实验接口带轻量限流保护（每 60 秒最多 12 次/调用方）
 - 审计追踪：所有动作写入 `tool_execution_logs`，可按 `execution_id` 查询详情
 
@@ -789,13 +846,16 @@ grep "降级\|fallback\|warning" logs/testpilot_*.log
 
 TestPilot 提供了可视化的配置中心，支持：
 
-- **统一管理**：通过Web界面管理所有配置项
-- **分类组织**：按功能模块分类管理配置
-- **实时生效**：配置修改后立即生效，无需重启
-- **审计日志**：记录所有配置变更历史
-- **配置验证**：自动验证配置格式和必填项
+- **统一管理**：通过 Web 界面管理所有配置项
+- **分类组织**：按功能模块分类；**最近配置变更** 为独立侧栏项
+- **实时生效**：保存后即时生效（词元等触发热重载）
+- **审计日志**：`GET /api/config/audit-logs`，配置中心内只读浏览
+- **配置验证**：自动验证格式与必填项
+- **词元分区**：AI 模型设置 → **单次最大词元数**（详见 TOKEN-CONFIG.md）
 
-**配置优先级**：配置中心 > .env 文件 > 默认值
+**配置优先级**：配置中心 > `.env` > 默认值
+
+**文档**：[docs/CONFIG-CENTER.md](docs/CONFIG-CENTER.md)、词元说明 [frontend/docs/TOKEN-CONFIG.md](frontend/docs/TOKEN-CONFIG.md)
 
 **初始化配置中心**：
 ```bash
@@ -828,8 +888,13 @@ QWEN_API_KEY=your-qwen-api-key
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MODEL=qwen-flash
 QWEN_TEMPERATURE=0.7
-TR_QWEN_MAX_TOKENS=8000
 QWEN_TIMEOUT=60
+
+# 词元（冷启动默认；运行期请在配置中心维护 TR_MAX_TOKENS / MAX_TOKENS）
+TR_MAX_TOKENS=8000
+MAX_TOKENS=4000
+TOKEN_MAX_PER_SESSION=50000
+TOKEN_MAX_CALLS_PER_SESSION=100
 
 # Ollama (本地部署)
 DEFAULT_COMPANY=OLLAMA
@@ -921,23 +986,22 @@ OLLAMA_MODEL=llama2
 ### 6. 配置中心管理
 
 1. **访问配置中心**
-   - 点击导航栏的"配置中心"按钮
-   - 查看所有配置项（按分类组织）
+   - 导航栏进入 **配置中心**
+   - 左侧切换分类；**最近配置变更** 为只读审计列表（独立页面布局）
 
 2. **配置管理**
-   - 按分类查看配置（AI模型、RAG、性能优化等）
-   - 编辑配置项：修改配置值并保存
-   - 配置验证：系统自动验证配置格式和必填项
-   - 查看审计日志：追踪所有配置变更历史
+   - 按分类编辑并保存（支持 dirty 提示、顶栏刷新）
+   - **AI 模型设置**：Provider 开关与密钥；**单次最大词元数** 分区（聊天 / 用例与需求 / 会话熔断）
+   - 导出、导入（审计页不提供）
+   - 校验失败时字段级或 Toast 提示
 
 3. **配置优先级**
-   - 配置中心的配置优先级最高
-   - 其次为 .env 文件配置
-   - 最后为系统默认值
+   - 配置中心 > `.env` > 系统默认值
 
 4. **敏感配置**
-   - API密钥等敏感信息加密存储
-   - 支持显示/隐藏敏感配置值
+   - API 密钥等掩码显示，可切换显示明文
+
+详细 API 与初始化见 [docs/CONFIG-CENTER.md](docs/CONFIG-CENTER.md)。
 
 ## API文档
 
@@ -969,11 +1033,27 @@ OLLAMA_MODEL=llama2
 - `GET /api/chat/history/{session_id}` - 获取聊天历史
 
 #### 实验动作编排（可选，默认关闭）
+需设置环境变量 `ENABLE_EXPERIMENTAL_ACTIONS=true` 后上述接口才可用（否则 403）。
+
+**与聊天通道分离（不兼容旧客户端）**：`/api/chat/message` 与 `/api/chat/stream` 仅支持 `mode=chat`；`mode=action` 一律 **400** `action_mode_not_supported`，响应体含 `experimental_actions.execute` 等指引。对话与智能建议走 LLM；工具请走下方 execute，**必须**显式 `tool_name` + `args`（侧栏「实验工具」页 `/experimental-tools`）。默认 **关闭** NL 推断（无 `tool_name` → 400 `explicit_tool_required`）；脚本调试可设 `EXPERIMENTAL_ACTIONS_ALLOW_NL=true`，此时模糊句可能 `skipped` 而非误执行 list。
+
 - `GET /api/experimental-actions/health` - 查询实验动作能力状态与已注册工具
-- `POST /api/experimental-actions/execute` - 自然语言触发动作计划（高风险动作默认待确认）
+- `POST /api/experimental-actions/execute` - 执行动作（显式 `tool_name`/`args` 或 NL 推断；高风险默认待确认；`done`/`failed` 且带 `session_id` 时会写入聊天历史）
 - `POST /api/experimental-actions/confirm` - 确认执行待确认动作
 - `POST /api/experimental-actions/cancel` - 取消待确认动作
 - `GET /api/experimental-actions/execution/{execution_id}` - 查询执行详情与审计状态
+
+**维护约定**：后端工具在 `experiments/action_runtime/orchestrator.py` 注册；实验工具页表单在 `frontend/src/config/experimentalTools.ts`，页面为 `frontend/src/views/ExperimentalToolsView.vue`。新增/改名工具须两处同步，否则 execute 可能返回 `unknown_tool` 或页面缺字段。非法 `tool_name` 在显式模式下返回 **400** `unknown_tool`，且 **不会** 回退 NL 推断。
+
+**怎么用（测试同学生路径）**
+
+1. 后端 `ENABLE_EXPERIMENTAL_ACTIONS=true`。侧栏「AI 助手」分组里，「实验工具」在「AI 聊天」下方，所有已登录用户可见（未配置角色限制）。后端未开启时页面会提示不可用，入口仍在。
+2. **日常讨论**：在 AI 聊天页用输入框或智能建议，走 LLM 对话（不会自动列库内用例）。
+3. **真要落库或列出数据**：打开侧栏「实验工具」，选工具后点「运行工具」。
+   - 「列出用例」等：多数可直接运行（已有默认条数）。
+   - 「生成用例」：在「需求描述」里填写需求，再 **运行工具**。切换到「分析文档内容」时已填的长文本会自动带过去。
+   - 聊天页智能建议含「设计/生成 + 用例」时：普通点击仍 **发送对话**；**Shift+点击** 跳到实验工具页并预填「生成用例」，不发送对话。
+4. 删除用例等高风险操作：运行后在同页确认，并输入 `DELETE`。
 
 #### 导出相关
 - `GET /api/export/cases` - 导出测试用例
@@ -987,13 +1067,16 @@ OLLAMA_MODEL=llama2
 - `GET /api/hallucination/config` - 获取幻觉检测配置
 
 #### 配置中心相关
-- `GET /api/config` - 获取所有配置项
+- `GET /api/config/categories` - 获取配置分类
 - `GET /api/config/<category>` - 获取指定分类的配置
 - `POST /api/config/<category>` - 批量更新指定分类的配置
 - `GET /api/config/item/<key>` - 获取单个配置项
 - `PUT /api/config/item/<key>` - 更新单个配置项
 - `DELETE /api/config/item/<key>` - 删除配置项
-- `GET /api/config/audit` - 获取配置审计日志
+- `GET /api/config/export` - 导出配置
+- `POST /api/config/import` - 导入配置
+- `GET /api/config/audit-logs` - 获取配置审计日志
+- `POST /api/config/validate/<key>` - 校验配置项
 
 #### 统计相关
 - `GET /api/stats/overview` - 获取概览统计
@@ -1077,6 +1160,23 @@ python scripts/run_hallucination_tests.py --full
 # 运行快速测试
 python scripts/run_hallucination_tests.py --quick
 ```
+
+## 认证与 RBAC
+
+TestPilot 支持可选的登录与 **部门级数据隔离**（用例、需求、知识库、聊天、导出、统计等）。默认 **`AUTH_REQUIRE_AUTH=false`**，与单机匿名使用兼容；团队或生产环境请在 `.env` 中开启并阅读完整说明。
+
+| 项目 | 说明 |
+|------|------|
+| 详细文档 | [docs/AUTH-RBAC.md](docs/AUTH-RBAC.md) |
+| 引导超管 | 空库首次迁移后自动创建，默认用户名 `admin`，密码见 `AUTH_BOOTSTRAP_SUPER_PASSWORD`（未设置时为 `TestPilot@2026`） |
+| 部门 admin / user | **不预置**；超管在 **用户管理** 创建，或开发环境运行 `python scripts/seed_demo_users.py` |
+| 数据库迁移 | 启动或 `python scripts/init_db.py init` → `run_auth_migrations()` |
+| 前端 | 登录页 + `/admin/users`（admin/super_admin）；配置中心仅 super_admin |
+
+生产请务必：设置强引导密码、开启 `AUTH_REQUIRE_AUTH`、关闭或审慎使用 `AUTH_REGISTER_ENABLED`。
+
+<img src="./pictures/001-CN-登录注册界面.webp" alt="登录与注册" />
+<img src="./pictures/009-CN-用户管理.webp" alt="用户管理" />
 
 ## 部署指南
 
@@ -1345,16 +1445,25 @@ python run.py
 
 ### 贡献方式
 
-1.**报告问题**：在GitHub Issues中报告bug或提出功能请求
-2.**提交代码**：Fork项目，创建分支，提交Pull Request
+1.**报告问题**：在 GitHub Issues 中报告 bug 或提出功能请求
+2.**提交代码**：Fork 项目，创建分支，提交 Merge Request
 3.**完善文档**：改进文档、添加示例、翻译内容
 4.**测试反馈**：测试新功能，提供使用反馈
+
+### 前端 UI 与样式
+
+- **技术栈**：Vue 3 + TypeScript + Vite；**Tailwind CSS 3** + **shadcn-vue** 基元；业务包装组件 `TpButton` / `TpInput` / `TpCard` 等。
+- **设计 token**：`frontend/src/styles/tokens.css`；布局与页面类名集中在 `frontend/src/lib/*-ui.ts`。
+- **构建**：`cd frontend && npm run build`（迁移完成后应无报错）。
+- **总纲 / 迁移 / 发版清单**：见 [frontend/docs/UI-REDESIGN-PLAN.md](frontend/docs/UI-REDESIGN-PLAN.md)、[frontend/docs/UI-MIGRATION.md](frontend/docs/UI-MIGRATION.md)、[frontend/docs/RELEASE-CHECKLIST.md](frontend/docs/RELEASE-CHECKLIST.md)。
+- **配置中心 / 词元**：[docs/CONFIG-CENTER.md](docs/CONFIG-CENTER.md)、[frontend/docs/TOKEN-CONFIG.md](frontend/docs/TOKEN-CONFIG.md)。
+- **CI 门禁**：GitHub Actions 工作流 `frontend-quality.yml`（`quality:api-contract`、`pytest tests/test_api_get_snapshots.py`、`quality:release:full`）。
 
 ### 开发环境设置
 
 1. **Fork并克隆项目**
 ```bash
-git clone https://github.com/zhoujun94511/TestPilot-vue
+git clone https://github.com/zhoujun94511/TestPilot-vue.git
 cd TestPilot-vue
 ```
 

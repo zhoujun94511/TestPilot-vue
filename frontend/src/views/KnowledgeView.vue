@@ -1,129 +1,143 @@
 ﻿<template>
-  <section class="tp-container-fluid tp-py-3 tp-page tp-page-shell tp-knowledge-page">
-    <div v-if="notice" class="tp-risk-block tp-mb-3" :class="noticeClass">
-      <div class="tp-flex tp-align-start tp-justify-between tp-gap-3">
-        <div class="tp-flex-grow-1">
-          <div>{{ notice.message }}</div>
-          <div v-if="notice.details?.length" class="tp-mt-2">
-            <TpButton variant="ghost" size="sm" @click="noticeDetailsExpanded = !noticeDetailsExpanded">
-              {{ noticeDetailsExpanded ? t('common.actions.collapse') : t('common.actions.expand') }}
-            </TpButton>
-            <ul v-if="noticeDetailsExpanded" class="tp-mb-0 tp-mt-2 tp-ps-3 tp-small">
-              <li v-for="(detail, idx) in notice.details" :key="idx">{{ detail }}</li>
-            </ul>
-          </div>
-        </div>
-        <TpButton variant="ghost" size="sm" :aria-label="t('common.actions.close')" @click="notice = null">
-          {{ t('common.actions.close') }}
-        </TpButton>
-      </div>
-    </div>
+  <section :class="pageRootMarkedClass(pageMarkerKnowledge)">
+    <PageNoticeBanner :notice="pageBanner" @close="clearPageBanner" />
 
-    <div class="tp-surface tp-p-3 tp-mb-3">
-      <div class="tp-flex tp-flex-wrap tp-gap-2 tp-justify-end">
-        <TpButton variant="secondary" :loading="refreshing" @click="handleRefresh">
-          {{ t('knowledge.actions.refresh') }}
-        </TpButton>
-        <TpButton variant="warning" :loading="rebuilding" @click="openConfirm('rebuild')">
-          {{ rebuilding ? t('knowledge.actions.rebuilding') : t('knowledge.actions.rebuild') }}
-        </TpButton>
-        <TpButton variant="danger" :loading="deleteLoading" :disabled="deleteLoading || !selectedIds.length" @click="openConfirm('delete')">
-          {{ deleteLoading ? t('knowledge.actions.deleting') : t('knowledge.actions.batchDelete') }}
-        </TpButton>
-        <TpButton v-if="previewVisible" variant="ghost" @click="clearPreview">
-          {{ t('common.actions.close') }}{{ t('knowledge.preview.title') }}
-        </TpButton>
-      </div>
-    </div>
-
-    <div class="tp-row tp-g-3 tp-mb-3">
-      <div class="tp-col-12 tp-col-md-6 tp-col-xxl-3" v-for="card in statsCards" :key="card.key">
-        <KnowledgeStatsCard :label="card.label" :value="card.value" :hint="card.hint" :icon="card.icon" />
-      </div>
-    </div>
-
-    <div class="tp-row tp-g-3 tp-knowledge-layout">
-      <div class="tp-col-12 tp-knowledge-main-col">
-        <div class="tp-surface tp-p-3 tp-mb-3 tp-knowledge-filter-sticky">
-          <div class="tp-flex tp-justify-between tp-align-start tp-gap-2 tp-mb-3">
-            <div>
-              <div class="tp-card__title">{{ t('knowledge.filters.title') }}</div>
-              <div class="tp-card__subtitle">{{ t('knowledge.result.title') }}</div>
-            </div>
-            <div class="tp-small" style="color: var(--tp-color-text-500)">{{ paginationText }}</div>
-          </div>
-
-          <form class="tp-row tp-g-3 tp-align-end" @submit.prevent="handleSearch">
-            <div class="tp-col-12 tp-col-lg-5">
-              <label class="tp-form-label">{{ t('knowledge.filters.keywordLabel') }}</label>
-              <input
-                v-model.trim="filters.keyword"
-                class="tp-input"
-                type="search"
-                :placeholder="t('knowledge.filters.keywordPlaceholder')"
-                @keyup.enter="handleSearch"
-              />
-            </div>
-
-            <div class="tp-col-12 tp-col-lg-3">
-              <label class="tp-form-label">{{ t('knowledge.filters.categoryLabel') }}</label>
-              <select v-model="filters.category" class="tp-select">
-                <option value="">{{ t('knowledge.filters.categoryAll') }}</option>
-                <option v-for="option in categoryOptions" :key="option.value || 'all'" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </div>
-
-            <div class="tp-col-12 tp-col-lg-2">
-              <label class="tp-form-label">{{ t('knowledge.filters.statusLabel') }}</label>
-              <select v-model="filters.status" class="tp-select">
-                <option value="">{{ t('knowledge.filters.statusAll') }}</option>
-                <option v-for="option in statusOptions" :key="option.value || 'all'" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </div>
-
-            <div class="tp-col-12 tp-col-lg-2 tp-grid">
-              <TpButton :loading="searchLoading || listLoading" :disabled="searchLoading || listLoading" @click="handleSearch">
-                {{ t('knowledge.actions.search') }}
+    <div :class="knowledgeLayoutClass">
+      <div :class="[colSpan12, knowledgeMainColClass]">
+        <PagePanel
+          :class="cn(knowledgeFilesPanelClass, 'min-h-0 flex-1')"
+          :padded="false"
+          :title="t('knowledge.tabs.files')"
+          :subtitle="t('knowledge.toolbar.filesLead')"
+        >
+          <template #actions>
+            <div :class="pageToolbarStripClass">
+              <TpButton variant="ghost" size="sm" :loading="refreshing" @click="handleRefresh">
+                {{ t('common.actions.refresh') }}
               </TpButton>
+              <ToolbarOverflowMenu>
+                <DropdownMenuItem
+                  :disabled="vectorDisabled || rebuilding"
+                  @select="openConfirm('rebuild')"
+                >
+                  {{ rebuilding ? t('knowledge.actions.rebuilding') : t('knowledge.actions.rebuild') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="previewVisible" @select="clearPreview">
+                  {{ t('knowledge.actions.closeResults') }}
+                </DropdownMenuItem>
+              </ToolbarOverflowMenu>
             </div>
-          </form>
-        </div>
+          </template>
 
-        <div class="tp-knowledge-workspace">
-          <div class="tp-surface tp-p-3 tp-knowledge-panel tp-knowledge-panel--files">
-            <div class="tp-flex tp-justify-between tp-align-center tp-gap-2 tp-mb-3">
-              <div>
-                <div class="tp-card__title">{{ t('knowledge.table.title') }}</div>
-                <div v-if="selectedIds.length" class="tp-small" style="color: var(--tp-color-text-500)">{{ selectedIds.length }} / {{ files.length }}</div>
+          <div class="px-[var(--tp-space-4)]">
+            <ToolbarBulkBar :count="selectedIds.length" @clear="clearKnowledgeSelection">
+              <TpButton
+                variant="danger"
+                size="sm"
+                :loading="deleteLoading"
+                :disabled="vectorDisabled || deleteLoading || !selectedIds.length"
+                @click="openConfirm('delete')"
+              >
+                {{ deleteLoading ? t('knowledge.actions.deleting') : t('knowledge.actions.batchDelete') }}
+              </TpButton>
+            </ToolbarBulkBar>
+          </div>
+
+          <div class="min-w-0 px-[var(--tp-space-4)] pb-0 pt-[var(--tp-space-4)]">
+            <PagePanel :title="t('knowledge.stats.title')" :padded="true" flat>
+              <div :class="grid12Class">
+                <div v-for="card in statsCards" :key="card.key" :class="colSpan12Md6Min1400_3">
+                  <KnowledgeStatsCard :label="card.label" :value="card.value" :hint="card.hint" :icon="card.icon" />
+                </div>
               </div>
-              <label class="tp-toggle">
-                <input class="tp-check" type="checkbox" :checked="allVisibleSelected" :disabled="!files.length" @change="toggleSelectAll(($event.target as HTMLInputElement).checked)" />
-                <span class="tp-small">{{ t('knowledge.table.selectAll') }}</span>
-              </label>
-            </div>
+            </PagePanel>
+          </div>
 
-            <div class="tp-knowledge-panel__body">
+          <div
+            v-if="!vectorDisabled"
+            :class="cn(pageSectionDivideClass, knowledgeFilterStickyClass, 'z-30 bg-[var(--tp-bg-surface)] px-[var(--tp-space-4)]')"
+          >
+            <TableToolbar :title="t('knowledge.filters.title')" :subtitle="t('knowledge.filters.subtitle')">
+              <template #filters>
+                <TableFilterForm @submit="handleSearch">
+                  <TableFilterInput
+                    v-model="filters.keyword"
+                    :placeholder="t('knowledge.filters.keywordPlaceholder')"
+                    :aria-label="t('knowledge.filters.keywordLabel')"
+                  />
+                  <TableFilterSelect
+                    v-model="filters.category"
+                    class="min-w-[140px]"
+                    :aria-label="t('knowledge.filters.categoryLabel')"
+                  >
+                    <option value="">{{ t('knowledge.filters.categoryAll') }}</option>
+                    <option v-for="option in categoryOptions" :key="option.value || 'all'" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </TableFilterSelect>
+                  <TableFilterSelect v-model="filters.status" :aria-label="t('knowledge.filters.statusLabel')">
+                    <option value="">{{ t('knowledge.filters.statusAll') }}</option>
+                    <option v-for="option in statusOptions" :key="option.value || 'all'" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </TableFilterSelect>
+                  <TpButton :loading="searchLoading" type="submit">
+                    {{ t('knowledge.filters.apply') }}
+                  </TpButton>
+                </TableFilterForm>
+              </template>
+            </TableToolbar>
+          </div>
+
+          <div :class="cn(pageSectionDivideClass, 'flex min-h-0 flex-1 flex-col')">
+          <KnowledgeVectorDisabledState v-if="vectorDisabled" class="mx-4 mb-4" />
+          <template v-else>
+            <div :class="knowledgeFilesPanelBodyClass">
               <BaseTable
                 :columns="tableColumns"
                 :data="files"
                 :loading="listLoading"
+                keep-content-while-loading
                 :loading-title="t('knowledge.table.loading')"
                 :empty-title="t('knowledge.table.empty')"
                 :empty-message="listError"
+                :error-empty-title="t('common.status.error')"
+                :retry-text="t('common.actions.retry')"
                 :selectable="true"
+                @retry="() => loadFiles(filters.page, 'initial')"
                 :selected-keys="selectedIds"
                 row-key="id"
                 @update:selectedKeys="handleSelectionUpdate"
               >
+                <template #toolbar>
+                  <TableToolbar :title="t('knowledge.table.title')" :pagination="pagination">
+                    <template #actions>
+                      <div
+                        v-if="selectedIds.length"
+                        :class="[captionTextClass, 'text-[var(--tp-color-text-500)]']"
+                      >
+                        {{ selectedIds.length }} / {{ files.length }}
+                      </div>
+                      <label :class="inlineToggleLabelClass">
+                        <input
+                          :class="tableCheckboxClass"
+                          type="checkbox"
+                          :checked="allVisibleSelected"
+                          :disabled="!files.length"
+                          @change="toggleSelectAll(($event.target as HTMLInputElement).checked)"
+                        />
+                        <span>{{ t('knowledge.table.selectAll') }}</span>
+                      </label>
+                    </template>
+                  </TableToolbar>
+                </template>
                 <template #cell-name="{ row }">
-                    <div class="tp-data-title">{{ resolveFileName(row as KnowledgeFileRecord) }}</div>
-                  <div v-if="(row as KnowledgeFileRecord).description" class="tp-data-subtitle text-truncate" style="max-width: 24rem">
-                    {{ (row as KnowledgeFileRecord).description }}
-                  </div>
+                  <div :class="dataTitleClass">{{ resolveFileName(row as KnowledgeFileRecord) }}</div>
+                  <TpTruncateText
+                    v-if="(row as KnowledgeFileRecord).description"
+                    :text="(row as KnowledgeFileRecord).description || ''"
+                    :class="[dataSubtitleDenseClass, 'max-w-96']"
+                  />
                 </template>
                 <template #cell-category="{ row }">
                   {{ resolveCategoryLabel((row as KnowledgeFileRecord).category) }}
@@ -132,21 +146,24 @@
                   {{ resolveFileType((row as KnowledgeFileRecord).file_type) }}
                 </template>
                 <template #cell-size="{ row }">
-                  {{ formatBytes((row as KnowledgeFileRecord).file_size) }}
+                  {{ formatBytes((row as KnowledgeFileRecord).file_size, { zero: '-' }) }}
                 </template>
                 <template #cell-chunks="{ row }">
                   {{ (row as KnowledgeFileRecord).document_count ?? 0 }}
                 </template>
                 <template #cell-status="{ row }">
-                  <TpTag :variant="statusTagVariant(row as KnowledgeFileRecord)">
+                  <TpTag :variant="knowledgeFileStatusTagVariant(row as KnowledgeFileRecord)">
                     {{ resolveStatusLabel(row as KnowledgeFileRecord) }}
                   </TpTag>
                 </template>
                 <template #cell-updatedAt="{ row }">
-                  {{ formatDateTime((row as KnowledgeFileRecord).updated_time || (row as KnowledgeFileRecord).created_time) }}
+                  {{ formatDateTimeLocalized((row as KnowledgeFileRecord).updated_time || (row as KnowledgeFileRecord).created_time) }}
                 </template>
                 <template #cell-actions="{ row }">
-                  <div class="tp-text-end tp-flex tp-justify-end tp-gap-2">
+                  <div :class="flexWrapEndGap2Class">
+                    <TpButton variant="primary" size="sm" @click="openMetaEditor(row as KnowledgeFileRecord)">
+                      {{ t('common.actions.edit') }}
+                    </TpButton>
                     <TpButton variant="secondary" size="sm" @click="openPreview(row as KnowledgeFileRecord)">
                       {{ t('knowledge.actions.preview') }}
                     </TpButton>
@@ -155,26 +172,25 @@
                     </TpButton>
                   </div>
                 </template>
+                <template #footer>
+                  <ListTablePager :pagination="pagination" @change="changePage" />
+                </template>
               </BaseTable>
             </div>
-            <div class="tp-knowledge-panel__footer">
-              <TpPager
-                v-if="pagination.pages > 1"
-                :page="pagination.page"
-                :per-page="pagination.per_page"
-                :total="pagination.total"
-                :pages="pagination.pages"
-                :has-prev="Boolean(pagination.has_prev)"
-                :has-next="Boolean(pagination.has_next)"
-                :previous-text="t('common.actions.previous')"
-                :next-text="t('common.actions.next')"
-                @change="changePage"
-              />
-            </div>
+          </template>
           </div>
-        </div>
+        </PagePanel>
       </div>
     </div>
+
+    <KnowledgeMetaEditDrawer
+      :visible="metaEditVisible"
+      :record="metaEditRecord"
+      :category-options="categoryOptions"
+      @close="closeMetaEditor"
+      @saved="handleMetaSaved"
+      @error="(message) => showNotice('danger', message, { title: t('common.status.error') })"
+    />
 
     <PreviewDrawer
       :visible="previewVisible"
@@ -197,28 +213,76 @@
     />
 
     <ConfirmDialog
-      v-model="confirm.visible"
-      :title="confirm.title"
-      :message="confirm.message"
-      :confirm-text="confirm.confirmText"
-      :cancel-text="confirm.cancelText"
-      :confirm-variant="confirm.variant"
-      @confirm="runConfirmedAction"
+      v-model="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :confirm-variant="confirmDialog.variant"
+      @confirm="confirmDialog.handleConfirm"
+      @cancel="confirmDialog.handleCancel"
     />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import BaseTable, { type BaseTableColumn } from '@/components/common/BaseTable.vue';
+import KnowledgeMetaEditDrawer from '@/components/knowledge/KnowledgeMetaEditDrawer.vue';
+import KnowledgeVectorDisabledState from '@/components/knowledge/KnowledgeVectorDisabledState.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
+import ListTablePager from '@/components/common/ListTablePager.vue';
+import { useConfirmAction } from '@/composables/useConfirmAction';
+import { useListPageChange } from '@/composables/useListPageChange';
+import { emptyListPagination, usePaginatedList } from '@/composables/usePaginatedList';
+import { formatBytes, formatDateTime } from '@/lib/format';
+import { knowledgeFileStatusTagVariant } from '@/lib/enum-tag-ui';
 import KnowledgeStatsCard from '@/components/common/KnowledgeStatsCard.vue';
+import PageNoticeBanner from '@/components/common/PageNoticeBanner.vue';
+import PagePanel from '@/components/common/PagePanel.vue';
 import PreviewDrawer from '@/components/common/PreviewDrawer.vue';
+import TableToolbar from '@/components/common/TableToolbar.vue';
+import { TableFilterForm, TableFilterInput, TableFilterSelect } from '@/components/common/table';
 import TpButton from '@/components/ui/base/TpButton.vue';
-import TpPager from '@/components/ui/base/TpPager.vue';
+import TpTruncateText from '@/components/ui/base/TpTruncateText.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
+import { refreshAppFeatureFlags } from '@/composables/useFeatureFlags';
+import { useKnowledgeVectorGate } from '@/composables/useKnowledgeVectorNotice';
+import { usePageNotifier, type PageNoticeExtras } from '@/composables/usePageNotifier';
+import ToolbarBulkBar from '@/components/common/ToolbarBulkBar.vue';
+import ToolbarOverflowMenu from '@/components/common/ToolbarOverflowMenu.vue';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import type { ListFetchMode } from '@/lib/list-fetch-mode';
+import { flexWrapEndGap2Class, pageToolbarStripClass } from '@/lib/page-chrome-ui';
+import {
+  colSpan12,
+  colSpan12Md6Min1400_3,
+  grid12Class,
+  pageMarkerKnowledge,
+  pageRootMarkedClass,
+  pageSectionDivideClass
+} from '@/lib/page-layout-ui';
+import {
+  knowledgeFilesPanelBodyClass,
+  knowledgeFilesPanelClass,
+  knowledgeFilterStickyClass,
+  knowledgeLayoutClass,
+  knowledgeMainColClass
+} from '@/lib/knowledge-ui';
+import {
+  captionTextClass,
+  dataSubtitleDenseClass,
+  dataTitleClass,
+  inlineToggleLabelClass
+} from '@/lib/page-typography';
+import { cn } from '@/lib/utils';
+import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
+import {
+  tableCellAlignEndClass,
+  tableCheckboxClass
+} from '@/lib/table-ui';
 import { useAppStore } from '@/stores';
 import {
   batchDeleteKnowledge,
@@ -234,12 +298,6 @@ import { ApiError } from '@/api/http';
 
 type NoticeType = 'success' | 'danger' | 'warning' | 'info';
 
-interface NoticeState {
-  type: NoticeType;
-  message: string;
-  details?: string[];
-}
-
 interface SelectOption {
   value: string;
   label: string;
@@ -248,6 +306,12 @@ interface SelectOption {
 const { t, locale } = useI18n();
 const route = useRoute();
 const appStore = useAppStore();
+const { vectorDisabled } = useKnowledgeVectorGate();
+const {
+  banner: pageBanner,
+  clearBanner: clearPageBanner,
+  showNotice: notifyShowNotice
+} = usePageNotifier();
 
 const files = ref<KnowledgeFileRecord[]>([]);
 const stats = ref<KnowledgeStats | null>(null);
@@ -268,33 +332,26 @@ const filters = reactive({
   per_page: 10
 });
 
-const notice = ref<NoticeState | null>(null);
-const noticeDetailsExpanded = ref(false);
-const listLoading = ref(false);
 const statsLoading = ref(false);
 const deleteLoading = ref(false);
 const rebuilding = ref(false);
 const searchLoading = ref(false);
 const previewLoading = ref(false);
 const previewVisible = ref(false);
-const listError = ref('');
+const metaEditVisible = ref(false);
+const metaEditRecord = ref<KnowledgeFileRecord | null>(null);
 const statsError = ref('');
 const previewError = ref('');
 const refreshing = ref(false);
+const { listLoading, listError, loadPage: loadKnowledgePage } = usePaginatedList(files, {
+  refreshLoading: refreshing,
+  pagination
+});
 const selectedIds = ref<number[]>([]);
 const previewFile = ref<(KnowledgeFileRecord & { preview?: string; preview_type?: string; preview_truncated?: boolean }) | null>(null);
 const currentLocale = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'));
 
-const confirm = reactive({
-  visible: false,
-  kind: '' as '' | 'delete' | 'rebuild',
-  title: '',
-  message: '',
-  confirmText: '',
-  cancelText: t('common.actions.cancel'),
-  variant: 'danger' as 'primary' | 'danger' | 'warning',
-  onConfirm: null as null | (() => Promise<void> | void)
-});
+const confirmDialog = useConfirmAction(t('common.actions.cancel'));
 
 const categoryOptions = computed<SelectOption[]>(() => [
   { value: 'test_cases', label: t('knowledge.category.test_cases') },
@@ -320,18 +377,16 @@ const tableColumns = computed<BaseTableColumn[]>(() => [
   { key: 'chunks', label: t('knowledge.table.columns.chunks') },
   { key: 'status', label: t('knowledge.table.columns.status') },
   { key: 'updatedAt', label: t('knowledge.table.columns.updatedAt') },
-  { key: 'actions', label: t('knowledge.table.columns.actions'), headerClass: 'tp-text-end', cellClass: 'tp-text-end' }
+  {
+    key: 'actions',
+    label: t('knowledge.table.columns.actions'),
+    headerClass: tableCellAlignEndClass,
+    cellClass: tableCellAlignEndClass
+  }
 ]);
 
 const hasSelection = computed(() => selectedIds.value.length > 0);
 const allVisibleSelected = computed(() => files.value.length > 0 && files.value.every((file) => selectedIds.value.includes(file.id)));
-
-const paginationText = computed(() => {
-  if (!pagination.value.total) return '';
-  const start = (pagination.value.page - 1) * pagination.value.per_page + 1;
-  const end = Math.min(pagination.value.page * pagination.value.per_page, pagination.value.total);
-  return `${start} - ${end} / ${pagination.value.total}`;
-});
 
 const statsCards = computed(() => [
   { key: 'total-files', label: t('knowledge.stats.totalFiles'), value: stats.value?.total_files ?? 0, hint: statsError.value || undefined, icon: 'KB' },
@@ -346,7 +401,7 @@ const statsCards = computed(() => [
     key: 'storage-size',
     label: t('knowledge.stats.storageSize'),
     value: formatBytes(stats.value?.storage_size ?? 0),
-    hint: stats.value?.last_update ? `${t('knowledge.stats.lastUpdate')}: ${formatDateTime(stats.value.last_update)}` : undefined,
+    hint: stats.value?.last_update ? `${t('knowledge.stats.lastUpdate')}: ${formatDateTimeLocalized(stats.value.last_update)}` : undefined,
     icon: 'ST'
   },
   {
@@ -366,16 +421,6 @@ const previewMetaLine = computed(() => {
   return previewFile.value.preview_truncated ? `${base} · ${t('knowledge.preview.truncated')}` : base;
 });
 
-const noticeClass = computed(() => {
-  const type = notice.value?.type || 'info';
-  return {
-    'tp-risk-block--info': type === 'info',
-    'tp-risk-block--danger': type === 'danger',
-    'tp-risk-block--warning': type === 'warning',
-    'tp-risk-block--success': type === 'success'
-  };
-});
-
 const pageBusy = computed(() => listLoading.value || statsLoading.value || deleteLoading.value || rebuilding.value);
 
 watch(pageBusy, (next) => {
@@ -387,9 +432,8 @@ function translateOrFallback(path: string, fallback: string) {
   return value === path ? fallback : value;
 }
 
-function showNotice(type: NoticeType, message: string, details?: string[]) {
-  notice.value = { type, message, details };
-  noticeDetailsExpanded.value = false;
+function showNotice(type: NoticeType, message: string, extras?: PageNoticeExtras) {
+  notifyShowNotice(type, message, extras);
 }
 
 function humanize(value?: string | null) {
@@ -413,54 +457,20 @@ function resolveStatusLabel(file: KnowledgeFileRecord) {
 }
 
 
-function statusTagVariant(file: KnowledgeFileRecord) {
-  if (file.is_duplicate) return 'warning';
-  switch ((file.status || 'active').toLowerCase()) {
-    case 'active':
-      return 'success';
-    case 'processing':
-      return 'info';
-    case 'archived':
-      return 'neutral';
-    case 'failed':
-      return 'danger';
-    default:
-      return 'neutral';
-  }
-}
-
 function resolveFileType(type?: string | null) {
   return type ? type.toUpperCase() : '-';
 }
 
-function formatBytes(bytes?: number | null) {
-  const value = Number(bytes || 0);
-  if (!value) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function formatDateTime(value?: string | null) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(currentLocale.value, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date);
+function formatDateTimeLocalized(value?: string | null) {
+  return formatDateTime(value, currentLocale.value);
 }
 
 function handleSelectionUpdate(values: Array<string | number>) {
   selectedIds.value = values.map((item) => Number(item)).filter((item) => !Number.isNaN(item));
+}
+
+function clearKnowledgeSelection() {
+  selectedIds.value = [];
 }
 
 function toggleSelectAll(checked: boolean) {
@@ -468,63 +478,75 @@ function toggleSelectAll(checked: boolean) {
 }
 
 function openConfirm(kind: 'delete' | 'rebuild') {
+  if (vectorDisabled.value) return;
   if (kind === 'delete' && !selectedIds.value.length) {
     showNotice('warning', t('knowledge.message.noSelection'));
     return;
   }
 
-  confirm.kind = kind;
-  confirm.title = kind === 'delete' ? t('knowledge.actions.batchDelete') : t('knowledge.actions.rebuild');
-  confirm.message = kind === 'delete' ? t('knowledge.confirm.deleteSelected') : t('knowledge.confirm.rebuild');
-  confirm.confirmText = kind === 'delete' ? t('common.actions.delete') : t('common.actions.confirm');
-  confirm.variant = 'danger';
-  confirm.visible = true;
-  confirm.onConfirm = kind === 'delete' ? () => deleteByIds([...selectedIds.value]) : () => handleRebuild();
-}
-
-async function runConfirmedAction() {
-  const action = confirm.onConfirm;
-  confirm.onConfirm = null;
-  if (action) await action();
+  confirmDialog.open({
+    title: kind === 'delete' ? t('knowledge.actions.batchDelete') : t('knowledge.actions.rebuild'),
+    message: kind === 'delete' ? t('knowledge.confirm.deleteSelected') : t('knowledge.confirm.rebuild'),
+    confirmText: kind === 'delete' ? t('common.actions.delete') : t('common.actions.confirm'),
+    variant: 'danger',
+    onConfirm: async () => {
+      if (kind === 'delete') {
+        await deleteByIds([...selectedIds.value]);
+      } else {
+        await handleRebuild();
+      }
+    }
+  });
 }
 
 async function loadStats() {
+  if (vectorDisabled.value) {
+    stats.value = null;
+    statsError.value = '';
+    return;
+  }
   statsLoading.value = true;
   statsError.value = '';
   try {
     stats.value = await getKnowledgeStats();
   } catch (error) {
     stats.value = null;
-    statsError.value = error instanceof Error ? error.message : t('knowledge.message.statsFailed');
+    statsError.value = getUserFacingErrorMessage(error, t('knowledge.message.statsFailed'));
   } finally {
     statsLoading.value = false;
   }
 }
 
-async function loadFiles(page = filters.page) {
-  listLoading.value = true;
-  listError.value = '';
-  try {
-    const response = await listKnowledge({
-      page,
-      per_page: filters.per_page,
-      search: filters.keyword || undefined,
-      category: filters.category || undefined,
-      status: filters.status || undefined
-    });
-    files.value = response.files;
-    pagination.value = response.pagination;
-    filters.page = response.pagination.page || page;
-    selectedIds.value = selectedIds.value.filter((id) => response.files.some((file) => file.id === id));
-    if (previewFile.value && !response.files.some((file) => file.id === previewFile.value?.id)) {
-      clearPreview();
-    }
-  } catch (error) {
+async function loadFiles(page = filters.page, mode: ListFetchMode = 'page') {
+  if (vectorDisabled.value) {
     files.value = [];
-    pagination.value = { page, per_page: filters.per_page, total: 0, pages: 0, has_prev: false, has_next: false };
-    listError.value = error instanceof Error ? error.message : t('knowledge.message.loadFailed');
-  } finally {
-    listLoading.value = false;
+    listError.value = '';
+    pagination.value = emptyListPagination(filters.per_page);
+    return;
+  }
+  const result = await loadKnowledgePage(
+    page,
+    mode,
+    () =>
+      listKnowledge({
+        page,
+        per_page: filters.per_page,
+        search: filters.keyword || undefined,
+        category: filters.category || undefined,
+        status: filters.status || undefined
+      }).then((response) => ({ rows: response.files, pagination: response.pagination })),
+    {
+      resolveMessage: (error) => getUserFacingErrorMessage(error, t('knowledge.message.loadFailed')),
+      onClear: () => {
+        pagination.value = emptyListPagination(filters.per_page, page);
+      }
+    }
+  );
+  if (!result) return;
+  filters.page = result.pagination.page || page;
+  selectedIds.value = selectedIds.value.filter((id) => result.rows.some((file) => file.id === id));
+  if (previewFile.value && !result.rows.some((file) => file.id === previewFile.value?.id)) {
+    clearPreview();
   }
 }
 
@@ -532,23 +554,22 @@ async function handleSearch() {
   searchLoading.value = true;
   filters.page = 1;
   try {
-    await loadFiles(1);
+    await loadFiles(1, 'filter');
   } finally {
     searchLoading.value = false;
   }
 }
 
 async function handleRefresh() {
-  refreshing.value = true;
   try {
-    await Promise.all([loadFiles(filters.page), loadStats()]);
+    await Promise.all([loadFiles(filters.page, 'refresh'), loadStats()]);
     if (listError.value || statsError.value) {
       showNotice('warning', t('common.status.error'));
     } else {
       showNotice('success', t('knowledge.message.refreshSuccess'));
     }
-  } finally {
-    refreshing.value = false;
+  } catch {
+    showNotice('warning', t('common.status.error'));
   }
 }
 
@@ -561,7 +582,7 @@ async function openPreview(file: KnowledgeFileRecord) {
     previewFile.value = detail;
   } catch (error) {
     previewFile.value = null;
-    previewError.value = error instanceof Error ? error.message : t('knowledge.preview.failed');
+    previewError.value = getUserFacingErrorMessage(error, t('knowledge.preview.failed'));
   } finally {
     previewLoading.value = false;
   }
@@ -571,6 +592,25 @@ function clearPreview() {
   previewVisible.value = false;
   previewFile.value = null;
   previewError.value = '';
+}
+
+function openMetaEditor(file: KnowledgeFileRecord) {
+  metaEditRecord.value = file;
+  metaEditVisible.value = true;
+}
+
+function closeMetaEditor() {
+  metaEditVisible.value = false;
+  metaEditRecord.value = null;
+}
+
+function handleMetaSaved(updated: KnowledgeFileRecord) {
+  closeMetaEditor();
+  showNotice('success', t('knowledge.edit.success'), { title: t('common.feedback.success') });
+  const index = files.value.findIndex((item) => item.id === updated.id);
+  if (index >= 0) {
+    files.value[index] = { ...files.value[index], ...updated };
+  }
 }
 
 function handlePreviewCopied() {
@@ -588,7 +628,11 @@ async function deleteByIds(ids: number[]) {
     const deletedCount = Number(response.deleted_count ?? ids.length);
     const failedCount = Number(response.failed_count ?? 0);
     if (failedCount > 0) {
-      showNotice('warning', `${t('knowledge.message.deleteSuccess')}: ${deletedCount}, ${failedCount}`);
+      const partial = `${t('knowledge.message.deleteSuccess')}: ${deletedCount}, ${failedCount}`;
+      showNotice(
+        deletedCount > 0 ? 'warning' : 'danger',
+        deletedCount > 0 ? partial : t('knowledge.message.batchDeleteFailed')
+      );
     } else {
       showNotice('success', t('knowledge.message.deleteSuccess'));
     }
@@ -596,9 +640,10 @@ async function deleteByIds(ids: number[]) {
       clearPreview();
     }
     selectedIds.value = [];
-    await Promise.all([loadFiles(filters.page), loadStats()]);
+    await Promise.all([loadFiles(filters.page, 'refresh'), loadStats()]);
   } catch (error) {
-    showNotice('danger', error instanceof ApiError ? error.message : t('knowledge.message.batchDeleteFailed'));
+    const fallback = ids.length > 1 ? t('knowledge.message.batchDeleteFailed') : t('knowledge.message.deleteFailed');
+    showNotice('danger', getUserFacingErrorMessage(error, fallback));
   } finally {
     deleteLoading.value = false;
   }
@@ -614,22 +659,27 @@ async function handleRebuild() {
   try {
     await rebuildKnowledgeIndex({ force: false, clear_all: false });
     showNotice('success', t('knowledge.message.rebuildSuccess'));
-    await Promise.all([loadFiles(filters.page), loadStats()]);
+    await Promise.all([loadFiles(filters.page, 'refresh'), loadStats()]);
   } catch (error) {
-    showNotice('danger', error instanceof ApiError ? error.message : t('knowledge.message.rebuildFailed'));
+    showNotice('danger', getUserFacingErrorMessage(error, t('knowledge.message.rebuildFailed')));
   } finally {
     rebuilding.value = false;
   }
 }
 
-async function changePage(page: number) {
-  if (page < 1 || page > (pagination.value.pages || 1)) return;
-  filters.page = page;
-  await loadFiles(page);
-}
+const { changePage } = useListPageChange(
+  pagination,
+  (page, mode) => loadFiles(page, mode),
+  { onAcceptPage: (page) => { filters.page = page; } }
+);
+
+onBeforeUnmount(() => {
+  appStore.setLoading(false);
+});
 
 onMounted(async () => {
-  await Promise.all([loadFiles(filters.page), loadStats()]);
+  await refreshAppFeatureFlags();
+  await Promise.all([loadFiles(filters.page, 'initial'), loadStats()]);
   const previewIdRaw = route.query.previewId;
   const previewId = typeof previewIdRaw === 'string' ? Number(previewIdRaw) : NaN;
   if (!Number.isNaN(previewId) && previewId > 0) {
@@ -648,110 +698,4 @@ onMounted(async () => {
   }
 });
 </script>
-
-<style scoped>
-.tp-knowledge-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.tp-knowledge-panel__body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-
-.tp-knowledge-panel__footer {
-  min-height: 42px;
-  margin-top: 8px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-}
-
-.tp-knowledge-filter-sticky {
-  position: sticky;
-  top: 72px;
-  z-index: 30;
-}
-
-.tp-knowledge-workspace {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr;
-  width: 100%;
-}
-
-.tp-knowledge-main-col {
-  min-width: 0;
-}
-
-.tp-knowledge-panel--files .tp-knowledge-panel__body {
-  overflow: hidden;
-}
-
-.tp-knowledge-panel--files .tp-knowledge-panel__body :deep(> div) {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.tp-knowledge-panel--files :deep(.tp-table-wrap) {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable both-edges;
-}
-
-@media (min-width: 1200px) {
-  .tp-knowledge-layout {
-    align-items: stretch;
-  }
-
-  .tp-knowledge-layout > .tp-knowledge-main-col {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .tp-knowledge-layout > .tp-knowledge-main-col {
-    min-height: 100%;
-  }
-
-  .tp-knowledge-main-col .tp-knowledge-workspace {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-    width: 100%;
-  }
-}
-
-@media (max-width: 1199px) {
-  .tp-knowledge-filter-sticky {
-    top: 12px;
-  }
-}
-
-.tp-knowledge-panel--files :deep(.tp-table-wrap)::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.tp-knowledge-panel--files :deep(.tp-table-wrap)::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--tp-border-default) 85%, transparent);
-  border-radius: 999px;
-}
-
-.tp-knowledge-panel--files :deep(.tp-table-wrap)::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-@media (max-width: 1199px) {
-  /* preview drawer responsive style is managed in PreviewDrawer */
-}
-</style>
 

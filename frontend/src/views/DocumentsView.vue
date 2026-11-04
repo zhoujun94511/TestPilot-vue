@@ -1,99 +1,102 @@
-<template>
-  <section class="tp-documents-page">
-    <div v-if="notice" class="tp-risk-block tp-mb-3" :class="noticeClass">
-      <div class="tp-flex tp-align-start tp-justify-between tp-gap-3">
-        <div class="tp-flex-grow-1">{{ notice.message }}</div>
-        <div class="tp-flex tp-align-center tp-gap-2">
-          <TpButton
-            v-if="notice.actionLabel && notice.onAction"
-            variant="secondary"
-            size="sm"
-            @click="handleNoticeAction"
-          >
-            {{ notice.actionLabel }}
-          </TpButton>
-          <TpButton variant="ghost" size="sm" :aria-label="t('common.actions.close')" @click="notice = null">
-            {{ t('common.actions.close') }}
-          </TpButton>
-        </div>
-      </div>
-    </div>
+﻿<template>
+  <section :class="pageRootMarkedClass(pageMarkerDocuments)">
+    <PageNoticeBanner
+      :notice="pageBanner"
+      @close="clearPageBanner"
+      @action="runPageBannerAction"
+    />
 
-    <div class="tp-doc-page-actions tp-mb-3">
-      <div class="tp-flex tp-flex-wrap tp-gap-2 tp-justify-end">
-        <TpButton variant="secondary" :loading="listLoading" @click="handleRefresh">
-          {{ t('documents.actions.refresh') }}
-        </TpButton>
-        <TpButton
-          variant="danger"
-          :disabled="analyzeLoading || !selectedDocumentKeys.length"
-          @click="handleDeleteSelectedDocuments"
+    <div :class="grid12Class">
+      <div :class="colSpan12">
+        <PagePanel
+          class="mb-4"
+          :title="t('documents.tabs.manage')"
+          :subtitle="t('documents.toolbar.manageLead')"
         >
-          {{ t('documents.actions.deleteDocuments') }}
-        </TpButton>
-        <TpButton variant="primary" :loading="generating" :disabled="generating || !canGenerateCases" @click="handleGenerateCases">
-          {{ generating ? t('documents.actions.generating') : t('documents.actions.generateCases') }}
-        </TpButton>
-        <TpButton
-          variant="secondary"
-          :loading="exportingRequirements"
-          :disabled="exportingRequirements || !analysisRequirements.length"
-          @click="handleExportRequirements"
-        >
-          {{ exportingRequirements ? t('documents.actions.exportingRequirements') : t('documents.actions.exportRequirements') }}
-        </TpButton>
-      </div>
-    </div>
-
-    <div class="tp-row tp-g-3">
-      <div class="tp-col-12">
-        <div class="tp-surface tp-p-3 tp-mb-3">
-          <div class="tp-flex tp-flex-wrap tp-justify-between tp-align-start tp-gap-2 tp-mb-3">
-            <div>
-              <div class="tp-card__title">{{ t('documents.filters.title') }}</div>
-              <div class="tp-card__subtitle">
-                <span v-if="selectedDocument">
-                  {{ t('documents.result.selected') }}: {{ resolveDocumentLabel(selectedDocument) }}
-                </span>
-                <span v-else>{{ t('documents.message.selectDocumentFirst') }}</span>
-                <span v-if="selectedDocumentKeys.length" class="tp-ml-2">
-                  · {{ t('documents.result.selectedDocumentsCount', { count: selectedDocumentKeys.length }) }}
-                </span>
-              </div>
-            </div>
-            <div class="tp-small" style="color: var(--tp-color-text-500)">{{ paginationText }}</div>
-          </div>
-
-          <form class="tp-row tp-g-3 tp-align-end" @submit.prevent="handleSearch">
-            <div class="tp-col-12 tp-col-lg-6">
-              <label class="tp-form-label">{{ t('documents.filters.keywordLabel') }}</label>
-              <input
-                v-model.trim="filters.search"
-                type="search"
-                class="tp-input"
-                :placeholder="t('documents.filters.keywordPlaceholder')"
-              />
-            </div>
-
-            <div class="tp-col-12 tp-col-lg-4">
-              <label class="tp-form-label">{{ t('documents.filters.analysisTypeLabel') }}</label>
-              <select v-model="filters.analysisType" class="tp-select">
-                <option v-for="option in analysisTypeOptions" :key="`filter-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </div>
-
-            <div class="tp-col-12 tp-col-lg-2 tp-grid">
-              <TpButton :loading="listLoading" @click="handleSearch">
-                {{ t('documents.filters.apply') }}
+          <template #actions>
+            <div :class="pageToolbarStripClass">
+              <TpButton variant="ghost" size="sm" :loading="listRefreshLoading" @click="handleRefresh">
+                {{ t('common.actions.refresh') }}
               </TpButton>
+              <span v-if="caseRagStatusLabel" class="whitespace-nowrap text-xs text-muted-foreground">{{ caseRagStatusLabel }}</span>
+              <TpButton
+                variant="primary"
+                size="sm"
+                :loading="generating"
+                :disabled="generating || !canGenerateCases"
+                @click="handleGenerateCases"
+              >
+                {{ generating ? t('documents.actions.generating') : t('documents.actions.generateCases') }}
+              </TpButton>
+              <ToolbarOverflowMenu>
+                <DropdownMenuItem
+                  v-if="!showAnalysisPanel && currentAnalysis"
+                  @select="showAnalysisPanel = true"
+                >
+                  {{ t('documents.analysis.showPanel') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  :disabled="exportingRequirements || !analysisRequirements.length"
+                  @select="handleExportRequirements"
+                >
+                  {{
+                    exportingRequirements
+                      ? t('documents.actions.exportingRequirements')
+                      : t('documents.actions.exportRequirements')
+                  }}
+                </DropdownMenuItem>
+              </ToolbarOverflowMenu>
             </div>
-          </form>
-        </div>
+          </template>
 
-        <div class="tp-surface tp-p-3 tp-mb-3">
-          <div v-if="listError" class="tp-mb-3">
+          <ToolbarBulkBar :count="selectedDocumentKeys.length" @clear="clearDocumentSelection">
+            <TpButton
+              variant="ghost"
+              size="sm"
+              :disabled="analyzeLoading || !selectedDocument"
+              @click="handleAnalyzeSelected"
+            >
+              {{ t('documents.actions.analyzeCurrent') }}
+            </TpButton>
+            <TpButton
+              variant="danger"
+              size="sm"
+              :disabled="analyzeLoading || !selectedDocumentKeys.length"
+              @click="handleDeleteSelectedDocuments"
+            >
+              {{ t('documents.actions.deleteDocuments') }}
+            </TpButton>
+          </ToolbarBulkBar>
+
+          <TableToolbar
+            :title="t('documents.filters.title')"
+            :subtitle="filterToolbarSubtitle"
+          >
+            <template #filters>
+              <TableFilterForm @submit="handleSearch">
+                <TableFilterInput
+                  v-model="filters.search"
+                  :placeholder="t('documents.filters.keywordPlaceholder')"
+                  :aria-label="t('documents.filters.keywordLabel')"
+                />
+                <TableFilterSelect
+                  v-model="filters.analysisType"
+                  class="min-w-[160px]"
+                  :aria-label="t('documents.filters.analysisTypeLabel')"
+                >
+                  <option v-for="option in analysisTypeOptions" :key="`filter-${option.value}`" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </TableFilterSelect>
+                <TpButton :loading="listLoading" type="submit">
+                  {{ t('documents.filters.apply') }}
+                </TpButton>
+              </TableFilterForm>
+            </template>
+          </TableToolbar>
+
+          <div :class="pageSectionDivideClass">
+          <div v-if="listError" class="mb-4">
             <BaseState
               variant="error"
               :title="t('common.status.error')"
@@ -109,6 +112,7 @@
             :data="documents"
             :row-class="resolveDocumentRowClass"
             :loading="listLoading"
+            keep-content-while-loading
             :loading-title="t('documents.table.loading')"
             :empty-title="t('documents.table.empty')"
             :empty-message="''"
@@ -116,28 +120,34 @@
             :selected-keys="selectedDocumentKeys"
             row-key="document_key"
             @update:selectedKeys="handleDocumentSelectionUpdate"
+            :managed-select-all="true"
             @toggleAll="handleDocumentToggleAll"
             @rowClick="selectDocument"
           >
+            <template #toolbar>
+              <TableToolbar :title="t('documents.table.title')" :pagination="pagination" />
+            </template>
             <template #cell-name="{ row }">
-              <div class="tp-data-title">{{ resolveDocumentLabel(row as DocumentRecord) }}</div>
-              <div v-if="(row as DocumentRecord).description" class="tp-data-subtitle text-truncate" style="max-width: 24rem">
-                {{ (row as DocumentRecord).description }}
-              </div>
+              <div :class="dataTitleClass">{{ resolveDocumentLabel(row as DocumentRecord) }}</div>
+              <TpTruncateText
+                v-if="(row as DocumentRecord).description"
+                :text="(row as DocumentRecord).description || ''"
+                :class="[dataSubtitleDenseClass, 'max-w-96']"
+              />
             </template>
             <template #cell-type="{ row }">
               {{ resolveFileTypeLabel((row as DocumentRecord).file_type) }}
             </template>
             <template #cell-status="{ row }">
-              <TpTag :variant="statusTagVariant((row as DocumentRecord).status || (row as DocumentRecord).analysis_status)">
+              <TpTag :variant="documentStatusTagVariant((row as DocumentRecord).status || (row as DocumentRecord).analysis_status)">
                 {{ resolveStatusLabel((row as DocumentRecord).status || (row as DocumentRecord).analysis_status) }}
               </TpTag>
             </template>
             <template #cell-updatedAt="{ row }">
-              {{ formatDateTime((row as DocumentRecord).updated_time || (row as DocumentRecord).created_time) }}
+              {{ formatDocDateTime((row as DocumentRecord).updated_time || (row as DocumentRecord).created_time) }}
             </template>
             <template #cell-actions="{ row }">
-              <div class="tp-flex tp-justify-end tp-gap-2">
+              <div class="flex justify-end gap-2">
                 <TpButton
                   v-if="canViewAnalysisResult(row as DocumentRecord)"
                   variant="secondary"
@@ -173,35 +183,34 @@
                 </TpButton>
               </div>
             </template>
+            <template #footer>
+              <ListTablePager :pagination="pagination" @change="changePage" />
+            </template>
           </BaseTable>
-          <div v-if="pagination.pages > 1" class="tp-flex tp-flex-wrap tp-justify-between tp-align-center tp-gap-2 tp-mt-3">
-            <div class="tp-small" style="color: var(--tp-color-text-500)">{{ paginationText }}</div>
-            <TpPager
-              :page="pagination.page"
-              :per-page="pagination.per_page"
-              :total="pagination.total"
-              :pages="pagination.pages"
-              :has-prev="Boolean(pagination.has_prev)"
-              :has-next="Boolean(pagination.has_next)"
-              :previous-text="t('common.actions.previous')"
-              :next-text="t('common.actions.next')"
-              @change="changePage"
-            />
           </div>
-        </div>
+        </PagePanel>
 
-        <div v-if="showAnalysisPanel || analyzeLoading || analysisError || currentAnalysis" ref="analysisPanelRef" class="tp-surface tp-p-3">
-          <div class="tp-flex tp-flex-wrap tp-justify-between tp-align-start tp-gap-2 tp-mb-3">
-            <div>
-              <div class="tp-card__title">{{ t('documents.analysis.title') }}</div>
-              <div class="tp-card__subtitle">
-                {{ selectedDocument ? `${t('documents.analysis.sourceDocument')}: ${resolveDocumentLabel(selectedDocument)}` : t('documents.analysis.empty') }}
+        <div
+          v-if="showAnalysisPanel || analyzeLoading || analysisError || currentAnalysis"
+          ref="analysisPanelRef"
+        >
+          <PagePanel>
+            <template #header>
+              <div>
+                <div :class="panelTitleClass">{{ t('documents.analysis.title') }}</div>
+                <div :class="panelSubtitleClass">
+                  {{ selectedDocument ? `${t('documents.analysis.sourceDocument')}: ${resolveDocumentLabel(selectedDocument)}` : t('documents.analysis.empty') }}
+                </div>
               </div>
-            </div>
-            <TpButton size="sm" :loading="generating" :disabled="generating || !analysisRequirements.length" @click="handleGenerateCases">
-              {{ t('documents.actions.generateCases') }}
-            </TpButton>
-          </div>
+            </template>
+            <template #actions>
+              <TpButton size="sm" variant="ghost" @click="showAnalysisPanel = false">
+                {{ t('documents.analysis.hidePanel') }}
+              </TpButton>
+              <TpButton size="sm" :loading="generating" :disabled="generating || !analysisRequirements.length" @click="handleGenerateCases">
+                {{ t('documents.actions.generateCases') }}
+              </TpButton>
+            </template>
 
           <BaseState
             v-if="analyzeLoading && !currentAnalysis"
@@ -231,32 +240,36 @@
               :confidence-label="analysisConfidenceLabel"
             >
               <template #summary>
-                <div class="tp-state__message tp-text-start">{{ analysisSummaryText }}</div>
+                <div class="mt-1.5 text-sm text-muted-foreground">{{ analysisSummaryText }}</div>
               </template>
 
               <template #metrics>
-                <div class="tp-row tp-g-3">
-                  <div v-for="card in summaryCards" :key="card.key" class="tp-col-12 tp-col-md-6 tp-col-xxl-3">
-                    <TpCard>
-                      <div class="tp-kpi-label">{{ card.label }}</div>
-                      <div class="tp-kpi-value">{{ card.value }}</div>
-                      <div v-if="card.hint" class="tp-kpi-hint">{{ card.hint }}</div>
-                    </TpCard>
+                <div :class="grid12Class">
+                  <div v-for="card in summaryCards" :key="card.key" :class="colSpan12Md6Min1400_3">
+                    <div :class="nestedMetricBlockClass">
+                      <div :class="kpiLabelClass">{{ card.label }}</div>
+                      <div :class="kpiValueClass">{{ card.value }}</div>
+                      <div v-if="card.hint" :class="kpiHintClass">{{ card.hint }}</div>
+                    </div>
                   </div>
                 </div>
               </template>
 
               <template #evidence>
-                <div v-if="analysisRequirements.length" class="tp-grid tp-gap-2">
-                  <div class="tp-flex tp-justify-between tp-align-center">
-                    <label class="tp-toggle">
+                <div v-if="analysisRequirements.length" class="grid gap-2">
+                  <div :class="sectionTitleClass">{{ t('documents.analysis.requirementsTitle') }}</div>
+                  <div v-if="selectedDocument" :class="captionTextClass">
+                    {{ t('documents.analysis.currentDocument') }}: {{ resolveDocumentLabel(selectedDocument) }}
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <label :class="inlineToggleLabelClass">
                       <input
-                        class="tp-check"
+                        :class="tableCheckboxClass"
                         type="checkbox"
                         :checked="allRequirementsSelected"
                         @change="toggleSelectAllRequirements(($event.target as HTMLInputElement).checked)"
                       />
-                      <span class="tp-small">{{ t('documents.actions.selectAllRequirements') }}</span>
+                      <span :class="captionTextClass">{{ t('documents.actions.selectAllRequirements') }}</span>
                     </label>
                     <TpButton
                       variant="danger"
@@ -270,37 +283,35 @@
                   <div
                     v-for="item in pagedAnalysisRequirements"
                     :key="item.req_id"
-                    class="tp-surface__body tp-p-0 tp-analysis-requirement-item"
-                    :class="resolveRequirementItemClass(item.req_id)"
+                    :class="[documentsAnalysisRequirementItemClass, resolveRequirementItemClass(item.req_id)]"
                     :data-req-id="item.req_id"
                   >
-                    <div class="tp-flex tp-justify-between tp-align-start tp-gap-2">
-                      <label class="tp-toggle">
+                    <div class="flex items-start justify-between gap-2">
+                      <label :class="inlineToggleLabelClass">
                         <input
-                          class="tp-check"
+                          :class="tableCheckboxClass"
                           type="checkbox"
                           :checked="selectedRequirementIds.includes(item.req_id)"
                           @change="toggleRequirementSelection(item.req_id, ($event.target as HTMLInputElement).checked)"
                         />
-                        <span class="tp-small">{{ item.req_id }}</span>
+                        <span :class="captionTextClass">{{ item.req_id }}</span>
                       </label>
-                      <TpButton variant="danger" size="sm" @click="handleDeleteSingleRequirement(item.req_id)">
-                        {{ t('common.actions.delete') }}
-                      </TpButton>
+                      <div class="flex shrink-0 gap-2">
+                        <TpButton variant="primary" size="sm" @click="openRequirementEditor(item)">
+                          {{ t('common.actions.edit') }}
+                        </TpButton>
+                        <TpButton variant="danger" size="sm" @click="handleDeleteSingleRequirement(item.req_id)">
+                          {{ t('common.actions.delete') }}
+                        </TpButton>
+                      </div>
                     </div>
-                    <div class="tp-data-title tp-mt-2">{{ item.title }}</div>
-                    <div class="tp-data-subtitle">{{ item.content }}</div>
+                    <div :class="[dataTitleClass, 'mt-2']">{{ item.title }}</div>
+                    <div :class="dataSubtitleClass">{{ item.content }}</div>
                   </div>
-                  <TpPager
-                    class="tp-mt-2"
-                    :page="analysisRequirementPagination.page"
-                    :per-page="analysisRequirementPagination.per_page"
-                    :total="analysisRequirementPagination.total"
-                    :pages="analysisRequirementPagination.pages"
-                    :has-prev="Boolean(analysisRequirementPagination.has_prev)"
-                    :has-next="Boolean(analysisRequirementPagination.has_next)"
-                    :previous-text="t('common.actions.previous')"
-                    :next-text="t('common.actions.next')"
+                  <ListTablePager
+                    class="mt-2"
+                    :pagination="analysisRequirementPagination"
+                    :show-summary="true"
                     @change="changeAnalysisRequirementPage"
                   />
                 </div>
@@ -313,10 +324,11 @@
               </template>
 
               <template #raw>
-                <pre class="tp-raw-block">{{ analysisRawText }}</pre>
+                <pre :class="documentsRawBlockClass">{{ analysisRawText }}</pre>
               </template>
             </AiResultCard>
           </template>
+          </PagePanel>
         </div>
 
         <PreviewDrawer
@@ -341,33 +353,95 @@
 
       </div>
     </div>
+    <RequirementEditDrawer
+      :visible="requirementEditVisible"
+      :record="editingRequirement"
+      :type-options="analysisRequirementTypeOptions"
+      :priority-options="analysisRequirementPriorityOptions"
+      @close="closeRequirementEditor"
+      @saved="handleRequirementSaved"
+      @error="(message) => showNotice('danger', message, { title: t('common.status.error') })"
+    />
+
     <ConfirmDialog
-      v-model="deleteConfirmVisible"
-      :title="deleteConfirmTitle"
-      :message="deleteConfirmMessage"
-      :confirm-text="deleteConfirmButtonText"
-      :cancel-text="t('common.actions.cancel')"
-      :confirm-variant="deleteConfirmVariant"
-      @confirm="runDeleteConfirmAction"
-      @cancel="clearDeleteConfirm"
+      v-model="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :confirm-variant="confirmDialog.variant"
+      @confirm="confirmDialog.handleConfirm"
+      @cancel="confirmDialog.handleCancel"
     />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import BaseState from '@/components/common/BaseState.vue';
+import PageNoticeBanner from '@/components/common/PageNoticeBanner.vue';
+import PagePanel from '@/components/common/PagePanel.vue';
+import TableToolbar from '@/components/common/TableToolbar.vue';
+import { TableFilterForm, TableFilterInput, TableFilterSelect } from '@/components/common/table';
+import {
+  colSpan12,
+  colSpan12Md6Min1400_3,
+  grid12Class,
+  pageMarkerDocuments,
+  pageRootMarkedClass,
+  pageSectionDivideClass
+} from '@/lib/page-layout-ui';
+import ToolbarBulkBar from '@/components/common/ToolbarBulkBar.vue';
+import ToolbarOverflowMenu from '@/components/common/ToolbarOverflowMenu.vue';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { type ListFetchMode } from '@/lib/list-fetch-mode';
+import { documentStatusTagVariant } from '@/lib/enum-tag-ui';
+import { useListPageChange } from '@/composables/useListPageChange';
+import { usePaginatedList } from '@/composables/usePaginatedList';
+import { useTimedHighlight } from '@/composables/useTimedHighlight';
+import { pageToolbarStripClass } from '@/lib/page-chrome-ui';
+import { captionTextClass } from '@/lib/page-typography';
+import { panelSubtitleClass, panelTitleClass } from '@/lib/panel-ui';
+import { cn } from '@/lib/utils';
+import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
+import {
+  dataSubtitleClass,
+  dataSubtitleDenseClass,
+  dataTitleClass,
+  inlineToggleLabelClass,
+  kpiHintClass,
+  kpiLabelClass,
+  kpiValueClass,
+  nestedMetricBlockClass,
+  sectionTitleClass
+} from '@/lib/page-typography';
+import {
+  documentsAnalysisRequirementItemClass,
+  documentsRawBlockClass,
+  documentsRequirementHighlightActiveClass,
+  documentsRequirementHighlightClass,
+  documentsRowHighlightActiveClass,
+  documentsRowHighlightClass
+} from '@/lib/documents-ui';
+import { buildRequirementTypeSelectOptions } from '@/lib/requirement-type-ui';
+import { tableCheckboxClass } from '@/lib/table-ui';
 import BaseTable, { type BaseTableColumn } from '@/components/common/BaseTable.vue';
+import RequirementEditDrawer from '@/components/documents/RequirementEditDrawer.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
+import ListTablePager from '@/components/common/ListTablePager.vue';
+import { useConfirmAction } from '@/composables/useConfirmAction';
+import { formatBytes, formatDateTime } from '@/lib/format';
+import { triggerBlobDownload } from '@/lib/download';
 import PreviewDrawer from '@/components/common/PreviewDrawer.vue';
 import AiResultCard from '@/components/ui/AiResultCard.vue';
 import TpButton from '@/components/ui/base/TpButton.vue';
-import TpCard from '@/components/ui/base/TpCard.vue';
-import TpPager from '@/components/ui/base/TpPager.vue';
+import TpTruncateText from '@/components/ui/base/TpTruncateText.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
 import { useAiResult } from '@/composables/useAiResult';
+import { useCaseGenerationRagStatus } from '@/composables/useCaseGenerationRagStatus';
+import { usePageNotifier, type PageNoticeExtras } from '@/composables/usePageNotifier';
 import {
   analyzeDocument,
   deleteDocument,
@@ -385,13 +459,6 @@ import {
   type DocumentRequirementRecord
 } from '@/api/documents';
 
-interface NoticeState {
-  type: 'success' | 'danger' | 'warning' | 'info';
-  message: string;
-  actionLabel?: string;
-  onAction?: () => void | Promise<void>;
-}
-
 interface SelectOption {
   value: DocumentAnalysisType;
   label: string;
@@ -400,17 +467,23 @@ interface SelectOption {
 const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const { label: caseRagStatusLabel, refresh: refreshCaseRagStatus } = useCaseGenerationRagStatus();
 const documents = ref<DocumentRecord[]>([]);
 const currentAnalysis = ref<DocumentAnalysisResult | null>(null);
 const selectedDocumentKey = ref<string>('');
-const listLoading = ref(false);
+const listRefreshLoading = ref(false);
 const analyzeLoading = ref(false);
 const generating = ref(false);
 const exportingRequirements = ref(false);
-const listError = ref('');
+const documentRowHighlight = useTimedHighlight(4200);
+const requirementRowHighlight = useTimedHighlight(4200);
 const analysisError = ref('');
-const notice = ref<NoticeState | null>(null);
-const noticeTimer = ref<number | null>(null);
+const {
+  banner: pageBanner,
+  clearBanner: clearPageBanner,
+  runBannerAction: runPageBannerAction,
+  showNotice: notifyShowNotice
+} = usePageNotifier();
 const analysisPanelRef = ref<HTMLElement | null>(null);
 const selectedDocumentKeys = ref<Array<string | number>>([]);
 const selectedDocumentRecordMap = ref<Record<string, DocumentRecord>>({});
@@ -421,16 +494,18 @@ const currentPreview = ref<DocumentPreviewResult | null>(null);
 const previewLoading = ref(false);
 const previewError = ref('');
 const previewPanelVisible = ref(false);
-const deleteConfirmVisible = ref(false);
-const deleteConfirmTitle = ref('');
-const deleteConfirmMessage = ref('');
-const deleteConfirmAction = ref<null | (() => Promise<void>)>(null);
-const deleteConfirmButtonText = ref(t('common.actions.delete'));
-const deleteConfirmVariant = ref<'primary' | 'danger' | 'warning'>('danger');
-const highlightDocumentKeys = ref<Set<string>>(new Set());
-const highlightRequirementIds = ref<Set<string>>(new Set());
-const highlightDocumentTimer = ref<number | null>(null);
-const highlightRequirementTimer = ref<number | null>(null);
+const confirmDialog = useConfirmAction(t('common.actions.cancel'));
+const requirementEditVisible = ref(false);
+const editingRequirement = ref<DocumentRequirementRecord | null>(null);
+
+const analysisRequirementTypeOptions = computed(() => buildRequirementTypeSelectOptions(t));
+
+const analysisRequirementPriorityOptions = computed(() => [
+  { value: 'P0', label: 'P0' },
+  { value: 'P1', label: 'P1' },
+  { value: 'P2', label: 'P2' },
+  { value: 'P3', label: 'P3' }
+]);
 
 const filters = reactive({
   search: '',
@@ -446,6 +521,11 @@ const pagination = ref({
   pages: 0,
   has_prev: false,
   has_next: false
+});
+
+const { listLoading, listError, loadPage: loadDocumentsPage } = usePaginatedList(documents, {
+  refreshLoading: listRefreshLoading,
+  pagination
 });
 
 const analysisTypeOptions = computed<SelectOption[]>(() => [
@@ -475,7 +555,80 @@ const selectedDocument = computed(() => {
   return documents.value.find((doc) => resolveDocumentKey(doc) === selectedDocumentKey.value) || documents.value[0] || null;
 });
 
-const analysisRequirements = computed<DocumentRequirementRecord[]>(() => currentAnalysis.value?.requirements || []);
+function documentListQuery(page: number, perPage: number) {
+  return {
+    page,
+    per_page: perPage,
+    search: filters.search.trim() || undefined,
+    analysis_type:
+      filters.analysisType === 'comprehensive' ? undefined : filters.analysisType
+  };
+}
+
+function requirementApiTypeForFilter(analysisType: DocumentAnalysisType): string | undefined {
+  if (analysisType === 'comprehensive' || analysisType === 'requirements') return undefined;
+  if (analysisType === 'test_points') return 'functional';
+  if (analysisType === 'business_rules') return 'business';
+  return undefined;
+}
+
+function splitRequirementsByKind(requirements: DocumentRequirementRecord[]) {
+  const testPoints = requirements.filter((item) => {
+    const type = String(item.type || '').toLowerCase();
+    return type === 'functional' || type === 'test_point' || item.is_test_point;
+  });
+  const businessRules = requirements.filter((item) => {
+    const type = String(item.type || '').toLowerCase();
+    return type === 'business' || type === 'business_rule' || item.is_business_rule;
+  });
+  const coreRequirements = requirements.filter((item) => {
+    const type = String(item.type || '').toLowerCase();
+    return type !== 'business' && type !== 'business_rule' && !item.is_business_rule;
+  });
+  return { testPoints, businessRules, coreRequirements };
+}
+
+function resolveVisibleRequirements(
+  requirements: DocumentRequirementRecord[],
+  analysisType: DocumentAnalysisType
+) {
+  const { testPoints, businessRules, coreRequirements } = splitRequirementsByKind(requirements);
+  if (analysisType === 'comprehensive') return requirements;
+  if (analysisType === 'test_points') return testPoints;
+  if (analysisType === 'business_rules') return businessRules;
+  return coreRequirements;
+}
+
+function buildAnalysisSnapshot(
+  requirements: DocumentRequirementRecord[],
+  analysisType: DocumentAnalysisType,
+  message?: string
+): DocumentAnalysisResult {
+  const { testPoints, businessRules, coreRequirements } = splitRequirementsByKind(requirements);
+  const visible = resolveVisibleRequirements(requirements, analysisType);
+  return {
+    success: true,
+    message: message || t('documents.message.resultLoadedFromHistory'),
+    analysis_type: analysisType,
+    requirements: visible,
+    test_points: testPoints,
+    business_rules: businessRules,
+    saved_requirements: [...requirements],
+    summary: {
+      requirements_count: coreRequirements.length,
+      test_points_count: testPoints.length,
+      business_rules_count: businessRules.length,
+      total_count: visible.length
+    }
+  };
+}
+
+const analysisRequirements = computed<DocumentRequirementRecord[]>(() => {
+  const stored = currentAnalysis.value?.saved_requirements?.length
+    ? currentAnalysis.value.saved_requirements
+    : currentAnalysis.value?.requirements || [];
+  return resolveVisibleRequirements(stored, filters.analysisType);
+});
 const selectedDocuments = computed(() =>
   selectedDocumentKeys.value
     .map((key) => selectedDocumentRecordMap.value[String(key)])
@@ -555,7 +708,10 @@ const summaryCards = computed(() => {
 });
 
 const analysisTitle = computed(() => {
-  return selectedDocument.value ? `${t('documents.analysis.title')} - ${resolveDocumentLabel(selectedDocument.value)}` : t('documents.analysis.title');
+  const base = t('documents.result.title');
+  return selectedDocument.value
+    ? `${base} · ${t('documents.analysis.title')} - ${resolveDocumentLabel(selectedDocument.value)}`
+    : `${base} · ${t('documents.analysis.title')}`;
 });
 
 const analysisSubtitle = computed(() => {
@@ -572,14 +728,17 @@ const analysisConfidenceLabel = computed(() => analysisAi.value.confidenceLabel)
 
 const analysisRawText = computed(() => JSON.stringify(currentAnalysis.value?.raw || currentAnalysis.value, null, 2));
 
-const paginationText = computed(() => {
-  if (!pagination.value.pages) {
-    return t('common.status.empty');
+const filterToolbarSubtitle = computed(() => {
+  const parts: string[] = [];
+  if (selectedDocument.value) {
+    parts.push(`${t('documents.result.selected')}: ${resolveDocumentLabel(selectedDocument.value)}`);
+  } else {
+    parts.push(t('documents.message.selectDocumentFirst'));
   }
-  return t('documents.pagination.pageInfo', {
-    page: pagination.value.page,
-    pages: pagination.value.pages
-  });
+  if (selectedDocumentKeys.value.length) {
+    parts.push(t('documents.result.selectedDocumentsCount', { count: selectedDocumentKeys.value.length }));
+  }
+  return parts.join(' · ');
 });
 
 const previewDocumentLabel = computed(() => {
@@ -592,7 +751,7 @@ const previewMetaLine = computed(() => {
   if (!currentPreview.value) return '';
   const meta = t('documents.preview.meta', {
     type: currentPreview.value.file_type || '-',
-    size: formatBytes(currentPreview.value.file_size)
+    size: formatBytes(currentPreview.value.file_size, { zero: '-' })
   });
   if (currentPreview.value.is_truncated) {
     return `${meta} · ${t('documents.preview.truncated')}`;
@@ -606,13 +765,6 @@ const previewDisplayContent = computed(() => {
   return formatPreviewContent(preview.content, preview.content_type);
 });
 
-const noticeClass = computed(() => ({
-  'tp-risk-block--info': notice.value?.type === 'info',
-  'tp-risk-block--danger': notice.value?.type === 'danger',
-  'tp-risk-block--warning': notice.value?.type === 'warning',
-  'tp-risk-block--success': notice.value?.type === 'success'
-}));
-
 watch(analysisRequirements, () => {
   analysisRequirementPage.value = 1;
   selectedRequirementIds.value = selectedRequirementIds.value.filter((reqId) =>
@@ -620,39 +772,12 @@ watch(analysisRequirements, () => {
   );
 });
 
-function clearNotice() {
-  if (noticeTimer.value) {
-    window.clearTimeout(noticeTimer.value);
-    noticeTimer.value = null;
-  }
-}
-
 function showNotice(
-  type: NoticeState['type'],
+  type: 'success' | 'danger' | 'warning' | 'info',
   message: string,
-  timeout = 4500,
-  options?: { actionLabel?: string; onAction?: () => void | Promise<void> }
+  extras?: PageNoticeExtras
 ) {
-  clearNotice();
-  notice.value = {
-    type,
-    message,
-    actionLabel: options?.actionLabel,
-    onAction: options?.onAction
-  };
-  if (timeout > 0) {
-    noticeTimer.value = window.setTimeout(() => {
-      notice.value = null;
-      noticeTimer.value = null;
-    }, timeout);
-  }
-}
-
-async function handleNoticeAction() {
-  const action = notice.value?.onAction;
-  if (!action) return;
-  await action();
-  notice.value = null;
+  notifyShowNotice(type, message, extras);
 }
 
 async function scrollToAnalysisPanel() {
@@ -677,40 +802,19 @@ async function openAnalysisForDocument(doc: DocumentRecord) {
     try {
       const response = await getDocumentRequirements({
         page: 1,
-        per_page: 200,
-        source_file: doc.filename || resolveDocumentLabel(doc)
+        per_page: 500,
+        source_file: doc.filename || resolveDocumentLabel(doc),
+        search: filters.search.trim() || undefined,
+        type: requirementApiTypeForFilter(filters.analysisType)
       });
       if (response.requirements.length > 0) {
-        const requirements = response.requirements;
-        const testPoints = requirements.filter((item) => {
-          const type = String(item.type || '').toLowerCase();
-          return type === 'functional' || type === 'test_point';
-        });
-        const businessRules = requirements.filter((item) => {
-          const type = String(item.type || '').toLowerCase();
-          return type === 'business' || type === 'business_rule';
-        });
-        currentAnalysis.value = {
-          success: true,
-          message: t('documents.message.resultLoadedFromHistory'),
-          analysis_type: 'requirements',
-          requirements,
-          test_points: testPoints,
-          business_rules: businessRules,
-          saved_requirements: requirements,
-          summary: {
-            requirements_count: requirements.length,
-            test_points_count: testPoints.length,
-            business_rules_count: businessRules.length,
-            total_count: requirements.length
-          }
-        };
+        currentAnalysis.value = buildAnalysisSnapshot(response.requirements, filters.analysisType);
         currentAnalysisDocumentKey.value = nextKey;
       } else {
         showNotice('info', t('documents.message.resultNotReady'));
       }
     } catch (error) {
-      analysisError.value = error instanceof Error ? error.message : t('documents.message.loadAnalysisFailed');
+      analysisError.value = getUserFacingErrorMessage(error, t('documents.message.loadAnalysisFailed'));
       showNotice('danger', analysisError.value);
     } finally {
       analyzeLoading.value = false;
@@ -732,7 +836,7 @@ function resolveDocumentKey(doc: DocumentRecord) {
 }
 
 function resolveDocumentLabel(doc: DocumentRecord) {
-  return doc.file_name || doc.filename || t('documents.table.empty');
+  return doc.display_name || doc.original_filename || doc.file_name || doc.filename || t('documents.table.empty');
 }
 
 function resolveAnalyzePath(doc: DocumentRecord) {
@@ -773,13 +877,6 @@ function canViewAnalysisResult(doc: DocumentRecord) {
   return status === 'analyzed' || status === 'done' || hasCount;
 }
 
-function resolveRequirementTypeLabel(type?: string) {
-  const key = (type || 'functional').toLowerCase();
-  if (key === 'functional' || key === 'test_point') return t('enums.documents.analysisType.test_points');
-  if (key === 'business' || key === 'business_rule') return t('enums.documents.analysisType.business_rules');
-  return key;
-}
-
 function resolvePriorityLabel(priority?: string) {
   const value = String(priority || '').trim().toLowerCase();
   if (value === 'p0' || value === 'critical') return 'P0';
@@ -789,35 +886,8 @@ function resolvePriorityLabel(priority?: string) {
   return String(priority || '-').toUpperCase();
 }
 
-function statusTagVariant(status?: string) {
-  const key = (status || '').toLowerCase();
-  if (['analyzed', 'active', 'ready', 'done'].includes(key)) return 'success';
-  if (['analyzing', 'processing', 'pending'].includes(key)) return 'warning';
-  if (['failed', 'error'].includes(key)) return 'danger';
-  return 'neutral';
-}
-
-function formatBytes(value?: number) {
-  const bytes = Number(value ?? 0);
-  if (!bytes) return '-';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let size = bytes;
-  let unit = 0;
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
-
-function formatDateTime(value?: string | null) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale.value, {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(date);
+function formatDocDateTime(value?: string | null) {
+  return formatDateTime(value, locale.value);
 }
 
 function formatPreviewContent(content?: string, contentType?: string) {
@@ -850,34 +920,76 @@ function formatPreviewContent(content?: string, contentType?: string) {
   return raw;
 }
 
-async function loadDocuments(page = filters.page) {
-  if (listLoading.value) return;
-  listLoading.value = true;
-  listError.value = '';
+async function syncAnalysisWithFilters(options?: { silent?: boolean }) {
+  const doc = selectedDocument.value;
+  if (!doc || (!showAnalysisPanel.value && !currentAnalysis.value)) return;
+
+  const silent = options?.silent ?? true;
+  if (!silent) analyzeLoading.value = true;
+  analysisError.value = '';
   try {
-    const response = await listDocuments({
-      page,
-      per_page: filters.per_page,
-      search: filters.search.trim() || undefined
+    const response = await getDocumentRequirements({
+      page: 1,
+      per_page: 500,
+      source_file: doc.filename || resolveDocumentLabel(doc),
+      search: filters.search.trim() || undefined,
+      type: requirementApiTypeForFilter(filters.analysisType)
     });
-    documents.value = response.documents;
-    for (const doc of response.documents) {
-      selectedDocumentRecordMap.value[resolveDocumentKey(doc)] = doc;
-    }
-    pagination.value = response.pagination;
-    filters.page = response.pagination.page;
-    if (documents.value.length && !selectedDocumentKey.value) {
-      selectedDocumentKey.value = resolveDocumentKey(documents.value[0]);
-    } else if (selectedDocumentKey.value && !documents.value.some((doc) => resolveDocumentKey(doc) === selectedDocumentKey.value)) {
-      selectedDocumentKey.value = resolveDocumentKey(documents.value[0]);
-    }
+    const key = resolveDocumentKey(doc);
+    currentAnalysis.value = buildAnalysisSnapshot(
+      response.requirements,
+      filters.analysisType,
+      response.requirements.length ? t('documents.message.resultLoadedFromHistory') : t('documents.analysis.noRequirements')
+    );
+    currentAnalysisDocumentKey.value = key;
+    selectedRequirementIds.value = [];
+    analysisRequirementPage.value = 1;
   } catch (error) {
-    listError.value = error instanceof Error ? error.message : t('documents.message.loadFailed');
-    showNotice('danger', listError.value);
+    analysisError.value = getUserFacingErrorMessage(error, t('documents.message.loadAnalysisFailed'));
+    if (!silent) showNotice('danger', analysisError.value);
   } finally {
-    listLoading.value = false;
+    if (!silent) analyzeLoading.value = false;
   }
 }
+
+async function loadDocuments(page = filters.page, mode: ListFetchMode = 'page') {
+  const result = await loadDocumentsPage(
+    page,
+    mode,
+    () =>
+      listDocuments(documentListQuery(page, filters.per_page)).then((response) => ({
+        rows: response.documents,
+        pagination: response.pagination
+      })),
+    {
+      resolveMessage: (error) =>
+        getUserFacingErrorMessage(
+          error,
+          filters.search.trim() ? t('documents.message.searchFailed') : t('documents.message.loadFailed')
+        )
+    }
+  );
+  if (!result) {
+    const message = listError.value;
+    if (message) showNotice('danger', message);
+    return;
+  }
+  for (const doc of result.rows) {
+    selectedDocumentRecordMap.value[resolveDocumentKey(doc)] = doc;
+  }
+  filters.page = result.pagination.page ?? page;
+  if (documents.value.length && !selectedDocumentKey.value) {
+    selectedDocumentKey.value = resolveDocumentKey(documents.value[0]);
+  } else if (selectedDocumentKey.value && !documents.value.some((doc) => resolveDocumentKey(doc) === selectedDocumentKey.value)) {
+    selectedDocumentKey.value = resolveDocumentKey(documents.value[0]);
+  }
+}
+
+const { changePage } = useListPageChange(
+  pagination,
+  (page, mode) => loadDocuments(page, mode),
+  { onAcceptPage: (page) => { filters.page = page; } }
+);
 
 function findDocumentByRouteTarget(target: string) {
   const normalized = String(target || '').trim().toLowerCase();
@@ -897,46 +1009,28 @@ function findDocumentByRouteTarget(target: string) {
   }) || null;
 }
 
-function resolveDocumentRowClass(row: Record<string, unknown>) {
-  const key = resolveDocumentKey(row as DocumentRecord);
-  return highlightDocumentKeys.value.has(key) ? 'tp-doc-row-highlight' : '';
+function resolveDocumentRowClass(row: DocumentRecord) {
+  const key = resolveDocumentKey(row);
+  return documentRowHighlight.has(key) ? documentsRowHighlightActiveClass : '';
 }
 
 function resolveRequirementItemClass(reqId: string) {
   const id = String(reqId || '').trim();
-  return id && highlightRequirementIds.value.has(id) ? 'tp-requirement-highlight' : '';
+  return id && requirementRowHighlight.has(id) ? documentsRequirementHighlightActiveClass : '';
 }
 
 function highlightDocumentRows(documentKeys: string[]) {
-  const keys = documentKeys.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 12);
-  if (!keys.length) return;
-  highlightDocumentKeys.value = new Set(keys);
-  if (highlightDocumentTimer.value !== null) {
-    window.clearTimeout(highlightDocumentTimer.value);
-  }
-  highlightDocumentTimer.value = window.setTimeout(() => {
-    highlightDocumentKeys.value = new Set();
-    highlightDocumentTimer.value = null;
-  }, 3600);
+  documentRowHighlight.highlight(documentKeys, 3600);
 }
 
 function highlightRequirements(reqIds: string[]) {
-  const ids = reqIds.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 20);
-  if (!ids.length) return;
-  highlightRequirementIds.value = new Set(ids);
-  if (highlightRequirementTimer.value !== null) {
-    window.clearTimeout(highlightRequirementTimer.value);
-  }
-  highlightRequirementTimer.value = window.setTimeout(() => {
-    highlightRequirementIds.value = new Set();
-    highlightRequirementTimer.value = null;
-  }, 4200);
+  requirementRowHighlight.highlight(reqIds, 4200, 20);
 }
 
 async function scrollToFirstHighlightedDocument() {
   await nextTick();
   window.setTimeout(() => {
-    const row = document.querySelector('.tp-doc-row-highlight') as HTMLElement | null;
+    const row = document.querySelector(`.${documentsRowHighlightClass}`) as HTMLElement | null;
     row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 80);
 }
@@ -944,7 +1038,7 @@ async function scrollToFirstHighlightedDocument() {
 async function scrollToFirstHighlightedRequirement() {
   await nextTick();
   window.setTimeout(() => {
-    const node = document.querySelector('.tp-requirement-highlight') as HTMLElement | null;
+    const node = document.querySelector(`.${documentsRequirementHighlightClass}`) as HTMLElement | null;
     node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 80);
 }
@@ -999,7 +1093,7 @@ async function handleRequirementRouteAction() {
   if (sourceFile) {
     filters.search = sourceFile;
     filters.page = 1;
-    await loadDocuments(1);
+    await loadDocuments(1, 'filter');
   }
 
   const normalizedSource = sourceFile.toLowerCase();
@@ -1029,8 +1123,8 @@ async function handleRequirementRouteAction() {
     highlightRequirements(reqIds);
   }
 
-  showNotice('success', t('common.feedback.success'), t('documents.result.selected'));
-  const nextQuery = { ...route.query } as Record<string, unknown>;
+  showNotice('success', t('documents.result.selected'), { title: t('common.feedback.success') });
+  const nextQuery: LocationQueryRaw = { ...route.query };
   delete nextQuery.fromRequirements;
   delete nextQuery.rids;
   delete nextQuery.at;
@@ -1038,24 +1132,31 @@ async function handleRequirementRouteAction() {
 }
 
 async function handleRefresh() {
-  await loadDocuments(filters.page || 1);
+  await loadDocuments(filters.page || 1, 'refresh');
   if (!listError.value) {
     showNotice('success', t('documents.message.refreshSuccess'));
   }
 }
 
 async function handleSearch() {
+  filters.search = filters.search.trim();
   filters.page = 1;
-  await loadDocuments(1);
+  const mode: ListFetchMode = documents.value.length > 0 ? 'page' : 'filter';
+  await loadDocuments(1, mode);
+  await syncAnalysisWithFilters({ silent: true });
 }
 
-function selectDocument(row: Record<string, unknown>) {
-  const doc = row as DocumentRecord;
+function selectDocument(row: DocumentRecord) {
+  const doc = row;
   selectedDocumentKey.value = resolveDocumentKey(doc);
 }
 
 function handleDocumentSelectionUpdate(values: Array<string | number>) {
   selectedDocumentKeys.value = values;
+}
+
+function clearDocumentSelection() {
+  selectedDocumentKeys.value = [];
 }
 
 async function handleDocumentToggleAll(checked: boolean) {
@@ -1077,11 +1178,7 @@ async function fetchAllFilteredDocuments() {
   let page = 1;
   const perPage = 200;
   while (true) {
-    const response = await listDocuments({
-      page,
-      per_page: perPage,
-      search: filters.search.trim() || undefined
-    });
+    const response = await listDocuments(documentListQuery(page, perPage));
     allDocs.push(...response.documents);
     if (!response.pagination.has_next || page >= (response.pagination.pages || 1)) break;
     page += 1;
@@ -1110,13 +1207,9 @@ async function reanalyzeDocumentRow(doc: DocumentRecord) {
     });
     currentAnalysis.value = result;
     currentAnalysisDocumentKey.value = resolveDocumentKey(doc);
-    showNotice(
-      'success',
-      result.message || t('documents.message.analyzeSuccess'),
-      8000
-    );
+    showNotice('success', result.message || t('documents.message.analyzeSuccess'), { timeout: 8000 });
   } catch (error) {
-    analysisError.value = error instanceof Error ? error.message : t('documents.message.analyzeFailed');
+    analysisError.value = getUserFacingErrorMessage(error, t('documents.message.analyzeFailed'));
     showNotice('danger', analysisError.value);
   } finally {
     analyzeLoading.value = false;
@@ -1150,18 +1243,19 @@ async function deleteDocumentsByRows(rows: DocumentRecord[]) {
     selectedDocumentKey.value = '';
   }
   selectedDocumentKeys.value = [];
-  await loadDocuments(1);
+  await loadDocuments(1, 'refresh');
 }
 
 async function handleDeleteSingleDocument(doc: DocumentRecord) {
-  deleteConfirmTitle.value = t('documents.actions.deleteDocuments');
-  deleteConfirmMessage.value = t('documents.confirm.deleteDocuments');
-  deleteConfirmButtonText.value = t('common.actions.delete');
-  deleteConfirmVariant.value = 'danger';
-  deleteConfirmAction.value = async () => {
-    await deleteDocumentsByRows([doc]);
-  };
-  deleteConfirmVisible.value = true;
+  confirmDialog.open({
+    title: t('documents.actions.deleteDocuments'),
+    message: t('documents.confirm.deleteDocuments'),
+    confirmText: t('common.actions.delete'),
+    variant: 'danger',
+    onConfirm: async () => {
+      await deleteDocumentsByRows([doc]);
+    }
+  });
 }
 
 async function handleDeleteSelectedDocuments() {
@@ -1170,14 +1264,15 @@ async function handleDeleteSelectedDocuments() {
     showNotice('warning', t('documents.message.noDocumentSelection'));
     return;
   }
-  deleteConfirmTitle.value = t('documents.actions.deleteDocuments');
-  deleteConfirmMessage.value = t('documents.confirm.deleteDocuments');
-  deleteConfirmButtonText.value = t('common.actions.delete');
-  deleteConfirmVariant.value = 'danger';
-  deleteConfirmAction.value = async () => {
-    await deleteDocumentsByRows(rows);
-  };
-  deleteConfirmVisible.value = true;
+  confirmDialog.open({
+    title: t('documents.actions.deleteDocuments'),
+    message: t('documents.confirm.deleteDocuments'),
+    confirmText: t('common.actions.delete'),
+    variant: 'danger',
+    onConfirm: async () => {
+      await deleteDocumentsByRows(rows);
+    }
+  });
 }
 
 async function analyzeByDocument(doc: DocumentRecord) {
@@ -1199,11 +1294,7 @@ async function analyzeByDocument(doc: DocumentRecord) {
       });
       currentAnalysis.value = result;
       currentAnalysisDocumentKey.value = resolveDocumentKey(doc);
-      showNotice(
-        'success',
-        result.message || t('documents.message.analyzeSuccess'),
-        8000
-      );
+      showNotice('success', result.message || t('documents.message.analyzeSuccess'), { timeout: 8000 });
       return;
     } catch {
       const fallbackResult = await reanalyzeDocument(resolveReanalyzeId(doc), {
@@ -1211,14 +1302,10 @@ async function analyzeByDocument(doc: DocumentRecord) {
       });
       currentAnalysis.value = fallbackResult;
       currentAnalysisDocumentKey.value = resolveDocumentKey(doc);
-      showNotice(
-        'success',
-        fallbackResult.message || t('documents.message.analyzeSuccess'),
-        8000
-      );
+      showNotice('success', fallbackResult.message || t('documents.message.analyzeSuccess'), { timeout: 8000 });
     }
   } catch (error) {
-    analysisError.value = error instanceof Error ? error.message : t('documents.message.analyzeFailed');
+    analysisError.value = getUserFacingErrorMessage(error, t('documents.message.analyzeFailed'));
     showNotice('danger', analysisError.value);
   } finally {
     analyzeLoading.value = false;
@@ -1237,6 +1324,36 @@ function toggleRequirementSelection(reqId: string, checked: boolean) {
 
 function toggleSelectAllRequirements(checked: boolean) {
   selectedRequirementIds.value = checked ? analysisRequirements.value.map((item) => item.req_id) : [];
+}
+
+function openRequirementEditor(row: DocumentRequirementRecord) {
+  editingRequirement.value = row;
+  requirementEditVisible.value = true;
+}
+
+function closeRequirementEditor() {
+  requirementEditVisible.value = false;
+  editingRequirement.value = null;
+}
+
+function replaceRequirementInAnalysis(updated: DocumentRequirementRecord) {
+  if (!currentAnalysis.value) return;
+  const patch = (list: DocumentRequirementRecord[]) =>
+    list.map((item) => (item.req_id === updated.req_id ? { ...item, ...updated } : item));
+  currentAnalysis.value = {
+    ...currentAnalysis.value,
+    requirements: patch(currentAnalysis.value.requirements || []),
+    saved_requirements: patch(currentAnalysis.value.saved_requirements || []),
+    test_points: patch(currentAnalysis.value.test_points || []),
+    business_rules: patch(currentAnalysis.value.business_rules || [])
+  };
+}
+
+function handleRequirementSaved(updated: DocumentRequirementRecord) {
+  closeRequirementEditor();
+  replaceRequirementInAnalysis(updated);
+  requirementRowHighlight.highlight([String(updated.req_id)], 4200, 20);
+  showNotice('success', t('documents.requirement.updateSuccess'), { title: t('common.feedback.success') });
 }
 
 async function deleteRequirementsByIds(reqIds: string[]) {
@@ -1266,14 +1383,15 @@ async function deleteRequirementsByIds(reqIds: string[]) {
 }
 
 async function handleDeleteSingleRequirement(reqId: string) {
-  deleteConfirmTitle.value = t('documents.actions.deleteRequirements');
-  deleteConfirmMessage.value = t('documents.confirm.deleteRequirements');
-  deleteConfirmButtonText.value = t('common.actions.delete');
-  deleteConfirmVariant.value = 'danger';
-  deleteConfirmAction.value = async () => {
-    await deleteRequirementsByIds([reqId]);
-  };
-  deleteConfirmVisible.value = true;
+  confirmDialog.open({
+    title: t('documents.actions.deleteRequirements'),
+    message: t('documents.confirm.deleteRequirements'),
+    confirmText: t('common.actions.delete'),
+    variant: 'danger',
+    onConfirm: async () => {
+      await deleteRequirementsByIds([reqId]);
+    }
+  });
 }
 
 async function handleDeleteSelectedRequirements() {
@@ -1282,24 +1400,15 @@ async function handleDeleteSelectedRequirements() {
     return;
   }
   const reqIds = [...selectedRequirementIds.value];
-  deleteConfirmTitle.value = t('documents.actions.deleteRequirements');
-  deleteConfirmMessage.value = t('documents.confirm.deleteRequirements');
-  deleteConfirmButtonText.value = t('common.actions.delete');
-  deleteConfirmVariant.value = 'danger';
-  deleteConfirmAction.value = async () => {
-    await deleteRequirementsByIds(reqIds);
-  };
-  deleteConfirmVisible.value = true;
-}
-
-async function runDeleteConfirmAction() {
-  const action = deleteConfirmAction.value;
-  deleteConfirmAction.value = null;
-  if (action) await action();
-}
-
-function clearDeleteConfirm() {
-  deleteConfirmAction.value = null;
+  confirmDialog.open({
+    title: t('documents.actions.deleteRequirements'),
+    message: t('documents.confirm.deleteRequirements'),
+    confirmText: t('common.actions.delete'),
+    variant: 'danger',
+    onConfirm: async () => {
+      await deleteRequirementsByIds(reqIds);
+    }
+  });
 }
 
 async function handleAnalyzeSelected() {
@@ -1319,7 +1428,7 @@ async function loadPreviewByDocument(doc: DocumentRecord) {
     currentPreview.value = await getDocumentPreview(previewId);
   } catch (error) {
     currentPreview.value = null;
-    previewError.value = error instanceof Error ? error.message : t('documents.message.previewFailed');
+    previewError.value = getUserFacingErrorMessage(error, t('documents.message.previewFailed'));
     showNotice('danger', previewError.value);
   } finally {
     previewLoading.value = false;
@@ -1331,11 +1440,11 @@ function closePreviewPanel() {
 }
 
 function handlePreviewCopied() {
-  showNotice('success', t('documents.message.previewCopySuccess'), 1800);
+  showNotice('success', t('documents.message.previewCopySuccess'), { timeout: 1800 });
 }
 
 function handlePreviewCopyFailed() {
-  showNotice('warning', t('documents.message.previewCopyFailed'), 2600);
+  showNotice('warning', t('documents.message.previewCopyFailed'), { timeout: 2600 });
 }
 
 async function handleGenerateCases() {
@@ -1384,28 +1493,37 @@ async function handleGenerateCases() {
   }
 
   if (sourceCount > 1) {
-    deleteConfirmTitle.value = t('documents.confirm.batchGenerateTitle');
-    deleteConfirmMessage.value = t(
-      sourceKind === 'document'
-        ? 'documents.confirm.batchGenerateByDocumentsMessage'
-        : 'documents.confirm.batchGenerateByRequirementsMessage',
-      {
-        count: sourceCount,
-        reqCount: requirementsToGenerate.length,
-        caseCount: requirementsToGenerate.length * 3,
-        skippedCount: skippedDocumentCount
+    confirmDialog.open({
+      title: t('documents.confirm.batchGenerateTitle'),
+      message: t(
+        sourceKind === 'document'
+          ? 'documents.confirm.batchGenerateByDocumentsMessage'
+          : 'documents.confirm.batchGenerateByRequirementsMessage',
+        {
+          count: sourceCount,
+          reqCount: requirementsToGenerate.length,
+          caseCount: requirementsToGenerate.length * 3,
+          skippedCount: skippedDocumentCount
+        }
+      ),
+      confirmText: t('common.actions.confirm'),
+      variant: 'warning',
+      onConfirm: async () => {
+        await executeGenerateCases(requirementsToGenerate);
       }
-    );
-    deleteConfirmButtonText.value = t('common.actions.confirm');
-    deleteConfirmVariant.value = 'warning';
-    deleteConfirmAction.value = async () => {
-      await executeGenerateCases(requirementsToGenerate);
-    };
-    deleteConfirmVisible.value = true;
+    });
     return;
   }
 
-  await executeGenerateCases(requirementsToGenerate);
+  confirmDialog.open({
+    title: t('documents.actions.generateCases'),
+    message: t('documents.confirm.generateCases'),
+    confirmText: t('common.actions.confirm'),
+    variant: 'primary',
+    onConfirm: async () => {
+      await executeGenerateCases(requirementsToGenerate);
+    }
+  });
 }
 
 async function executeGenerateCases(requirementsToGenerate: DocumentRequirementRecord[]) {
@@ -1425,21 +1543,10 @@ async function executeGenerateCases(requirementsToGenerate: DocumentRequirementR
     }
     await router.push({ name: 'cases-manage' });
   } catch (error) {
-    showNotice('danger', error instanceof Error ? error.message : t('documents.message.generateFailed'));
+    showNotice('danger', getUserFacingErrorMessage(error, t('documents.message.generateFailed')));
   } finally {
     generating.value = false;
   }
-}
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename || 'requirements.xlsx';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }
 
 async function handleExportRequirements() {
@@ -1456,17 +1563,18 @@ async function handleExportRequirements() {
   try {
     exportingRequirements.value = true;
     const result = await exportRequirementsExcel({ req_ids: reqIds });
-    triggerDownload(result.blob, result.filename);
+    triggerBlobDownload(result.blob, result.filename);
     showNotice('success', t('documents.message.exportRequirementsSuccess'));
   } catch (error) {
-    showNotice('danger', error instanceof Error ? error.message : t('documents.message.exportRequirementsFailed'));
+    showNotice('danger', getUserFacingErrorMessage(error, t('documents.message.exportRequirementsFailed')));
   } finally {
     exportingRequirements.value = false;
   }
 }
 
 onMounted(async () => {
-  await loadDocuments(1);
+  void refreshCaseRagStatus();
+  await loadDocuments(1, 'initial');
   await handleUploadRouteAction();
   await handleRequirementRouteAction();
 });
@@ -1477,46 +1585,5 @@ watch(
     await handleRequirementRouteAction();
   }
 );
-
-onBeforeUnmount(() => {
-  if (highlightDocumentTimer.value !== null) {
-    window.clearTimeout(highlightDocumentTimer.value);
-    highlightDocumentTimer.value = null;
-  }
-  if (highlightRequirementTimer.value !== null) {
-    window.clearTimeout(highlightRequirementTimer.value);
-    highlightRequirementTimer.value = null;
-  }
-});
 </script>
 
-<style scoped>
-.tp-doc-page-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.tp-analysis-requirement-item {
-  border: 1px solid var(--tp-border-default);
-  border-radius: var(--tp-radius-md);
-  padding: 10px 12px !important;
-  background: color-mix(in srgb, var(--tp-bg-surface) 94%, var(--tp-color-primary-600) 6%);
-}
-
-:deep(.tp-doc-row-highlight) {
-  background: color-mix(in srgb, var(--tp-color-primary-500) 14%, transparent);
-  animation: tp-doc-highlight-fade 3.6s ease forwards;
-}
-
-.tp-requirement-highlight {
-  outline: 2px solid color-mix(in srgb, var(--tp-color-primary-600) 50%, transparent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tp-color-primary-600) 12%, transparent);
-  transition: outline-color 0.25s ease, box-shadow 0.25s ease;
-}
-
-@keyframes tp-doc-highlight-fade {
-  0% { background: color-mix(in srgb, var(--tp-color-primary-500) 22%, transparent); }
-  100% { background: transparent; }
-}
-</style>

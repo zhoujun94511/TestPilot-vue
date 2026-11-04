@@ -238,7 +238,7 @@ class TestAgent:
 
         input_text = str(input_data)
         estimated_tokens = count_tokens(input_text)
-        record_llm_call(estimated_tokens, is_actual=True, input_text=input_text)
+        record_llm_call(estimated_tokens, is_actual=True, input_text=input_text, source='agent')
 
         while retry_count < max_retries:
             try:
@@ -263,6 +263,20 @@ class TestAgent:
         return OpenAIFunctionsAgentOutputParser(pydantic_object=AgentFunctionCaseList)  # type: ignore
 
     def _retriever_knowledge(self, query):
+        try:
+            from services.rag_threshold_utils import search_documents_above_threshold
+
+            vector_db = create_vector_db()
+            docs = search_documents_above_threshold(
+                vector_db, query, k=2, apply_scope_kwargs=False
+            )
+            if docs:
+                return "\n".join([
+                    f"[知识条目 {doc.page_content[:200]}..."
+                    for doc in docs
+                ])
+        except Exception as e:
+            logger.warning(f"带阈值知识检索失败，回退 retriever: {e}")
         if self.retriever:
             docs = self.retriever.invoke(query)
             return "\n".join([
@@ -290,9 +304,6 @@ class TestAgent:
             case_count: 生成用例数量
         """
         try:
-            estimated_tokens = count_tokens(query)
-            record_llm_call(estimated_tokens, is_actual=True, input_text=query)
-
             # 获取知识库检索结果
             retriever = ""
             if use_rag:
@@ -392,7 +403,7 @@ class TestAgent:
 
                     # 记录到 Token 监控器
                     if total_tokens > 0:
-                        record_llm_call(total_tokens, is_actual=True)
+                        record_llm_call(total_tokens, is_actual=True, source='case_generation')
 
             # 解析响应
             response_text = getattr(response, 'content', str(response))
@@ -411,9 +422,6 @@ class TestAgent:
         基于RAG知识库生成测试用例（使用 settings.FUNCTION_PROMPT_RAG）
         """
         try:
-            estimated_tokens = count_tokens(query)
-            record_llm_call(estimated_tokens, is_actual=True, input_text=query)
-
             # 获取知识库检索结果
             retriever = self._retriever_knowledge(query)
 
@@ -498,7 +506,7 @@ class TestAgent:
 
                     # 记录到 Token 监控器
                     if total_tokens > 0:
-                        record_llm_call(total_tokens, is_actual=True)
+                        record_llm_call(total_tokens, is_actual=True, source='case_generation')
 
             response_text = getattr(response, 'content', str(response))
             parsed_response = safe_json_loads(response_text)

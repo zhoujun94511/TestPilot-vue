@@ -1,3 +1,4 @@
+import { resolveUserFacingErrorMessage } from '@/lib/user-facing-error';
 import { ApiError } from './http';
 
 export interface NormalizedResponseOptions {
@@ -31,22 +32,29 @@ export function pickCompatField<T = unknown>(source: unknown, keys: string[], fa
 
 export function normalizeError(error: unknown, fallback = 'Request failed'): never {
   if (error instanceof ApiError) {
-    throw error;
+    throw new ApiError(resolveUserFacingErrorMessage(error, fallback), {
+      code: error.code,
+      errorCode: error.errorCode,
+      messageKey: error.messageKey,
+      messageParams: error.messageParams,
+      details: error.details
+    });
   }
 
   if (error instanceof Error) {
-    throw new ApiError(error.message || fallback);
+    throw new ApiError(resolveUserFacingErrorMessage(error, fallback));
   }
 
   if (isRecord(error)) {
-    throw new ApiError(String(error.message ?? error.error ?? fallback), {
+    const raw = String(error.message ?? error.error ?? fallback);
+    throw new ApiError(resolveUserFacingErrorMessage(raw, fallback), {
       errorCode: typeof error.error_code === 'string' ? error.error_code : undefined,
       code: typeof error.code === 'number' ? error.code : undefined,
       details: error.data ?? error.details ?? error
     });
   }
 
-  throw new ApiError(fallback);
+  throw new ApiError(resolveUserFacingErrorMessage(undefined, fallback));
 }
 
 export function normalizeResponse<T = unknown>(payload: unknown, options: NormalizedResponseOptions = {}): T {

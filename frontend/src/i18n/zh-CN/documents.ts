@@ -8,9 +8,13 @@ export default {
     manage: '需求文档与需求管理',
     history: '需求历史'
   },
+  toolbar: {
+    manageLead: '上传并分析文档；选中列表项后可批量维护或生成用例。',
+    historyLead: '浏览历史需求；选中后可生成用例或批量删除。',
+    generateSettings: '生成设置'
+  },
   actions: {
     upload: '上传文档',
-    hideUpload: '收起上传',
     backToDocuments: '返回文档分析',
     analyzeCurrent: '分析当前',
     reanalyze: '重新分析',
@@ -30,13 +34,9 @@ export default {
   filters: {
     title: '搜索与筛选',
     keywordLabel: '关键词',
-    keywordPlaceholder: '输入文档名称、内容或关键字',
+    keywordPlaceholder: '搜索',
     analysisTypeLabel: '分析类型',
     apply: '搜索'
-  },
-  form: {
-    useRag: '使用知识库增强',
-    useRagDisabled: '当前知识库增强不可用，将使用纯模型生成'
   },
   upload: {
     title: '文档上传',
@@ -87,7 +87,7 @@ export default {
     source: '来源文档',
     sourceAll: '全部来源文档',
     selectedRequirementsCount: '已选需求 {count} 条（跨分页）',
-    searchPlaceholder: '搜索需求编号/标题/内容',
+    searchPlaceholder: '搜索',
     typeAll: '全部类型',
     priorityAll: '全部优先级'
   },
@@ -103,9 +103,16 @@ export default {
   requirement: {
     id: '编号',
     title: '标题',
+    content: '需求内容',
     type: '类型',
     priority: '优先级',
-    category: '分类'
+    category: '分类',
+    statusLabel: '状态',
+    editTitle: '编辑需求',
+    editLoading: '正在加载需求详情…',
+    editEmpty: '未选择需求',
+    updateFailed: '保存需求失败',
+    updateSuccess: '需求已保存'
   },
   message: {
     loadFailed: '加载文档列表失败',
@@ -141,8 +148,5 @@ export default {
     batchGenerateByDocumentsMessage: '批量生成：文档 {count} 个，处理需求 {reqCount} 条（约 {caseCount} 条用例），跳过未分析 {skippedCount} 个。继续？',
     deleteDocuments: '确认删除选中文档吗？删除后无法恢复。',
     deleteRequirements: '确认删除选中需求吗？删除后无法恢复。'
-  },
-  pagination: {
-    pageInfo: '第 {page} / {pages} 页'
   }
 };

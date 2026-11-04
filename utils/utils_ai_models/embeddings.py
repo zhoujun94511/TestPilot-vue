@@ -53,11 +53,18 @@ logging.getLogger("langchain_core").disabled = True
 # 禁用所有警告
 warnings.filterwarnings("ignore")
 
-from langchain_chroma import Chroma
 from config.settings import settings
 from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _legacy_chroma_class():
+    """仅 VECTOR_BACKEND=chroma 时使用；默认 sqlite 路径不会调用。"""
+    from langchain_chroma import Chroma
+
+    return Chroma
+
 
 # 线程锁，用于保护向量数据库访问
 _vector_db_lock = threading.RLock()
@@ -342,6 +349,7 @@ def create_vector_db():
         if backend == 'chroma':
             # 使用 ChromaDB（保留用于回滚）
             try:
+                chroma_cls = _legacy_chroma_class()
                 import platform
                 import chromadb
                 from chromadb.config import Settings as ChromaSettings
@@ -365,7 +373,7 @@ def create_vector_db():
                         )
                         
                         # 使用新 API 创建 Chroma 向量存储
-                        vector_db = Chroma(
+                        vector_db = chroma_cls(
                             client=chroma_client,
                             embedding_function=embeddings,
                             collection_name=settings.CHROMA_COLLECTION_NAME
@@ -373,7 +381,7 @@ def create_vector_db():
                     except Exception as client_error:
                         logger.warning(f"使用新 API 创建客户端失败，降级到旧方式: {client_error}")
                         # 降级到简单方式
-                        vector_db = Chroma(
+                        vector_db = chroma_cls(
                             embedding_function=embeddings,
                             persist_directory=settings.VECTOR_STORE_DIR,
                             collection_name=settings.CHROMA_COLLECTION_NAME
@@ -385,7 +393,7 @@ def create_vector_db():
                             path=settings.VECTOR_STORE_DIR,
                             settings=chroma_settings
                         )
-                        vector_db = Chroma(
+                        vector_db = chroma_cls(
                             client=chroma_client,
                             embedding_function=embeddings,
                             collection_name=settings.CHROMA_COLLECTION_NAME
@@ -393,7 +401,7 @@ def create_vector_db():
                     except (ImportError, AttributeError, TypeError, ValueError) as client_fallback_error:
                         # 降级到旧方式（处理客户端创建失败的情况）
                         logger.warning(f"使用新 API 创建客户端失败，降级到旧方式: {client_fallback_error}")
-                        vector_db = Chroma(
+                        vector_db = chroma_cls(
                             embedding_function=embeddings,
                             persist_directory=settings.VECTOR_STORE_DIR,
                             collection_name=settings.CHROMA_COLLECTION_NAME
@@ -410,7 +418,7 @@ def create_vector_db():
                     logger.info("清理旧数据库并重新创建...")
                     clear_vector_db()
                     # 重新创建（使用简单方式）
-                    vector_db = Chroma(
+                    vector_db = chroma_cls(
                         embedding_function=embeddings,
                         persist_directory=settings.VECTOR_STORE_DIR,
                         collection_name=settings.CHROMA_COLLECTION_NAME
@@ -423,7 +431,7 @@ def create_vector_db():
                     try:
                         import chromadb
                         chroma_client = chromadb.PersistentClient(path=settings.VECTOR_STORE_DIR)
-                        vector_db = Chroma(
+                        vector_db = chroma_cls(
                             client=chroma_client,
                             embedding_function=embeddings,
                             collection_name=settings.CHROMA_COLLECTION_NAME
@@ -432,7 +440,7 @@ def create_vector_db():
                     except Exception as fallback_error:
                         logger.error(f"使用新 API 失败，使用旧方式: {fallback_error}")
                         # 最后降级到最简单的旧方式（忽略弃用警告）
-                        vector_db = Chroma(
+                        vector_db = chroma_cls(
                             embedding_function=embeddings,
                             persist_directory=settings.VECTOR_STORE_DIR,
                             collection_name=settings.CHROMA_COLLECTION_NAME
@@ -449,9 +457,10 @@ def create_vector_db():
 
 def create_vector_db_from_texts(texts):
     """从文本创建向量数据库，自动处理维度不匹配问题"""
+    chroma_cls = _legacy_chroma_class()
     try:
         # 尝试创建向量数据库
-        return Chroma.from_texts(
+        return chroma_cls.from_texts(
             texts=texts,
             embedding=embeddings,
             persist_directory=settings.VECTOR_STORE_DIR
@@ -462,7 +471,7 @@ def create_vector_db_from_texts(texts):
             logger.info("清理旧数据库并重新创建...")
             clear_vector_db()
             # 重新创建
-            return Chroma.from_texts(
+            return chroma_cls.from_texts(
                 texts=texts,
                 embedding=embeddings,
                 persist_directory=settings.VECTOR_STORE_DIR
@@ -474,9 +483,10 @@ def create_vector_db_from_docs(documents):
     """
     通过 Document 对象列表创建向量数据库，自动处理维度不匹配问题
     """
+    chroma_cls = _legacy_chroma_class()
     try:
         # 尝试创建向量数据库
-        return Chroma.from_documents(
+        return chroma_cls.from_documents(
             documents=documents,
             embedding=embeddings,
             persist_directory=settings.VECTOR_STORE_DIR
@@ -487,7 +497,7 @@ def create_vector_db_from_docs(documents):
             logger.info("清理旧数据库并重新创建...")
             clear_vector_db()
             # 重新创建
-            return Chroma.from_documents(
+            return chroma_cls.from_documents(
                 documents=documents,
                 embedding=embeddings,
                 persist_directory=settings.VECTOR_STORE_DIR

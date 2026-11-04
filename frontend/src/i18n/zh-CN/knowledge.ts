@@ -8,9 +8,20 @@ export default {
     files: '知识库文件管理',
     search: '知识检索'
   },
+  toolbar: {
+    filesLead: '维护向量库文件；选中后可批量删除，索引异常时可重建。'
+  },
+  banner: {
+    vectorDisabledTitle: '向量库功能已关闭',
+    vectorDisabledMessage:
+      '当前 ENABLE_VECTOR_STORE 为关闭，知识库相关接口（含文件列表、统计、上传、检索与索引重建）均不可用。请在配置中心开启后保存，并刷新本页。',
+    vectorDisabledAction: '打开配置中心',
+    vectorDisabledStateTitle: '知识库暂不可用',
+    vectorDisabledStateMessage:
+      '向量库关闭时后端会拒绝全部知识库 API。开启 ENABLE_VECTOR_STORE 并刷新后，方可浏览文件、上传与检索。'
+  },
   actions: {
     upload: '上传文件',
-    hideUpload: '收起上传',
     refresh: '刷新',
     rebuild: '重建索引',
     search: '搜索',
@@ -22,10 +33,15 @@ export default {
     preview: '预览',
     closeResults: '关闭'
   },
+  searchPage: {
+    threshold: '相似度阈值',
+    openInFiles: '在文件管理中打开'
+  },
   filters: {
     title: '筛选与检索',
+    subtitle: '按关键词、分类与状态筛选知识库文件',
     keywordLabel: '搜索关键词',
-    keywordPlaceholder: '输入文件名、描述或关键字',
+    keywordPlaceholder: '搜索',
     categoryLabel: '分类',
     categoryAll: '全部分类',
     statusLabel: '状态',
@@ -36,6 +52,7 @@ export default {
     title: '上传知识文件',
     file: '选择文件（可多选）',
     fileHint: '支持 TXT / CSV / DOCX / PDF / JSON / MD',
+    serverHint: '单文件不超过 {size}；允许类型：{types}',
     category: '文件分类',
     categoryPlaceholder: '请选择分类',
     description: '文件描述',
@@ -45,6 +62,12 @@ export default {
     dragHint: '可一次选择多个文件，上传后系统将自动解析并入库',
     progress: '上传进度',
     filesSelected: '已选择 {count} 个文件'
+  },
+  edit: {
+    title: '编辑文件信息',
+    empty: '未选择文件',
+    success: '文件信息已更新',
+    failed: '更新文件信息失败'
   },
   preview: {
     title: '文档预览',
@@ -94,9 +117,6 @@ export default {
     source: '来源',
     relevance: '相关性',
     snippet: '内容片段'
-  },
-  pagination: {
-    pageInfo: '第 {page} / {pages} 页'
   },
   confirm: {
     deleteSelected: '确认删除选中的知识库文件吗？',

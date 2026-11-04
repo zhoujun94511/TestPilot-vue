@@ -1,18 +1,39 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 import os
-import time
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import cast
+
+from sqlalchemy import or_
+from sqlalchemy.sql.elements import ColumnElement
+
 from models.models import db, Requirement
 from werkzeug.exceptions import BadRequest
 from services.document_service import DocumentService
+from services.document_meta import (
+    document_matches_analysis_filter,
+    is_document_meta_file,
+    normalize_analysis_type,
+    persist_document_analysis_type,
+    read_document_meta,
+    resolve_stored_analysis_type,
+    stamp_document_ownership,
+    write_document_meta,
+)
+from utils.utils_core.upload_storage import build_versioned_storage_filename, resolve_display_filename
 from flask import Blueprint, request, jsonify, current_app
 from utils.utils_core.api_response import api_success, api_error
 from utils.utils_core.api_error_handler import build_internal_error_result
+from services.data_scope import can_access_document_filename, can_access_record
+from services.sql_query_helpers import filter_by_eq, filter_like_contains
+from services.stats_scope import scoped_requirements_query
 
 # 创建蓝图
 documents_bp = Blueprint('documents', __name__)
+
+# 与 DocumentService.validate_document 的上限一致
+MAX_DOCUMENT_UPLOAD_BYTES = 50 * 1024 * 1024
 
 # 初始化服务
 document_service = DocumentService()
@@ -65,46 +86,36 @@ def upload_document():
                 'message': '不支持的文件类型'
             }), 400
 
+        # 落盘前校验大小，避免超大文件先占满磁盘
+        file.stream.seek(0, os.SEEK_END)
+        upload_size = file.stream.tell()
+        file.stream.seek(0)
+        if upload_size > MAX_DOCUMENT_UPLOAD_BYTES:
+            return jsonify({
+                'success': False,
+                'message': f'文件过大，最大支持 {MAX_DOCUMENT_UPLOAD_BYTES // (1024 * 1024)}MB',
+                'error_code': 'FILE_TOO_LARGE',
+            }), 413
+
         # 保存文件
         upload_dir = Path(current_app.config['UPLOAD_FOLDER']) / 'documents'
         upload_dir.mkdir(parents=True, exist_ok=True)
 
-        # 处理文件名，支持中文字符
-        def safe_filename(input_filename):
-            """创建安全的文件名，保留中文字符"""
-            import re
-            import unicodedata
-            
-            # 分离文件名和扩展名
-            file_name, file_ext = os.path.splitext(input_filename)
-            
-            # 对文件名部分进行安全处理
-            # 保留中文字符、英文字母、数字、连字符、下划线
-            safe_name = re.sub(r'[^\w\u4e00-\u9fff\-_]', '_', file_name)
-            
-            # 移除连续的下划线
-            safe_name = re.sub(r'_+', '_', safe_name)
-            
-            # 移除开头和结尾的下划线
-            safe_name = safe_name.strip('_')
-            
-            # 如果处理后的文件名为空，使用默认名称
-            if not safe_name:
-                safe_name = 'document'
-            
-            return safe_name + file_ext
-        
-        filename = safe_filename(file.filename)
-        file_path = upload_dir / filename
-
-        # 如果文件已存在，添加时间戳
-        if file_path.exists():
-            file_name_part, file_ext_part = os.path.splitext(filename)
-            timestamp = int(time.time())
-            filename = f"{file_name_part}_{timestamp}{file_ext_part}"
-            file_path = upload_dir / filename
-
+        stored_filename, original_filename = build_versioned_storage_filename(file.filename)
+        file_path = upload_dir / stored_filename
         file.save(str(file_path))
+
+        upload_analysis_type = normalize_analysis_type(request.form.get('analysis_type', 'requirements'))
+        write_document_meta(
+            file_path,
+            {
+                'original_filename': original_filename,
+                'analysis_type': upload_analysis_type,
+                'analysis_status': 'uploaded',
+                'uploaded_at': datetime.now(timezone.utc).isoformat()
+            }
+        )
+        stamp_document_ownership(file_path)
 
         # 返回文件信息
         # 确保返回正确的相对路径格式
@@ -113,7 +124,9 @@ def upload_document():
             'success': True,
             'message': '文件上传成功',
             'data': {
-                'filename': filename,
+                'filename': stored_filename,
+                'original_filename': original_filename,
+                'display_name': original_filename,
                 'file_path': relative_path.as_posix(),  # 使用pathlib的as_posix()方法统一返回正斜杠格式，跨平台兼容
                 'size': file_path.stat().st_size
             }
@@ -149,10 +162,18 @@ def analyze_document():
         # 执行文档分析
         if file_path:
             # 从文件分析
-            # 使用pathlib自动处理路径格式，跨平台兼容
-            full_path = Path(current_app.config['UPLOAD_FOLDER']) / file_path
-            if not full_path.exists():
-                raise BadRequest(f"文件不存在: {full_path}")
+            upload_root = Path(current_app.config['UPLOAD_FOLDER']).resolve()
+            full_path = (upload_root / str(file_path)).resolve()
+            if not full_path.is_relative_to(upload_root / 'documents'):
+                raise BadRequest("文件路径无效")
+            if not full_path.is_file():
+                raise BadRequest(f"文件不存在: {Path(str(file_path)).name}")
+            doc_name = full_path.name
+            if not can_access_document_filename(doc_name):
+                return jsonify({
+                    'success': False,
+                    'message': '无权分析该文档',
+                }), 403
 
             result = document_service.analyze_document_file(
                 file_path=str(full_path),
@@ -208,7 +229,8 @@ def list_documents():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         search = request.args.get('search', '').strip()
-        
+        analysis_type = request.args.get('analysis_type', '').strip().lower()
+
         # 修复路径拼接问题
         upload_dir = Path(current_app.config['UPLOAD_FOLDER']) / 'documents'
         if not upload_dir.exists():
@@ -224,50 +246,88 @@ def list_documents():
                 }
             })
 
+        scoped_req = scoped_requirements_query()
         documents = []
         for file_path in upload_dir.iterdir():
-            if file_path.is_file():
-                stat = file_path.stat()
-                # 统计与该文档相关的需求数量和分类
-                filename = file_path.name
-                if hasattr(Requirement, 'source_file'):
-                    # 总需求数量
-                    requirements_count = Requirement.query.filter(
-                        Requirement.source_file.like(f'%{filename}%')
-                    ).count()
-                    
-                    # 功能需求数量
-                    functional_count = Requirement.query.filter(
-                        Requirement.source_file.like(f'%{filename}%'),
-                        Requirement.type == 'functional'
-                    ).count()
-                    
-                    # 业务需求数量
-                    business_count = Requirement.query.filter(
-                        Requirement.source_file.like(f'%{filename}%'),
-                        Requirement.type == 'business'
-                    ).count()
-                else:
-                    requirements_count = 0
-                    functional_count = 0
-                    business_count = 0
-                
-                documents.append({
-                    'id': file_path.stem,  # 使用文件名（不含扩展名）作为ID
-                    'filename': filename,
-                    'file_size': stat.st_size,
-                    'file_type': file_path.suffix[1:] if file_path.suffix else '',
-                    'created_time': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    'relative_path': filename,  # 只返回文件名，不包含documents/前缀
-                    'requirements_count': requirements_count,
-                    'functional_count': functional_count,  # 功能需求数量
-                    'business_count': business_count  # 业务需求数量
-                })
+            if not file_path.is_file() or is_document_meta_file(file_path):
+                continue
+            stat = file_path.stat()
+            filename = file_path.name
+            if not can_access_document_filename(filename):
+                continue
+            stored_analysis_type = resolve_stored_analysis_type(file_path)
+            if hasattr(Requirement, 'source_file'):
+                by_file = filter_like_contains(scoped_req, Requirement.source_file, filename)
+                requirements_count = by_file.count()
+                functional_count = filter_by_eq(
+                    filter_like_contains(scoped_req, Requirement.source_file, filename),
+                    Requirement.type,
+                    'functional',
+                ).count()
+                business_count = filter_by_eq(
+                    filter_like_contains(scoped_req, Requirement.source_file, filename),
+                    Requirement.type,
+                    'business',
+                ).count()
+            else:
+                requirements_count = 0
+                functional_count = 0
+                business_count = 0
 
-        # 应用搜索过滤
+            # 历史文件无 meta：已分析过的视为「综合分析」，避免按需求条数误出现在各专项筛选里
+            if stored_analysis_type is None and requirements_count > 0:
+                stored_analysis_type = 'comprehensive'
+
+            meta = read_document_meta(file_path)
+            display_name = resolve_display_filename(filename, meta)
+            documents.append({
+                'id': file_path.stem,
+                'filename': filename,
+                'original_filename': meta.get('original_filename') or display_name,
+                'display_name': display_name,
+                'file_size': stat.st_size,
+                'file_type': file_path.suffix[1:] if file_path.suffix else '',
+                'created_time': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                'relative_path': filename,
+                'requirements_count': requirements_count,
+                'functional_count': functional_count,
+                'business_count': business_count,
+                'analysis_type': stored_analysis_type,
+            })
+
+        # 应用搜索过滤（文件名 + 关联需求标题/内容/编号）
         if search:
-            documents = [doc for doc in documents if search.lower() in doc['filename'].lower()]
-        
+            search_lower = search.lower()
+            matched = []
+            for doc in documents:
+                filename = doc['filename']
+                if search_lower in filename.lower():
+                    matched.append(doc)
+                    continue
+                if hasattr(Requirement, 'source_file'):
+                    search_clause = cast(
+                        ColumnElement[bool],
+                        or_(
+                            Requirement.title.ilike(f'%{search}%'),
+                            Requirement.content.ilike(f'%{search}%'),
+                            Requirement.req_id.ilike(f'%{search}%'),
+                        ),
+                    )
+                    has_req = filter_like_contains(
+                        scoped_req, Requirement.source_file, filename
+                    ).filter(search_clause).limit(1).count()
+                    if has_req:
+                        matched.append(doc)
+            documents = matched
+
+        # 按上传/分析时保存的 analysis_type 过滤（勿用需求条数，综合分析会误命中各类型）
+        if analysis_type:
+            documents = [
+                doc
+                for doc in documents
+                if document_matches_analysis_filter(doc.get('analysis_type'), analysis_type)
+            ]
+
         # 按上传时间倒序排序
         documents.sort(key=lambda x: x['created_time'], reverse=True)
 
@@ -323,6 +383,12 @@ def delete_document(file_path):
         if not str(full_path.resolve()).startswith(str((upload_folder / 'documents').resolve())):
             raise BadRequest("非法的文件路径")
 
+        if not can_access_document_filename(safe_name):
+            return jsonify({
+                'success': False,
+                'message': '无权删除该文档',
+            }), 403
+
         try:
             full_path.unlink()
         except OSError as exc:
@@ -337,7 +403,11 @@ def delete_document(file_path):
             }), 500
 
         try:
-            Requirement.query.filter_by(source_file=safe_name).delete(synchronize_session=False)
+            filter_by_eq(
+                scoped_requirements_query(),
+                Requirement.source_file,
+                safe_name,
+            ).delete(synchronize_session=False)
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -430,6 +500,12 @@ def get_requirement(req_id):
                 'success': False,
                 'message': '需求不存在'
             }), 404
+        if not can_access_record(requirement, 'requirements'):
+            return jsonify({
+                'success': False,
+                'message': '没有权限访问该需求',
+                'message_key': 'common.errors.http403',
+            }), 403
 
         return jsonify({
             'success': True,
@@ -457,6 +533,12 @@ def update_requirement(req_id):
                 'success': False,
                 'message': '需求不存在'
             }), 404
+        if not can_access_record(requirement, 'requirements'):
+            return jsonify({
+                'success': False,
+                'message': '没有权限修改该需求',
+                'message_key': 'common.errors.http403',
+            }), 403
 
         data = request.get_json()
         if not data:
@@ -508,6 +590,12 @@ def delete_requirement(req_id):
                 'success': False,
                 'message': '需求不存在'
             }), 404
+        if not can_access_record(requirement, 'requirements'):
+            return jsonify({
+                'success': False,
+                'message': '没有权限删除该需求',
+                'message_key': 'common.errors.http403',
+            }), 403
 
         db.session.delete(requirement)
         db.session.commit()
@@ -545,6 +633,12 @@ def get_document_preview(document_id):
         # 检查文件路径安全性
         if not str(file_path.resolve()).startswith(str(upload_folder.resolve())):
             raise BadRequest("非法的文件路径")
+
+        if not can_access_document_filename(document_id):
+            return jsonify({
+                'success': False,
+                'message': '无权预览该文档',
+            }), 403
         
         # 使用通用预览工具，支持多种文件格式
         from utils.utils_document_processing.file_preview import get_file_preview
@@ -591,6 +685,12 @@ def reanalyze_document(document_id):
         # 检查文件路径安全性
         if not str(file_path.resolve()).startswith(str(upload_folder.resolve())):
             raise BadRequest("非法的文件路径")
+
+        if not can_access_document_filename(document_id):
+            return jsonify({
+                'success': False,
+                'message': '无权重新分析该文档',
+            }), 403
         
         # 获取分析类型（默认为需求分析）
         data = request.get_json() or {}
@@ -604,6 +704,7 @@ def reanalyze_document(document_id):
         )
         
         if result['success']:
+            persist_document_analysis_type(file_path, analysis_type)
             return jsonify({
                 'success': True,
                 'message': '文档重新分析完成',

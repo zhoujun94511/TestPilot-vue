@@ -24,9 +24,61 @@ from utils.utils_core.logger import get_logger
 from utils.utils_core.api_error_handler import normalize_provider_error
 from utils.utils_intelligent_retrieval.smart_retrieval_strategy import get_smart_retrieval_strategy
 from utils.utils_ai_quality.hallucination_detector import create_hallucination_detector
-from config.settings import settings
+from config.settings import anthropic_rejects_sampling, settings
+from services.rag_threshold_utils import (
+    get_rag_score_threshold,
+    search_documents_above_threshold,
+)
+from services.sql_query_helpers import filter_column_eq
 
 logger = get_logger(__name__)
+
+
+def _llm_model_name(llm: Any, user_settings: Optional[Dict[str, Any]]) -> str:
+    if llm is not None:
+        for attr in ('model', 'model_name'):
+            value = getattr(llm, attr, None)
+            if value:
+                return str(value)
+    if user_settings:
+        return str(user_settings.get('model') or '')
+    return ''
+
+
+def build_llm_call_settings(llm: Any, user_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    按 LLM 类型组装 invoke/stream 的额外参数（OpenAI / Gemini / DeepSeek / Qwen / Anthropic）。
+    """
+    llm_class = llm.__class__.__name__ if llm is not None else ''
+    is_gemini = llm_class == 'ChatGoogleGenerativeAI'
+    is_anthropic = llm_class == 'ChatAnthropic'
+    model_name = _llm_model_name(llm, user_settings)
+    # GPT-5 只接受默认 temperature；claude-*-5 不接受 temperature / top_p
+    is_gpt5 = 'gpt-5' in model_name.lower()
+    anthropic_no_sampling = is_anthropic and anthropic_rejects_sampling(model_name)
+
+    call_settings: Dict[str, Any] = {
+        'max_tokens': getattr(settings, 'MAX_TOKENS', 4000),
+    }
+    if not anthropic_no_sampling:
+        call_settings['top_p'] = 1.0
+
+    # frequency_penalty / presence_penalty 仅 OpenAI / DeepSeek / Qwen 支持
+    if not is_gemini and not is_anthropic:
+        call_settings['frequency_penalty'] = 0.0
+        call_settings['presence_penalty'] = 0.0
+
+    if user_settings:
+        if not is_gpt5 and not anthropic_no_sampling:
+            user_temp = user_settings.get('temperature', 0.7)
+            # temperature >= 0.7 时降到 0.3，提高 prompt 遵循度
+            call_settings['temperature'] = 0.3 if user_temp >= 0.7 else user_temp
+
+        call_settings['max_tokens'] = user_settings.get(
+            'max_tokens', getattr(settings, 'MAX_TOKENS', 4000)
+        )
+
+    return call_settings
 
 
 class ChatService:
@@ -150,12 +202,17 @@ class ChatService:
                     if use_knowledge and self.vector_db:
                         # 获取知识库文档作为源
                         try:
-                            knowledge_docs = self.vector_db.similarity_search(message, k=3)
+                            knowledge_docs = search_documents_above_threshold(
+                                self.vector_db, message, k=3
+                            )
                             for doc in knowledge_docs:
+                                meta = getattr(doc, "metadata", None) or {}
                                 source_documents.append({
                                     'content': doc.page_content,
                                     'source': 'knowledge_base',
-                                    'quality_score': 0.9
+                                    'quality_score': float(
+                                        meta.get('similarity_score', 0.9)
+                                    ),
                                 })
                         except Exception as e:
                             logger.debug(f"获取知识库文档失败: {e}")
@@ -185,6 +242,12 @@ class ChatService:
             )
             db_session.add(ai_message)
             db_session.commit()
+            try:
+                from services.llm_usage_service import log_chat_assistant_usage
+
+                log_chat_assistant_usage(ai_message)
+            except Exception as log_error:
+                logger.warning("Chat Token 落库失败: %s", log_error)
 
             # 生成回复建议
             conversation_context = self._get_conversation_context_for_suggestions(db_session, session_id)
@@ -271,6 +334,9 @@ class ChatService:
             # Gemini 需要通过 generation_config 传递参数，且不接受 stream 参数
             if self.llm.__class__.__name__ == 'ChatGoogleGenerativeAI':
                 llm_settings = self._adapt_settings_for_gemini(llm_settings, include_stream=True)
+            elif self.llm.__class__.__name__ == 'ChatAnthropic':
+                # ChatAnthropic.stream 自行设置 stream，重复传入会冲突
+                pass
             else:
                 # 其他模型需要 stream 参数
                 llm_settings["stream"] = True
@@ -330,6 +396,16 @@ class ChatService:
                     })
                     return
 
+            else:
+                logger.error("当前 LLM 不支持流式调用: %s", type(self.llm).__name__)
+                yield self._create_stream_event("error", {
+                    "message": "当前模型不支持流式输出，请关闭流式后重试",
+                    "error_code": "STREAM_NOT_SUPPORTED",
+                    "retryable": False,
+                    "status_code": 500
+                })
+                return
+
             # 回复建议
             suggestions = []
             model_name = self._resolve_model_name(user_settings)
@@ -354,12 +430,17 @@ class ChatService:
                     if use_knowledge and self.vector_db:
                         # 获取知识库文档作为源
                         try:
-                            knowledge_docs = self.vector_db.similarity_search(message, k=3)
+                            knowledge_docs = search_documents_above_threshold(
+                                self.vector_db, message, k=3
+                            )
                             for doc in knowledge_docs:
+                                meta = getattr(doc, "metadata", None) or {}
                                 source_documents.append({
                                     'content': doc.page_content,
                                     'source': 'knowledge_base',
-                                    'quality_score': 0.9
+                                    'quality_score': float(
+                                        meta.get('similarity_score', 0.9)
+                                    ),
                                 })
                         except Exception as e:
                             logger.debug(f"获取知识库文档失败: {e}")
@@ -470,34 +551,59 @@ class ChatService:
             if use_smart_retrieval:
                 # 使用智能检索策略
                 try:
-                    smart_results = self.smart_retrieval.retrieve(
+                    from services.data_scope import filter_scoped_retrieval_items
+                    from services.knowledge_vector_scope import merged_vector_search_kwargs
+
+                    smart_results = filter_scoped_retrieval_items(self.smart_retrieval.retrieve(
                         query=message,
                         vector_db=self.vector_db,
-                        context=None  # 可以传入对话上下文
-                    )
+                        context=None,
+                        vector_search_kwargs=merged_vector_search_kwargs(),
+                    ))
                 except ValueError as retrieval_error:
                     logger.debug(f"跳过知识检索（参数无效）: {retrieval_error}")
                     return message
                 
-                # 转换为文档格式
+                score_threshold = get_rag_score_threshold()
+                # 转换为文档格式（retrieve 内已按 score_threshold 过滤，此处再对齐阈值并打日志）
                 relevant_docs = []
                 for result in smart_results[:top_k]:
-                    # 创建模拟的文档对象
+                    score = float(result.score or 0)
+                    if score < score_threshold:
+                        continue
                     class MockDoc:
                         def __init__(self, content, metadata):
                             self.page_content = content
                             self.metadata = metadata
-                    
-                    relevant_docs.append(MockDoc(result.content, result.metadata))
+
+                    doc_meta = dict(result.metadata or {})
+                    doc_meta['similarity_score'] = score
+                    relevant_docs.append(MockDoc(result.content, doc_meta))
+
+                if smart_results and not relevant_docs:
+                    logger.info(
+                        "聊天 RAG：检索到 %d 条结果，均未达到 score_threshold=%.3f，不注入参考资料",
+                        len(smart_results),
+                        score_threshold,
+                    )
+                elif relevant_docs:
+                    logger.debug(
+                        "聊天 RAG：注入 %d 条参考资料 (threshold=%.3f, scores=%s)",
+                        len(relevant_docs),
+                        score_threshold,
+                        [d.metadata.get('similarity_score') for d in relevant_docs],
+                    )
                 
                 # 记录搜索耗时（用于性能监控）
                 search_duration = time.time() - start_time
                 logger.debug(f"智能检索耗时: {search_duration:.3f}秒")
                 
             else:
-                # 使用传统搜索
+                # 使用传统搜索（带分数 + 阈值）
                 try:
-                    relevant_docs = self.vector_db.similarity_search(message, k=top_k)
+                    relevant_docs = search_documents_above_threshold(
+                        self.vector_db, message, k=top_k
+                    )
                 except ValueError as retrieval_error:
                     logger.debug(f"跳过知识检索（参数无效）: {retrieval_error}")
                     return message
@@ -666,55 +772,7 @@ class ChatService:
         return messages
 
     def _prepare_llm_settings(self, user_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        准备LLM设置（统一适配 OpenAI / Gemini / DeepSeek / Qwen 等所有模型）
-        根据当前 LLM 类型自动决定参数集，避免产生无用的参数添加/移除
-        """
-        from config.settings import settings as config_settings
-        
-        # 判断当前是否为 Gemini 模型
-        is_gemini = (self.llm and self.llm.__class__.__name__ == 'ChatGoogleGenerativeAI')
-        
-        # 判断当前是否为 GPT-5 模型（GPT-5 不支持自定义 temperature，只支持默认值 1）
-        is_gpt5 = False
-        if self.llm:
-            model_name = None
-            if hasattr(self.llm, 'model'):
-                model_name = self.llm.model
-            elif hasattr(self.llm, 'model_name'):
-                model_name = self.llm.model_name
-            elif user_settings and 'model' in user_settings:
-                model_name = user_settings.get('model', '')
-            
-            if model_name and 'gpt-5' in str(model_name).lower():
-                is_gpt5 = True
-        
-        default_settings = {
-            'max_tokens': getattr(config_settings, 'MAX_TOKENS', 4000),
-            'top_p': 1.0,
-        }
-        
-        # frequency_penalty / presence_penalty 仅 OpenAI / DeepSeek / Qwen 支持，Gemini 不支持
-        if not is_gemini:
-            default_settings['frequency_penalty'] = 0.0
-            default_settings['presence_penalty'] = 0.0
-
-        if user_settings:
-            # GPT-5 不支持自定义 temperature，只支持默认值 1，所以不设置 temperature 参数
-            if not is_gpt5:
-                user_temp = user_settings.get('temperature', 0.7)
-                
-                # 所有模型统一：temperature >= 0.7 时自动降到 0.3，提高 prompt 遵循度
-                if user_temp >= 0.7:
-                    default_settings['temperature'] = 0.3
-                else:
-                    default_settings['temperature'] = user_temp
-
-            default_settings['max_tokens'] = user_settings.get(
-                'max_tokens', getattr(config_settings, 'MAX_TOKENS', 4000)
-            )
-
-        return default_settings
+        return build_llm_call_settings(self.llm, user_settings)
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
@@ -949,12 +1007,17 @@ class ChatService:
                 try:
                     # 使用智能检索获取相关文档（最多3个）
                     if self.smart_retrieval:
-                        smart_results = self.smart_retrieval.retrieve(
+                        from services.data_scope import filter_scoped_retrieval_items
+                        from services.knowledge_vector_scope import merged_vector_search_kwargs
+
+                        smart_results = filter_scoped_retrieval_items(self.smart_retrieval.retrieve(
                             query=user_message,
                             vector_db=self.vector_db,
-                            context=None
-                        )
+                            context=None,
+                            vector_search_kwargs=merged_vector_search_kwargs(),
+                        ))
                         
+                        doc_threshold = get_rag_score_threshold()
                         knowledge_context['knowledge_docs'] = [
                             {
                                 'content': result.content[:200],  # 只取前200字符作为摘要
@@ -962,13 +1025,18 @@ class ChatService:
                                 'source': result.metadata.get('file_name', '未知') if result.metadata else '未知'
                             }
                             for result in smart_results[:3]
+                            if float(result.score or 0) >= doc_threshold
                         ]
                     else:
-                        # 回退到普通检索
-                        docs = self.vector_db.similarity_search(user_message, k=3)
+                        docs = search_documents_above_threshold(
+                            self.vector_db, user_message, k=3
+                        )
                         knowledge_context['knowledge_docs'] = [
                             {
                                 'content': doc.page_content[:200],
+                                'score': (getattr(doc, 'metadata', None) or {}).get(
+                                    'similarity_score'
+                                ),
                                 'source': doc.metadata.get('file_name', '未知') if hasattr(doc, 'metadata') else '未知'
                             }
                             for doc in docs
@@ -997,9 +1065,12 @@ class ChatService:
                             search_conditions.append(TestCase.description.contains(keyword))
                     
                     if search_conditions:
-                        test_cases = TestCase.query.filter(
-                            or_(*search_conditions),
-                            TestCase.status == 'active'
+                        from services.stats_scope import scoped_cases_query
+
+                        test_cases = filter_column_eq(
+                            scoped_cases_query().filter(or_(*search_conditions)),
+                            TestCase.status,
+                            'active',
                         ).limit(3).all()
                         
                         knowledge_context['test_cases'] = [
@@ -1032,9 +1103,12 @@ class ChatService:
                             search_conditions.append(Requirement.content.contains(keyword))
                     
                     if search_conditions:
-                        requirements = Requirement.query.filter(
-                            or_(*search_conditions),
-                            Requirement.status == 'active'
+                        from services.stats_scope import scoped_requirements_query
+
+                        requirements = filter_column_eq(
+                            scoped_requirements_query().filter(or_(*search_conditions)),
+                            Requirement.status,
+                            'active',
                         ).limit(3).all()
                         
                         knowledge_context['requirements'] = [

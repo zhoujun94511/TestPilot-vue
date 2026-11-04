@@ -1,8 +1,11 @@
+@import './tailwind.css';
+@import './shell-nav.css';
 @import './tokens.css';
 @import './theme.css';
 @import './layout.css';
-@import './utilities.css';
-@import './components.css';
+@import './chat-rich-content.css';
+@import './feedback.css';
+@import './motion.css';
 
 html {
   background: var(--tp-bg-page);

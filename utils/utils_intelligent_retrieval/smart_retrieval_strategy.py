@@ -86,6 +86,7 @@ class SmartRetrievalStrategy:
             'strategy_usage': {strategy.value: 0 for strategy in RetrievalStrategy},
             'success_rate': 0.0
         }
+        self._active_vector_search_kwargs: dict = {}
 
     @staticmethod
     def _is_empty_query_error(error: Exception) -> bool:
@@ -98,7 +99,8 @@ class SmartRetrievalStrategy:
         vector_db, 
         context: Optional[str] = None,
         strategy: Optional[RetrievalStrategy] = None,
-        top_k: Optional[int] = None
+        top_k: Optional[int] = None,
+        vector_search_kwargs: Optional[dict] = None,
     ) -> List[RetrievalResult]:
         """
         执行智能检索
@@ -109,11 +111,13 @@ class SmartRetrievalStrategy:
             context: 上下文信息
             strategy: 指定检索策略，如果为None则自动选择
             top_k: 返回结果数量，如果为None则使用配置中的top_k
+            vector_search_kwargs: 传给向量检索的额外参数（如部门 pre-filter）
             
         Returns:
             检索结果列表
         """
         start_time = time.time()
+        self._active_vector_search_kwargs = vector_search_kwargs or {}
         
         # 使用传入的 top_k 或配置中的 top_k
         effective_top_k = top_k if top_k is not None else self.config.top_k
@@ -137,6 +141,8 @@ class SmartRetrievalStrategy:
             # 重排序
             if self.config.enable_reranking:
                 results = self._rerank_results(results, query, context)
+
+            results = self._apply_score_threshold(results, self._live_score_threshold())
             
             # 更新性能统计
             self._update_performance_stats(strategy, time.time() - start_time, True)
@@ -151,6 +157,11 @@ class SmartRetrievalStrategy:
                 False
             )
             return []
+        finally:
+            self._active_vector_search_kwargs = {}
+
+    def _vector_search_kwargs(self) -> dict:
+        return getattr(self, '_active_vector_search_kwargs', {}) or {}
     
     def _select_optimal_strategy(self, query: str, context: Optional[str] = None) -> RetrievalStrategy:
         """
@@ -251,7 +262,9 @@ class SmartRetrievalStrategy:
             # 尝试使用 similarity_search_with_score 获取文档ID和得分
             # 如果方法不存在，降级到 similarity_search
             try:
-                docs_with_scores = vector_db.similarity_search_with_score(query, k=self.config.top_k)
+                docs_with_scores = vector_db.similarity_search_with_score(
+                    query, k=self.config.top_k, **self._vector_search_kwargs()
+                )
                 
                 results = []
                 for doc, score in docs_with_scores:
@@ -269,7 +282,9 @@ class SmartRetrievalStrategy:
                 return results
             except AttributeError:
                 # 如果 similarity_search_with_score 不存在，使用 similarity_search
-                docs = vector_db.similarity_search(query, k=self.config.top_k)
+                docs = vector_db.similarity_search(
+                    query, k=self.config.top_k, **self._vector_search_kwargs()
+                )
                 
                 results = []
                 for doc in docs:
@@ -305,7 +320,9 @@ class SmartRetrievalStrategy:
             keyword_query = " ".join(keywords)
             
             # 执行搜索
-            docs = vector_db.similarity_search(keyword_query, k=self.config.top_k)
+            docs = vector_db.similarity_search(
+                keyword_query, k=self.config.top_k, **self._vector_search_kwargs()
+            )
             
             results = []
             for doc in docs:
@@ -518,6 +535,36 @@ class SmartRetrievalStrategy:
         
         return list(unique_results.values())
     
+    def _live_score_threshold(self) -> float:
+        """配置中心优先，失败时回退实例 config（单例创建时的 settings）。"""
+        try:
+            from services.rag_threshold_utils import get_rag_score_threshold
+
+            return float(get_rag_score_threshold())
+        except (ImportError, TypeError, ValueError):
+            return float(self.config.score_threshold)
+
+    def _apply_score_threshold(
+        self,
+        results: List[RetrievalResult],
+        threshold: Optional[float] = None,
+    ) -> List[RetrievalResult]:
+        """丢弃低于 score_threshold 的检索结果（与知识库搜索 API 行为一致）。"""
+        if not results:
+            return results
+        cutoff = self.config.score_threshold if threshold is None else threshold
+        threshold = float(cutoff)
+        kept = [r for r in results if float(r.score or 0) >= threshold]
+        dropped = len(results) - len(kept)
+        if dropped:
+            logger.debug(
+                "RAG score_threshold=%.3f 已过滤 %d/%d 条低分 chunk",
+                threshold,
+                dropped,
+                len(results),
+            )
+        return kept
+
     def _rerank_results(self, results: List[RetrievalResult], query: str, context: Optional[str] = None) -> List[RetrievalResult]:
         """重排序检索结果"""
         if not results:
@@ -601,6 +648,20 @@ def get_smart_retrieval_strategy(config: Optional[RetrievalConfig] = None) -> Sm
     """获取智能检索策略实例（单例模式）"""
     global _smart_retrieval_strategy
     if _smart_retrieval_strategy is None:
+        if config is None:
+            try:
+                from config.settings import settings
+                config = RetrievalConfig(
+                    top_k=getattr(settings, 'RAG_TOP_K', 5),
+                    score_threshold=getattr(settings, 'RAG_SCORE_THRESHOLD', 0.7),
+                    enable_reranking=getattr(settings, 'RAG_ENABLE_RERANKING', True),
+                    enable_query_expansion=getattr(settings, 'RAG_ENABLE_QUERY_EXPANSION', True),
+                    enable_context_awareness=getattr(settings, 'RAG_ENABLE_CONTEXT_AWARENESS', True),
+                    max_context_length=getattr(settings, 'RAG_MAX_CONTEXT_LENGTH', 2000),
+                    similarity_threshold=getattr(settings, 'RAG_SIMILARITY_THRESHOLD', 0.8),
+                )
+            except (ImportError, AttributeError, TypeError, ValueError):
+                config = RetrievalConfig()
         _smart_retrieval_strategy = SmartRetrievalStrategy(config)
     return _smart_retrieval_strategy
 

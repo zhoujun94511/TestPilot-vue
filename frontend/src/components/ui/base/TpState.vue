@@ -1,12 +1,26 @@
 <template>
-  <section class="tp-state" :class="stateClass">
-    <div v-if="showSpinner" class="tp-state__spinner" aria-hidden="true"></div>
-    <div class="tp-state__title" :class="titleClass">{{ title }}</div>
-    <div v-if="message" class="tp-state__body">{{ message }}</div>
-    <div v-if="$slots.default" class="tp-state__content">
+  <section :class="rootClass">
+    <div
+      v-if="showSpinner"
+      class="mx-auto mb-3 size-8 animate-spin rounded-full border-[3px] border-primary/20 border-t-primary"
+      aria-hidden="true"
+    />
+    <div :class="titleClass">{{ title }}</div>
+    <div
+      v-if="message"
+      :class="
+        cn('mt-1.5 text-sm leading-relaxed [overflow-wrap:anywhere]', {
+          'text-[var(--tp-color-text-700)]': variant === 'error' || variant === 'warning',
+          'text-muted-foreground': variant !== 'error' && variant !== 'warning'
+        })
+      "
+    >
+      {{ message }}
+    </div>
+    <div v-if="$slots.default" class="mt-2">
       <slot />
     </div>
-    <div v-if="$slots.actions" class="tp-state__actions">
+    <div v-if="$slots.actions" class="mt-3.5 flex flex-wrap justify-center gap-2.5">
       <slot name="actions" />
     </div>
   </section>
@@ -14,6 +28,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { cn } from '@/lib/utils';
 
 type Variant = 'loading' | 'empty' | 'error' | 'success' | 'warning' | 'info' | 'processing' | 'analyzing' | 'generating';
 
@@ -23,22 +38,14 @@ const props = defineProps<{
   message?: string;
 }>();
 
-const stateClass = computed(() => ({
-  'tp-state--loading': props.variant === 'loading',
-  'tp-state--empty': props.variant === 'empty',
-  'tp-state--error': props.variant === 'error',
-  'tp-state--success': props.variant === 'success',
-  'tp-state--warning': props.variant === 'warning',
-  'tp-state--info': props.variant === 'info',
-  'tp-state--processing': props.variant === 'processing',
-  'tp-state--analyzing': props.variant === 'analyzing',
-  'tp-state--generating': props.variant === 'generating'
-}));
+const rootClass = computed(() => cn('px-5 py-7 text-center text-foreground'));
 
-const titleClass = computed(() => ({
-  'tp-state__title--danger': props.variant === 'error',
-  'tp-state__title--warning': props.variant === 'warning'
-}));
+const titleClass = computed(() =>
+  cn('text-base font-bold leading-tight text-foreground', {
+    'text-[var(--tp-color-danger-600)]': props.variant === 'error',
+    'text-[var(--tp-color-warning-600)]': props.variant === 'warning'
+  })
+);
 
 const showSpinner = computed(() => ['loading', 'processing', 'analyzing', 'generating'].includes(props.variant));
 </script>

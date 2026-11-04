@@ -1,0 +1,21 @@
+/* P3：统一减弱动效偏好（Chat 渐入、页级 Toast、骨架 shimmer） */
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-rich-content {
+    animation: none;
+  }
+
+  .chat-content-skeleton__line {
+    animation: none;
+    background: color-mix(in srgb, var(--tp-color-text-500) 14%, transparent);
+  }
+
+  .animate-page-toast-in {
+    animation: none;
+  }
+
+  .animate-cases-row-highlight-fade,
+  .animate-doc-row-highlight-fade {
+    animation: none;
+  }
+}

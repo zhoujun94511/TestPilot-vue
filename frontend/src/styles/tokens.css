@@ -1,30 +1,57 @@
 :root {
   color-scheme: light;
-  --tp-bg-page: #f5f7fb;
-  --tp-bg-surface: #f8fafc;
-  --tp-bg-subtle: #f8fafc;
+  --tp-bg-page: #f4f6fa;
+  --tp-bg-surface: #ffffff;
+  --tp-bg-subtle: #f1f5f9;
   --tp-bg-elevated: #eef2f7;
 
   --tp-color-text-900: #0f172a;
   --tp-color-text-600: #475569;
   --tp-color-text-500: #64748b;
+  --tp-color-text-400: #94a3b8;
+  --tp-color-text-placeholder: #6b7280;
   --tp-color-text-inverse: #f8fafc;
 
   --tp-color-primary-600: #1d4ed8;
+  --tp-color-primary-500: var(--tp-color-primary-600);
   --tp-color-primary-700: #1e40af;
+  --tp-color-text-800: #1e293b;
+  --tp-color-text-700: #334155;
+  --tp-color-text-300: #94a3b8;
+  --tp-color-text-200: #cbd5e1;
+  --tp-color-text-100: #e2e8f0;
+  --tp-surface-raised: var(--tp-bg-subtle);
   --tp-color-ai-600: #0f766e;
   --tp-color-success-600: #16a34a;
   --tp-color-warning-600: #d97706;
   --tp-color-danger-600: #dc2626;
+  --tp-color-danger-500: var(--tp-color-danger-600);
+  --tp-color-danger-700: #b91c1c;
+  --tp-color-warning-500: var(--tp-color-warning-600);
   --tp-color-info-600: #0284c7;
+  --tp-radius-xs: 6px;
+  --tp-preview-top-offset: 100px;
+  --tp-col: auto;
+  --tp-table-min: 100%;
 
-  --tp-border-default: #d7e0ea;
-  --tp-border-strong: #c5d0dd;
+  --tp-border-default: #a8b8ca;
+  --tp-border-strong: #8fa3b8;
+  --tp-border-interactive: color-mix(in srgb, var(--tp-color-primary-600) 28%, var(--tp-border-strong));
 
-  --tp-radius-sm: 10px;
-  --tp-radius-md: 12px;
-  --tp-radius-lg: 16px;
-  --tp-radius-xl: 20px;
+  /* shadcn 风格语义别名（映射到现有 token，便于后续组件扩展） */
+  --tp-background: var(--tp-bg-page);
+  --tp-foreground: var(--tp-color-text-900);
+  --tp-muted: var(--tp-bg-subtle);
+  --tp-muted-foreground: var(--tp-color-text-600);
+  --tp-accent: color-mix(in srgb, var(--tp-color-primary-600) 9%, var(--tp-bg-surface));
+  --tp-accent-foreground: var(--tp-color-text-900);
+  --tp-border: var(--tp-border-default);
+  --tp-ring: color-mix(in srgb, var(--tp-color-primary-600) 38%, transparent);
+
+  --tp-radius-sm: 8px;
+  --tp-radius-md: 10px;
+  --tp-radius-lg: 14px;
+  --tp-radius-xl: 18px;
 
   --tp-space-1: 4px;
   --tp-space-2: 8px;
@@ -33,51 +60,125 @@
   --tp-space-5: 20px;
   --tp-space-6: 24px;
   --tp-space-8: 32px;
+  --tp-page-block-gap: var(--tp-space-3);
 
+  --tp-motion-fast: 150ms;
+  --tp-motion-normal: 200ms;
+  --tp-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --tp-rich-code-bg: color-mix(in srgb, var(--tp-bg-surface) 90%, var(--tp-bg-page));
+  --tp-rich-code-head-bg: var(--tp-bg-subtle);
+
+  --tp-shadow-switch-knob: 0 1px 2px color-mix(in srgb, var(--tp-color-text-900) 18%, transparent);
   --tp-shadow-sm: 0 1px 2px color-mix(in srgb, var(--tp-color-text-900) 4%, transparent);
   --tp-shadow-md: 0 8px 24px color-mix(in srgb, var(--tp-color-text-900) 6%, transparent);
   --tp-shadow-lg: 0 18px 48px color-mix(in srgb, var(--tp-color-text-900) 10%, transparent);
+  --tp-overlay-scrim: color-mix(in srgb, var(--tp-color-text-900) 52%, transparent);
+  --tp-shadow-notice: 0 10px 28px color-mix(in srgb, var(--tp-color-text-900) 22%, transparent);
+
+  /* 页级 Toast / PageNoticeBanner（按语义色，Light） */
+  --tp-notice-danger-accent: var(--tp-color-danger-600);
+  --tp-notice-danger-bg: color-mix(in srgb, var(--tp-color-danger-600) 11%, var(--tp-bg-surface));
+  --tp-notice-danger-fg: #7f1d1d;
+  --tp-notice-danger-fg-emphasis: #991b1b;
+  --tp-notice-warning-accent: var(--tp-color-warning-600);
+  --tp-notice-warning-bg: color-mix(in srgb, var(--tp-color-warning-600) 12%, var(--tp-bg-surface));
+  --tp-notice-warning-fg: #78350f;
+  --tp-notice-warning-fg-emphasis: #92400e;
+  --tp-notice-success-accent: #15803d;
+  --tp-notice-success-bg: color-mix(in srgb, var(--tp-color-success-600) 10%, var(--tp-bg-surface));
+  --tp-notice-success-fg: #14532d;
+  --tp-notice-success-fg-emphasis: #166534;
+  --tp-notice-info-accent: #0369a1;
+  --tp-notice-info-bg: color-mix(in srgb, var(--tp-color-info-600) 10%, var(--tp-bg-surface));
+  --tp-notice-info-fg: #0c4a6e;
+  --tp-notice-info-fg-emphasis: #075985;
 
   --tp-font-sans: Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
   --tp-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 
   /* Global responsive layout tokens */
-  --tp-shell-sidebar-width: 280px;
-  --tp-topbar-min-height: 72px;
+  --tp-shell-sidebar-width: 268px;
+  --tp-shell-sidebar-width-collapsed: 76px;
+  --tp-topbar-min-height: 52px;
   --tp-content-padding: 24px;
-  --tp-page-shell-min-height: calc(100vh - 140px);
+  --tp-page-shell-min-height: calc(100vh - 112px);
   --tp-chat-message-min-height: 260px;
   --tp-chat-message-max-height: calc(100vh - 560px);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --tp-bg-page: #0f172a;
-  --tp-bg-surface: #1e293b;
-  --tp-bg-subtle: #020617;
+  --tp-bg-page: #0b1220;
+  --tp-bg-surface: #111827;
+  --tp-bg-subtle: #151d2e;
+  --tp-bg-elevated: #1c2536;
 
+  --tp-accent: color-mix(in srgb, var(--tp-color-primary-600) 14%, var(--tp-bg-surface));
+  --tp-ring: color-mix(in srgb, var(--tp-color-primary-600) 45%, transparent);
   --tp-color-text-900: #e5e7eb;
+  --tp-color-text-800: #e2e8f0;
+  --tp-color-text-700: #cbd5e1;
   --tp-color-text-600: #cbd5f5;
-  --tp-color-text-500: #94a3b8;
+  --tp-color-text-500: #a1adbd;
+  --tp-color-text-400: #8b98aa;
+  --tp-color-text-placeholder: #8b98aa;
+  --tp-color-text-300: #64748b;
+  --tp-color-text-200: #475569;
+  --tp-color-text-100: #334155;
   --tp-color-text-inverse: #0f172a;
+  --tp-surface-raised: color-mix(in srgb, var(--tp-bg-surface) 88%, var(--tp-bg-subtle));
 
-  --tp-border-default: #334155;
-  --tp-border-strong: #475569;
+  --tp-border-default: #4a5f78;
+  --tp-border-strong: #5c738f;
+  --tp-border-interactive: color-mix(in srgb, var(--tp-color-primary-600) 38%, var(--tp-border-strong));
+
+  --tp-muted: #1a2332;
+  --tp-muted-foreground: #a8b4c4;
+  --tp-foreground: var(--tp-color-text-900);
+  --tp-background: var(--tp-bg-page);
+  --tp-border: var(--tp-border-default);
 
   --tp-color-primary-600: #6366f1;
   --tp-color-primary-700: #4f46e5;
   --tp-color-ai-600: #14b8a6;
+  --tp-color-danger-600: #f87171;
+  --tp-color-danger-500: #f87171;
+  --tp-color-danger-700: #fca5a5;
+  --tp-color-warning-600: #f59e0b;
+  --tp-color-warning-500: #f59e0b;
+  --tp-color-success-600: #4ade80;
+  --tp-color-info-600: #38bdf8;
 
-  --tp-shadow-sm: 0 1px 2px color-mix(in srgb, var(--tp-color-text-900) 24%, transparent);
-  --tp-shadow-md: none;
-  --tp-shadow-lg: none;
+  --tp-shadow-switch-knob: 0 1px 3px color-mix(in srgb, black 45%, transparent);
+  --tp-shadow-sm: 0 1px 2px color-mix(in srgb, black 35%, transparent);
+  --tp-shadow-md: 0 10px 28px color-mix(in srgb, black 42%, transparent);
+  --tp-shadow-lg: 0 18px 40px color-mix(in srgb, black 50%, transparent);
+  --tp-overlay-scrim: color-mix(in srgb, black 62%, transparent);
+  --tp-shadow-notice: 0 12px 28px color-mix(in srgb, black 48%, transparent);
+  --tp-rich-code-bg: color-mix(in srgb, var(--tp-bg-elevated) 94%, var(--tp-bg-page));
+  --tp-rich-code-head-bg: color-mix(in srgb, var(--tp-bg-subtle) 80%, var(--tp-bg-elevated));
+
+  --tp-notice-danger-bg: color-mix(in srgb, var(--tp-color-danger-600) 24%, var(--tp-bg-page));
+  --tp-notice-danger-fg: #fecaca;
+  --tp-notice-danger-fg-emphasis: #fca5a5;
+  --tp-notice-warning-bg: color-mix(in srgb, var(--tp-color-warning-600) 22%, var(--tp-bg-page));
+  --tp-notice-warning-fg: #fde68a;
+  --tp-notice-warning-fg-emphasis: #fcd34d;
+  --tp-notice-success-bg: color-mix(in srgb, var(--tp-color-success-600) 20%, var(--tp-bg-page));
+  --tp-notice-success-fg: #d1fae5;
+  --tp-notice-success-fg-emphasis: #86efac;
+  --tp-notice-info-bg: color-mix(in srgb, var(--tp-color-info-600) 22%, var(--tp-bg-page));
+  --tp-notice-info-fg: #bae6fd;
+  --tp-notice-info-fg-emphasis: #7dd3fc;
+  --tp-notice-success-accent: #41c784;
+  --tp-notice-info-accent: var(--tp-color-info-600);
 }
 
 @media (max-height: 900px) {
   :root {
-    --tp-topbar-min-height: 64px;
+    --tp-topbar-min-height: 48px;
     --tp-content-padding: 16px;
-    --tp-page-shell-min-height: calc(100vh - 120px);
+    --tp-page-shell-min-height: calc(100vh - 96px);
     --tp-chat-message-min-height: 220px;
     --tp-chat-message-max-height: calc(100vh - 430px);
   }
@@ -85,9 +186,9 @@
 
 @media (min-height: 901px) and (max-height: 1200px) {
   :root {
-    --tp-topbar-min-height: 72px;
+    --tp-topbar-min-height: 52px;
     --tp-content-padding: 24px;
-    --tp-page-shell-min-height: calc(100vh - 140px);
+    --tp-page-shell-min-height: calc(100vh - 112px);
     --tp-chat-message-min-height: 260px;
     --tp-chat-message-max-height: calc(100vh - 560px);
   }
@@ -95,9 +196,9 @@
 
 @media (min-height: 1201px) {
   :root {
-    --tp-topbar-min-height: 76px;
+    --tp-topbar-min-height: 56px;
     --tp-content-padding: 28px;
-    --tp-page-shell-min-height: calc(100vh - 160px);
+    --tp-page-shell-min-height: calc(100vh - 124px);
     --tp-chat-message-min-height: 320px;
     --tp-chat-message-max-height: calc(100vh - 600px);
   }

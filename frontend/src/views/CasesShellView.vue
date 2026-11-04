@@ -1,55 +1,32 @@
 <template>
-  <section class="tp-container-fluid tp-py-3 tp-page tp-page-shell">
-    <ActionBar :title="t('cases.page.title')" :subtitle="t('cases.page.subtitle')" />
-    <div class="tp-doc-tabs">
-      <RouterLink class="tp-doc-tab" to="/cases/generate" active-class="is-active">
-        {{ t('cases.tabs.generate') }}
-      </RouterLink>
-      <RouterLink class="tp-doc-tab" to="/cases/manage" active-class="is-active">
-        {{ t('cases.tabs.manage') }}
-      </RouterLink>
-    </div>
+  <section :class="pageFluidShellSectionClass()">
+    <PageTabs class="mb-4" :tabs="tabs" :aria-label="t('cases.page.title')" />
     <router-view />
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import ActionBar from '@/components/common/ActionBar.vue';
+import PageTabs, { type PageTabItem } from '@/components/common/PageTabs.vue';
+import { pageFluidShellSectionClass } from '@/lib/page-layout-ui';
 
 const { t } = useI18n();
+
+const tabs = computed((): PageTabItem[] => [
+  {
+    to: '/cases/generate',
+    label: t('cases.single.title'),
+    match: (route) => route.path === '/cases/generate' && route.query.kind !== 'batch'
+  },
+  {
+    to: { path: '/cases/generate', query: { kind: 'batch' } },
+    label: t('cases.batch.title'),
+    match: (route) => route.path === '/cases/generate' && route.query.kind === 'batch'
+  },
+  {
+    to: '/cases/manage',
+    label: t('cases.tabs.manage')
+  }
+]);
 </script>
-
-<style scoped>
-.tp-doc-tabs {
-  display: inline-flex;
-  gap: 8px;
-  padding: 4px;
-  margin-bottom: 12px;
-  border-radius: var(--tp-radius-md);
-  background: var(--tp-bg-surface);
-  border: 1px solid var(--tp-border-default);
-}
-
-.tp-doc-tab {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 12px;
-  border-radius: var(--tp-radius-sm);
-  color: var(--tp-color-text-600);
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.tp-doc-tab:hover {
-  color: var(--tp-color-primary-700);
-  background: color-mix(in srgb, var(--tp-color-primary-600) 10%, transparent);
-}
-
-.tp-doc-tab.is-active {
-  color: var(--tp-color-primary-700);
-  background: color-mix(in srgb, var(--tp-color-primary-600) 16%, transparent);
-}
-</style>

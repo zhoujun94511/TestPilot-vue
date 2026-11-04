@@ -1,42 +1,44 @@
 <template>
-  <section class="tp-card" :class="cardClass">
-    <header v-if="$slots.header || title || subtitle" class="tp-card__header">
+  <Card
+    :class="
+      cn(
+        surfacePanelClass,
+        props.class
+      )
+    "
+  >
+    <CardHeader v-if="$slots.header || title || subtitle">
       <slot name="header">
         <div v-if="title || subtitle">
-          <div class="tp-card__title">{{ title }}</div>
-          <div v-if="subtitle" class="tp-card__subtitle">{{ subtitle }}</div>
+          <div :class="sectionTitleClass">{{ title }}</div>
+          <div v-if="subtitle" :class="cardSubtitleClass">{{ subtitle }}</div>
         </div>
       </slot>
-    </header>
+    </CardHeader>
 
-    <div class="tp-card__body">
+    <CardContent :class="{ '!pt-0': !padded && !$slots.header && !title && !subtitle }">
       <slot />
-    </div>
+    </CardContent>
 
-    <footer v-if="$slots.footer" class="tp-card__footer">
+    <CardFooter v-if="$slots.footer">
       <slot name="footer" />
-    </footer>
-  </section>
+    </CardFooter>
+  </Card>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import type { HTMLAttributes } from 'vue';
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
+import { cardSubtitleClass, sectionTitleClass } from '@/lib/page-typography';
+import { surfacePanelClass } from '@/lib/surface-ui';
+import { cn } from '@/lib/utils';
 
 const props = withDefaults(defineProps<{
   title?: string;
   subtitle?: string;
   padded?: boolean;
+  class?: HTMLAttributes['class'];
 }>(), {
   padded: true
 });
-
-const cardClass = computed(() => ({
-  'tp-card--flat': !props.padded
-}));
 </script>
-
-<style scoped>
-.tp-card--flat .tp-card__body {
-  padding-top: 0;
-}
-</style>

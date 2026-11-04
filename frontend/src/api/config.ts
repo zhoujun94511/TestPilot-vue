@@ -5,7 +5,46 @@ import {
   pickCompatField
 } from './core';
 
-export type ConfigFieldKind = 'string' | 'number' | 'boolean' | 'select' | 'password' | 'textarea';
+export type ConfigFieldKind =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'password'
+  | 'textarea'
+  | 'dedup_weights';
+
+/** 内容去重权重 JSON 的固定字段（与后端 CONTENT_DEDUP_WEIGHTS 一致） */
+export const CONTENT_DEDUP_WEIGHT_KEYS = ['title', 'steps', 'expected', 'preconditions'] as const;
+
+export type ContentDedupWeightKey = (typeof CONTENT_DEDUP_WEIGHT_KEYS)[number];
+
+export const DEFAULT_CONTENT_DEDUP_WEIGHTS: Record<ContentDedupWeightKey, number> = {
+  title: 0.4,
+  steps: 0.3,
+  expected: 0.2,
+  preconditions: 0.1
+};
+
+export function parseContentDedupWeights(value: unknown): Record<ContentDedupWeightKey, number> {
+  const base = { ...DEFAULT_CONTENT_DEDUP_WEIGHTS };
+  if (value == null || value === '') return base;
+  try {
+    const raw = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!raw || typeof raw !== 'object') return base;
+    for (const key of CONTENT_DEDUP_WEIGHT_KEYS) {
+      const n = Number((raw as Record<string, unknown>)[key]);
+      if (!Number.isNaN(n)) base[key] = n;
+    }
+  } catch {
+    // keep defaults
+  }
+  return base;
+}
+
+export function serializeContentDedupWeights(weights: Record<ContentDedupWeightKey, number>): string {
+  return JSON.stringify(weights);
+}
 
 export interface ConfigCategory {
   id: string;
@@ -156,7 +195,7 @@ function extractList<T>(payload: unknown, candidateKeys: string[]): T[] {
   return [];
 }
 
-function extractObject<T extends Record<string, unknown>>(payload: unknown): T {
+function extractObject<T extends object>(payload: unknown): T {
   if (isRecord(payload)) return payload as T;
   return {} as T;
 }
@@ -197,16 +236,29 @@ function normalizeOptions(raw: Record<string, unknown>): ConfigOption[] | undefi
   return undefined;
 }
 
+/** max_tokens / 会话熔断等：键名含 TOKEN 但是整数配置，不能按 API 密钥渲染 */
+function isNumericTokenLimitKey(key: string): boolean {
+  const normalized = key.toUpperCase();
+  if (normalized === 'MAX_TOKENS' || normalized === 'TR_MAX_TOKENS') return true;
+  if (normalized === 'TOKEN_MAX_PER_SESSION' || normalized === 'TOKEN_MAX_CALLS_PER_SESSION') {
+    return true;
+  }
+  return /^TR_[A-Z0-9]+_MAX_TOKENS$/.test(normalized);
+}
+
+function isSecretConfigField(key: string, description: string): boolean {
+  const upperKey = key.toUpperCase();
+  if (/(?:^|_)API_KEY$|SECRET|PASSWORD|PRIVATE_KEY/.test(upperKey)) return true;
+  if (/\bapi\s*key\b|api密钥|密钥|secret|password/i.test(description)) return true;
+  return false;
+}
+
 function inferInputKind(raw: Record<string, unknown>): ConfigFieldKind {
   const key = String(raw.key || '');
   const description = String(raw.description || '').toLowerCase();
   const valueType = String(raw.value_type || raw.type || raw.field_type || raw.input_type || '').toLowerCase();
   const options = normalizeOptions(raw);
   const hasOptions = Boolean(options && options.length > 0);
-
-  if (raw.is_sensitive === true || /api[_-]?key|secret|password|token/i.test(key) || /api key|secret|password|token/i.test(description)) {
-    return 'password';
-  }
 
   if (hasOptions || ['select', 'enum', 'choice'].includes(valueType)) {
     return 'select';
@@ -216,12 +268,20 @@ function inferInputKind(raw: Record<string, unknown>): ConfigFieldKind {
     return 'boolean';
   }
 
-  if (['int', 'integer', 'float', 'number', 'decimal'].includes(valueType)) {
+  if (isNumericTokenLimitKey(key) || ['int', 'integer', 'float', 'number', 'decimal'].includes(valueType)) {
     return 'number';
+  }
+
+  if (raw.is_sensitive === true || isSecretConfigField(key, description)) {
+    return 'password';
   }
 
   if (['textarea', 'text-area', 'longtext'].includes(valueType)) {
     return 'textarea';
+  }
+
+  if (key === 'CONTENT_DEDUP_WEIGHTS') {
+    return 'dedup_weights';
   }
 
   if (['json'].includes(valueType)) {

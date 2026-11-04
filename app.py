@@ -1,6 +1,8 @@
 ﻿#!/usr/bin/python
 # -*- coding: utf-8 -*-
 import os
+import atexit
+import signal
 import subprocess
 import sys
 import time
@@ -9,9 +11,9 @@ import warnings
 import threading
 import webbrowser
 from pathlib import Path
+from typing import Optional
 from flask_session import Session
 from config.settings import settings
-from utils.utils_ai_models.get_llm import get_llm
 from utils.utils_core.logger import get_logger
 from models.models import db, init_database
 from utils.utils_ai_models.embeddings import create_vector_db
@@ -22,9 +24,11 @@ from flask import Flask, jsonify, send_from_directory, Response, make_response, 
 FRONTEND_ROOT = Path(__file__).resolve().parent / 'frontend'
 FRONTEND_PUBLIC = FRONTEND_ROOT / 'public'
 FRONTEND_DIST = FRONTEND_ROOT / 'dist'
+# Vite dev server；开发态 UI 应访问此端口才有热更新
+FRONTEND_DEV_PORT = 5173
 
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent.parent
+# 添加项目根目录到 Python 路径（与 run.py 一致：仓库根即 TestPilot-vue）
+project_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(project_root))
 
 # 禁用各种遥测和警告
@@ -81,7 +85,11 @@ def render_vue_index(base_path: str = '/') -> Response:
 
     html = index_file.read_text(encoding='utf-8')
     html = html.replace('__TESTPILOT_BASE_PATH__', base_path)
-    return Response(html, mimetype='text/html')
+    response = Response(html, mimetype='text/html')
+    # 避免浏览器长期缓存 SPA 入口，导致仍加载旧 hash 的 JS/CSS
+    response.headers['Cache-Control'] = 'no-store, max-age=0, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 def serve_vue_asset(filename: str):
@@ -116,6 +124,11 @@ def create_app():
     # 加载配置
     flask_app.config.from_object(settings)
     settings.init_app(flask_app)
+
+    if not flask_app.debug and flask_app.config.get('SECRET_KEY') == 'testpilot-secret-key-2024':
+        logger.warning(
+            '当前使用默认 SECRET_KEY，存在会话安全风险；生产部署请设置环境变量 SECRET_KEY'
+        )
 
     # 初始化扩展
     db.init_app(flask_app)
@@ -184,6 +197,16 @@ def create_app():
     def model_status():
         """获取模型状态信息（实时返回当前配置的AI提供商状态）"""
         try:
+            from services.auth_service import auth_required, current_user
+
+            if auth_required() and current_user() is None:
+                return jsonify({
+                    'success': False,
+                    'code': 'UNAUTHORIZED',
+                    'message_key': 'common.errors.http401',
+                    'message': '未登录或会话已过期',
+                }), 401
+
             # 实时从settings读取当前的AI提供商
             current_company = settings.DEFAULT_COMPANY
             status_data = flask_app.config.get('MODEL_STATUS')
@@ -236,6 +259,8 @@ def create_app():
 
     # 注册蓝图
     register_blueprints(flask_app)
+    from services.auth_gate import install_auth_gate
+    install_auth_gate(flask_app)
 
     # 注册错误处理器（先注册特定错误，后注册通用异常处理）
     register_error_handlers(flask_app)
@@ -323,8 +348,10 @@ def register_blueprints(flask_app: Flask) -> None:
     from blueprints.stats import stats_bp
     from blueprints.chat import chat_bp
     from blueprints.config_center import config_center_bp
+    from blueprints.auth import auth_bp
 
     # 注册API蓝图
+    flask_app.register_blueprint(auth_bp, url_prefix='/api/auth')
     flask_app.register_blueprint(cases_bp, url_prefix='/api/cases')
     flask_app.register_blueprint(documents_bp, url_prefix='/api/documents')
     flask_app.register_blueprint(knowledge_bp, url_prefix='/api/knowledge')
@@ -367,6 +394,12 @@ def register_error_handlers(flask_app: Flask) -> None:
 def init_app_context(flask_app: Flask) -> None:
     """初始化应用上下文"""
     try:
+        try:
+            flask_app.logger = get_logger('testpilot')
+            get_logger(__name__).debug('应用日志已就绪')
+        except Exception as log_error:
+            get_logger(__name__).warning('应用日志初始化跳过: %s', log_error)
+
         # 从配置中心加载配置（优先级：配置中心 > .env）
         try:
             settings.load_from_config_center()
@@ -405,6 +438,8 @@ def init_app_context(flask_app: Flask) -> None:
             # 初始化LLM
             try:
                 # 为不同场景初始化LLM实例
+                from utils.utils_ai_models.get_llm import get_llm
+
                 flask_app.llm = get_llm(settings.DEFAULT_COMPANY, use_case='chat')  # AI聊天
                 flask_app.llm_case_generation = get_llm(settings.DEFAULT_COMPANY, use_case='case_generation')  # 用例生成
                 flask_app.llm_requirement_analysis = get_llm(settings.DEFAULT_COMPANY,
@@ -431,17 +466,22 @@ def init_app_context(flask_app: Flask) -> None:
             try:
                 flask_app.vector_db = create_vector_db()
                 get_logger(__name__).info("向量数据库初始化成功！")
+                try:
+                    from services.knowledge_vector_scope import backfill_all_knowledge_vector_metadata
+
+                    backfill_all_knowledge_vector_metadata(flask_app.vector_db)
+                except Exception as meta_error:
+                    get_logger(__name__).warning('知识库向量 metadata 回填跳过: %s', meta_error)
             except Exception as e:
                 get_logger(__name__).error(f"向量数据库初始化失败: {e}")
                 flask_app.vector_db = None
 
-        # 初始化日志
         try:
-            flask_app.logger = get_logger('testpilot')
-            get_logger(__name__).info("日志系统初始化成功！")
-        except Exception as e:
-            get_logger(__name__).error(f"日志系统初始化失败: {e}")
-            flask_app.logger = None
+            from services.app_background_jobs import start_background_jobs
+
+            start_background_jobs(flask_app)
+        except Exception as job_error:
+            get_logger(__name__).warning('后台任务启动跳过: %s', job_error)
 
         get_logger(__name__).info("应用上下文初始化完成！")
     except Exception as e:
@@ -459,38 +499,101 @@ def open_browser(ip: str, web_port: int) -> None:
     webbrowser.open(f'http://{ip}:{web_port}')
 
 
-def sync_frontend_env(host: str, port: int):
+def sync_frontend_env(host: str, port: int, *, proxy_host: Optional[str] = None):
+    """写入 Vite 开发代理目标。同机开发时应用 127.0.0.1，避免 LAN IP 变更导致 /api 全 502。"""
     logger = get_logger(__name__)
     try:
         env_file = FRONTEND_ROOT / '.env.development.local'
-        flask_target = f"http://{host}:{port}"
+        target_host = (proxy_host or host or '127.0.0.1').strip()
+        if target_host == '0.0.0.0':
+            target_host = '127.0.0.1'
+        flask_target = f"http://{target_host}:{port}"
         env_file.write_text(
             f"VITE_FLASK_TARGET={flask_target}\n",
             encoding='utf-8'
         )
-        logger.info(f"[SYNC] 前端代理地址已更新: {flask_target}")
+        logger.info(f"[SYNC] 前端代理地址已更新: {flask_target} (Flask bind 参考: {host}:{port})")
     except Exception as e:
         logger.error(f"[SYNC ERROR] 写入前端 env 失败: {e}", exc_info=True)
 
 
+_FRONTEND_PROC: Optional[subprocess.Popen] = None
+
+
+def stop_frontend() -> None:
+    """停止 run.py 拉起的前端 dev 进程（Windows 下清理 npm/node 子树）。"""
+    global _FRONTEND_PROC
+    logger = get_logger(__name__)
+    proc = _FRONTEND_PROC
+    _FRONTEND_PROC = None
+    os.environ.pop('FRONTEND_STARTED', None)
+    if proc is None:
+        return
+    if proc.poll() is not None:
+        return
+    try:
+        if sys.platform == 'win32':
+            subprocess.run(
+                ['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        else:
+            proc.terminate()
+            try:
+                proc.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        logger.info("前端 dev 进程已停止")
+    except Exception as e:
+        logger.warning(f"停止前端 dev 进程时出错: {e}")
+
+
 def start_frontend():
+    global _FRONTEND_PROC
     logger = get_logger(__name__)
     try:
-        # 避免重复启动
-        if os.getenv("FRONTEND_STARTED") == "1":
-            logger.info("前端已存在，跳过启动")
+        if _FRONTEND_PROC is not None and _FRONTEND_PROC.poll() is None:
+            logger.info("前端 dev 已在运行 (pid=%s)，跳过重复启动", _FRONTEND_PROC.pid)
             return
 
         os.environ["FRONTEND_STARTED"] = "1"
 
-        subprocess.Popen(
-            ["npm", "run", "dev"],
+        npm_cmd = 'npm.cmd' if sys.platform == 'win32' else 'npm'
+        # 勿继承 Flask 的 DEBUG=true：Tailwind PostCSS 会据此打开 JIT 控制台计时日志
+        frontend_env = os.environ.copy()
+        frontend_env.pop("DEBUG", None)
+        # 勿用 shell=True：否则会多一层 cmd.exe，Ctrl+C 退出时出现 GBK「终止批处理(Y/N)?」并在 UTF-8 终端乱码
+        _FRONTEND_PROC = subprocess.Popen(
+            [npm_cmd, 'run', 'dev'],
             cwd=str(FRONTEND_ROOT),
-            shell=True
+            shell=False,
+            env=frontend_env,
         )
-        logger.info("前端已启动")
+        logger.info(
+            "前端 Vite 已启动 (pid=%s)，开发 UI: http://127.0.0.1:%s （热更新）",
+            _FRONTEND_PROC.pid,
+            FRONTEND_DEV_PORT,
+        )
     except Exception as e:
         logger.error(f"启动前端失败: {e}", exc_info=True)
+
+
+def register_shutdown_handlers() -> None:
+    """Ctrl+C / 终止时先停前端子进程，避免 Windows cmd 批处理确认乱码。"""
+    logger = get_logger(__name__)
+
+    def _shutdown(signum=None, _frame=None):
+        label = 'SIGINT' if signum == signal.SIGINT else ('SIGTERM' if signum == signal.SIGTERM else 'exit')
+        logger.info("正在退出 TestPilot (%s)...", label)
+        stop_frontend()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, _shutdown)
+    atexit.register(stop_frontend)
 
 
 # 创建应用实例（用于直接运行 app.py）

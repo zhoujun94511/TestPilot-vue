@@ -1,224 +1,426 @@
 <template>
-  <div class="tp-shell">
-    <aside class="tp-sidebar">
-      <div class="tp-brand">
-        <div class="tp-brand-mark">
-          <img class="tp-brand-mark__icon" :src="robotLogo" alt="TestPilot" />
+  <AppTooltipProvider>
+  <div :class="shellRootClass({ collapsed: sidebarCollapsedVisual })">
+    <div
+      v-if="mobileNavOpen"
+      :class="shellSidebarBackdropClass"
+      aria-hidden="true"
+      @click="closeMobileNav"
+    />
+
+    <aside :class="shellSidebarClass(mobileNavOpen)" :aria-label="t('common.shell.mainNav')">
+      <div :class="shellBrandHeaderClass(sidebarCollapsedVisual)">
+        <div :class="shellBrandBlockClass(sidebarCollapsedVisual)">
+          <div :class="shellBrandMarkClass">
+            <BrandMark size="lg" decorative />
+          </div>
+          <div v-show="!sidebarCollapsedVisual" :class="shellBrandTextClass">
+            <div :class="brandNameClass">{{ t('common.app.brand') }}</div>
+            <div :class="brandSubtitleClass" :title="t('common.app.subtitle')">
+              {{ t('common.app.subtitle') }}
+            </div>
+          </div>
         </div>
-        <div>
-          <div class="tp-brand-name">TestPilot</div>
-          <div class="tp-brand-subtitle">{{ t('common.app.subtitle') }}</div>
-        </div>
+        <button
+          type="button"
+          :class="shellCollapseBtnClass()"
+          :title="collapseSidebarTitle"
+          :aria-label="collapseSidebarTitle"
+          @click="toggleSidebarCollapsed"
+        >
+          <PanelLeftClose v-if="!sidebarCollapsedVisual" :size="18" :stroke-width="2" />
+          <PanelLeft v-else :size="18" :stroke-width="2" />
+        </button>
       </div>
 
-      <nav>
-        <section v-for="group in navGroups" :key="group.title" class="tp-nav-group">
-          <div class="tp-nav-group-title">{{ group.title }}</div>
-          <div class="tp-nav-list">
-            <RouterLink
-              v-for="item in group.items"
-              :key="item.to"
-              :to="item.to"
-              class="tp-nav-item"
-            >
-              <span class="tp-nav-item-icon" aria-hidden="true">{{ item.icon }}</span>
-              <span class="tp-nav-item-label">{{ item.label }}</span>
-            </RouterLink>
-          </div>
-        </section>
-      </nav>
+      <div :class="shellSidebarBodyClass">
+        <nav :class="shellMainNavClass">
+          <section
+            v-for="group in navGroups"
+            :key="group.titleKey"
+            :class="shellNavGroupClass"
+          >
+            <div v-show="!sidebarCollapsedVisual" :class="shellNavGroupTitleClass">
+              {{ t(group.titleKey) }}
+            </div>
+            <div :class="shellNavListClass">
+              <RouterLink
+                v-for="item in group.items"
+                :key="item.to"
+                :to="item.to"
+                :class="
+                  navItemClass({
+                    active: isNavItemActive(item),
+                    collapsed: sidebarCollapsedVisual
+                  })
+                "
+                :title="sidebarCollapsedVisual ? t(item.labelKey) : undefined"
+                @click="closeMobileNav"
+              >
+                <span
+                  :class="navItemIconClass({ active: isNavItemActive(item) })"
+                  aria-hidden="true"
+                >
+                  <AppNavIcon :icon="item.icon" />
+                </span>
+                <span v-show="!sidebarCollapsedVisual" :class="navItemLabelClass">
+                  {{ t(item.labelKey) }}
+                </span>
+              </RouterLink>
+            </div>
+          </section>
+        </nav>
 
+        <div :class="shellSidebarDockClass">
+          <DropdownMenu v-if="showAccountActions" :modal="false">
+            <DropdownMenuTrigger as-child>
+              <button
+                type="button"
+                :class="[
+                  navItemClass({ collapsed: sidebarCollapsedVisual }),
+                  shellSidebarAccountTriggerClass
+                ]"
+                :title="sidebarCollapsedVisual ? t('common.shell.account') : undefined"
+                :aria-label="t('common.shell.account')"
+              >
+                <span :class="navItemIconClass()" aria-hidden="true">
+                  <AppNavIcon :icon="CircleUser" />
+                </span>
+                <span v-show="!sidebarCollapsedVisual" :class="navItemLabelClass">
+                  {{ t('common.shell.account') }}
+                </span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent class="max-w-[11rem]" side="top" align="start" :side-offset="8">
+              <DropdownMenuLabel class="line-clamp-2 break-all text-center" :title="signedInLabel">
+                {{ signedInLabel }}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem class="justify-center" @select="changePasswordOpen = true">
+                <KeyRound />
+                {{ t('auth.password.title') }}
+              </DropdownMenuItem>
+              <DropdownMenuItem class="justify-center" @select="handleLogout">
+                <LogOut />
+                {{ t('common.shell.logout') }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ChangePasswordDialog v-if="showAccountActions" v-model="changePasswordOpen" />
+
+          <footer
+            v-show="!sidebarCollapsedVisual"
+            :class="shellSidebarFooterClass"
+            :aria-label="t('common.shell.sidebarFooter')"
+          >
+            <p :class="shellSidebarCopyrightClass">
+              {{ sidebarCopyrightLine }}
+            </p>
+          </footer>
+        </div>
+      </div>
     </aside>
 
-    <div class="tp-workspace">
-      <header class="tp-topbar">
-        <div class="tp-topbar-left">
-          <div class="tp-page-kicker">{{ pageKicker }}</div>
-          <div class="tp-page-context">{{ pageContext }}</div>
+    <div :class="[shellWorkspaceClass, mobileNavOpen ? 'relative z-[29]' : '']">
+      <header ref="topbarEl" :class="shellTopbarClass">
+        <div :class="shellTopbarLeftClass">
+          <button
+            type="button"
+            :class="[topbarIconBtnClass(), 'max-[1199px]:inline-flex min-[1200px]:hidden']"
+            :title="t('common.shell.openMenu')"
+            :aria-label="t('common.shell.openMenu')"
+            @click="openMobileNav"
+          >
+            <Menu :size="20" :stroke-width="2" />
+          </button>
+          <div class="min-w-0">
+            <div v-if="showPageKicker" :class="shellPageKickerClass">{{ t('common.shell.pageKicker') }}</div>
+            <AppBreadcrumb />
+            <div v-if="showPageTitle" :class="pageContextClass">{{ pageTitle }}</div>
+            <div v-if="showTopbarSubtitle" :class="pageSubtitleClass">{{ pageSubtitle }}</div>
+          </div>
         </div>
 
-        <div class="tp-topbar-actions">
+        <div :class="shellTopbarActionsClass">
+          <span class="sr-only" aria-live="polite">
+            {{ appStore.loading ? t('common.shell.system.busy') : t('common.shell.system.ready') }}
+          </span>
+          <LanguageSwitcher />
           <button
-            class="tp-topbar-icon-btn"
             type="button"
-            :title="languageToggleTitle"
-            :aria-label="languageToggleTitle"
-            @click="toggleLanguage"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m5 8 6 6" />
-              <path d="m4 14 6-6 2-3" />
-              <path d="M2 5h12" />
-              <path d="M7 2h1" />
-              <path d="m22 22-5-10-5 10" />
-              <path d="M14 18h6" />
-            </svg>
-            <span class="tp-topbar-lang">{{ languageToggleText }}</span>
-          </button>
-          <button
-            class="tp-topbar-icon-btn"
-            type="button"
-            :title="themeToggleTitle"
-            :aria-label="themeToggleTitle"
+            :class="topbarIconBtnClass()"
+            :title="`${themeToggleTitle} (${themeModeLabel})`"
+            :aria-label="`${themeToggleTitle}. ${appStore.theme === 'dark' ? t('common.shell.theme.dark') : t('common.shell.theme.light')}`"
             @click="toggleTheme"
           >
-            <svg v-if="appStore.theme === 'dark'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2" />
-              <path d="M12 20v2" />
-              <path d="m4.93 4.93 1.41 1.41" />
-              <path d="m17.66 17.66 1.41 1.41" />
-              <path d="M2 12h2" />
-              <path d="M20 12h2" />
-              <path d="m6.34 17.66-1.41 1.41" />
-              <path d="m19.07 4.93-1.41 1.41" />
-            </svg>
-            <svg v-else xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" />
-            </svg>
+            <Sun v-if="appStore.theme === 'dark'" :size="20" :stroke-width="2" />
+            <Moon v-else :size="20" :stroke-width="2" />
           </button>
           <button
-            class="tp-topbar-icon-btn"
+            v-if="mobileNavOpen"
             type="button"
-            :title="t('common.nav.configCenter')"
-            :aria-label="t('common.nav.configCenter')"
-            @click="openConfigCenter"
+            :class="[topbarIconBtnClass(), 'max-[1199px]:inline-flex min-[1200px]:hidden']"
+            :title="t('common.shell.closeMenu')"
+            :aria-label="t('common.shell.closeMenu')"
+            @click="closeMobileNav"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
+            <X :size="20" :stroke-width="2" />
           </button>
         </div>
       </header>
 
-      <main class="tp-content">
-        <router-view />
+      <main :class="shellContentClass">
+        <router-view v-slot="{ Component, route: activeRoute }">
+          <component :is="Component" v-if="Component" :key="shellModuleKey(activeRoute)" />
+        </router-view>
       </main>
     </div>
+
+    <AppToastStack />
   </div>
+  </AppTooltipProvider>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { useRouter } from 'vue-router';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import ChangePasswordDialog from '@/components/auth/ChangePasswordDialog.vue';
 import { useI18n } from 'vue-i18n';
-import { useAppStore } from '@/stores';
-import robotLogo from '@/assets/robot.svg';
+import {
+  CircleUser,
+  KeyRound,
+  LogOut,
+  Menu,
+  Moon,
+  PanelLeft,
+  PanelLeftClose,
+  Sun,
+  X
+} from '@lucide/vue';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
+import { appNavGroups, type AppNavItem } from '@/config/navigation';
+import { refreshAppFeatureFlags } from '@/composables/useFeatureFlags';
+import { useTokenSessionNotice } from '@/composables/useTokenSessionNotice';
+import BrandMark from '@/components/brand/BrandMark.vue';
+import AppNavIcon from '@/components/shell/AppNavIcon.vue';
+import AppBreadcrumb from '@/components/layout/AppBreadcrumb.vue';
+import AppTooltipProvider from '@/components/layout/AppTooltipProvider.vue';
+import AppToastStack from '@/components/layout/AppToastStack.vue';
+import LanguageSwitcher from '@/components/common/LanguageSwitcher.vue';
+import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
+import {
+  brandNameClass,
+  brandSubtitleClass,
+  pageContextClass,
+  pageSubtitleClass,
+  shellPageKickerClass
+} from '@/lib/page-typography';
+import {
+  navItemClass,
+  navItemIconClass,
+  navItemLabelClass,
+  shellBrandBlockClass,
+  shellBrandHeaderClass,
+  shellBrandMarkClass,
+  shellBrandTextClass,
+  shellCollapseBtnClass,
+  shellSidebarAccountTriggerClass,
+  shellSidebarDockClass,
+  shellContentClass,
+  shellMainNavClass,
+  shellSidebarBodyClass,
+  shellSidebarCopyrightClass,
+  shellSidebarFooterClass,
+  shellNavGroupClass,
+  shellNavGroupTitleClass,
+  shellNavListClass,
+  shellRootClass,
+  shellSidebarBackdropClass,
+  shellSidebarClass,
+  shellTopbarActionsClass,
+  shellTopbarClass,
+  shellTopbarLeftClass,
+  shellWorkspaceClass,
+  topbarIconBtnClass
+} from '@/lib/shell-ui';
+import { shellModuleKey } from '@/lib/route-view-props';
+import { useAppStore, useAuthStore } from '@/stores';
+import type { AppNavRole } from '@/config/navigation';
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const appStore = useAppStore();
+const authStore = useAuthStore();
+const breadcrumbs = useBreadcrumbs();
+
+const mobileNavOpen = ref(false);
+const changePasswordOpen = ref(false);
+
+function navItemVisible(roles?: AppNavRole[]) {
+  if (!roles?.length) return true;
+  if (!authStore.authRequired) return false;
+  const role = authStore.user?.role;
+  return Boolean(role && roles.includes(role));
+}
 
 const navGroups = computed(() =>
-  [
-    {
-      title: t('common.shell.groups.overview'),
-      items: [
-        { to: '/', label: t('common.nav.dashboard'), icon: 'DB' }
-      ]
-    },
-    {
-      title: t('common.shell.groups.analysis'),
-      items: [
-        { to: '/documents', label: t('common.nav.documents'), icon: 'DO' },
-        { to: '/knowledge', label: t('common.nav.knowledgeBase'), icon: 'KB' }
-      ]
-    },
-    {
-      title: t('common.shell.groups.generation'),
-      items: [
-        { to: '/cases', label: t('common.nav.cases'), icon: 'CS' }
-      ]
-    },
-    {
-      title: t('common.shell.groups.assistant'),
-      items: [
-        { to: '/chat', label: t('common.nav.chat'), icon: 'AI' }
-      ]
-    },
-    {
-      title: t('common.shell.groups.system'),
-      items: []
-    }
-  ].filter((group) => group.items.length > 0)
+  appNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => navItemVisible(item.roles))
+    }))
+    .filter((group) => group.items.length > 0)
 );
 
-const pageKicker = computed(() => t('common.shell.pageKicker'));
-const pageContext = computed(() => {
+const sidebarCollapsedVisual = computed(
+  () => appStore.sidebarCollapsed && !mobileNavOpen.value
+);
+
+const showAccountActions = computed(
+  () => authStore.authRequired && authStore.isAuthenticated
+);
+
+const signedInLabel = computed(() =>
+  t('common.shell.signedInAs', { name: authStore.user?.username || '' })
+);
+
+const pageTitle = computed(() => {
   const key = String(route.meta.titleKey || 'dashboard.page.title');
   return t(key);
 });
 
-const languageToggleText = computed(() => (appStore.locale === 'zh-CN' ? 'en' : 'zh'));
-const languageToggleTitle = computed(() =>
-  appStore.locale === 'zh-CN' ? t('common.shell.switchToEnglish') : t('common.shell.switchToChinese')
+const pageSubtitle = computed(() => {
+  const key = route.meta.subtitleKey as string | undefined;
+  return key ? t(key) : '';
+});
+
+/**
+ * 顶栏副标题：默认关闭（各页在 Tab / PagePanel / ActionBar / hero 内已有说明）。
+ * 仅当路由显式 `meta.showTopbarSubtitle: true` 时展示。
+ */
+const showTopbarSubtitle = computed(
+  () => route.meta.showTopbarSubtitle === true && Boolean(pageSubtitle.value)
 );
+
+/**
+ * 顶栏大标题：面包屑已表达「模块 / Tab / 当前页」时不再插入 route.meta.title。
+ */
+const showPageTitle = computed(() => {
+  const items = breadcrumbs.value;
+  if (!items.length) return false;
+  const lastLabel = items[items.length - 1]?.label?.trim() || '';
+  if (lastLabel === pageTitle.value.trim()) return false;
+  if (items.length >= 2) return false;
+  return true;
+});
+
+/** 模块内子 Tab 页由面包屑表达层级，隐藏固定 kicker 以减少顶栏重复信息 */
+const showPageKicker = computed(() => breadcrumbs.value.length < 2);
+
+const collapseSidebarTitle = computed(() => {
+  if (mobileNavOpen.value) return t('common.shell.closeMenu');
+  return appStore.sidebarCollapsed
+    ? t('common.shell.expandSidebar')
+    : t('common.shell.collapseSidebar');
+});
+
 const themeToggleTitle = computed(() =>
   appStore.theme === 'dark' ? t('common.shell.switchToLight') : t('common.shell.switchToDark')
 );
+
+const themeModeLabel = computed(() =>
+  appStore.theme === 'dark' ? t('common.shell.theme.darkShort') : t('common.shell.theme.lightShort')
+);
+
+const COPYRIGHT_START_YEAR = 2025;
+
+function formatCopyrightYearRange(startYear: number, endYear: number) {
+  if (endYear <= startYear) return String(startYear);
+  return `${startYear}–${endYear}`;
+}
+
+const sidebarCopyrightLine = computed(() =>
+  t('common.shell.sidebarCopyright', {
+    yearRange: formatCopyrightYearRange(COPYRIGHT_START_YEAR, new Date().getFullYear()),
+    brand: t('common.app.brand')
+  })
+);
+
+function isNavItemActive(item: AppNavItem) {
+  if (item.to === '/') {
+    return route.path === '/' || route.path === '/dashboard';
+  }
+  return route.path === item.to || route.path.startsWith(`${item.to}/`);
+}
+
+const MOBILE_NAV_QUERY = '(max-width: 1199px)';
+
+function toggleSidebarCollapsed() {
+  if (window.matchMedia(MOBILE_NAV_QUERY).matches) {
+    closeMobileNav();
+    return;
+  }
+  appStore.setSidebarCollapsed(!appStore.sidebarCollapsed);
+}
+
+function openMobileNav() {
+  mobileNavOpen.value = true;
+}
+
+function closeMobileNav() {
+  mobileNavOpen.value = false;
+}
 
 function toggleTheme() {
   appStore.setTheme(appStore.theme === 'dark' ? 'light' : 'dark');
 }
 
-function toggleLanguage() {
-  const nextLocale = appStore.locale === 'zh-CN' ? 'en' : 'zh-CN';
-  appStore.setLocale(nextLocale);
-  document.documentElement.lang = nextLocale;
+async function handleLogout() {
+  await authStore.logout();
+  if (authStore.authRequired) {
+    await router.push({ name: 'login' });
+  }
 }
 
-function openConfigCenter() {
-  router.push('/config');
+watch(
+  () => route.fullPath,
+  () => {
+    closeMobileNav();
+  }
+);
+
+useTokenSessionNotice();
+
+const topbarEl = ref<HTMLElement | null>(null);
+let topbarObserver: ResizeObserver | null = null;
+
+function syncDrawerTopOffset() {
+  const topbar = topbarEl.value;
+  if (!topbar) return;
+  const bottom = Math.ceil(topbar.getBoundingClientRect().bottom);
+  document.documentElement.style.setProperty('--tp-preview-top-offset', `${bottom}px`);
 }
+
+onMounted(() => {
+  void refreshAppFeatureFlags();
+  syncDrawerTopOffset();
+  if (typeof ResizeObserver !== 'undefined' && topbarEl.value) {
+    topbarObserver = new ResizeObserver(() => syncDrawerTopOffset());
+    topbarObserver.observe(topbarEl.value);
+  }
+  window.addEventListener('resize', syncDrawerTopOffset);
+});
+
+onUnmounted(() => {
+  topbarObserver?.disconnect();
+  window.removeEventListener('resize', syncDrawerTopOffset);
+});
 </script>
-
-<style scoped>
-.tp-topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--tp-space-2);
-}
-
-.tp-topbar-icon-btn {
-  border: 1px solid transparent;
-  border-radius: var(--tp-radius-sm);
-  background: transparent;
-  color: var(--tp-color-text-600);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 36px;
-  min-height: 36px;
-  padding: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tp-topbar-icon-btn:hover {
-  color: var(--tp-color-primary-600);
-  background: color-mix(in srgb, var(--tp-color-primary-600) 10%, transparent);
-}
-
-.tp-topbar-icon-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--tp-color-primary-600) 40%, white);
-  outline-offset: 2px;
-}
-
-.tp-topbar-lang {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.tp-brand-mark__icon {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-</style>

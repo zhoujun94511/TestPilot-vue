@@ -1,4 +1,4 @@
-import http, { ApiError, del, get, post, put } from './http';
+import http, { ApiError, del, get, notifyUnauthorized, post, put } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -9,7 +9,8 @@ import {
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 export type ChatMessageType = 'chat' | 'test_case' | 'requirement_analysis';
-export type ChatMode = 'chat' | 'action';
+/** 聊天发送仅支持 chat；实验工具走 /experimental-actions/execute。 */
+export type ChatMode = 'chat';
 export type ChatExportFormat = 'json' | 'txt' | 'excel';
 export type ChatStreamEventType = 'start' | 'chunk' | 'end' | 'error';
 
@@ -104,6 +105,7 @@ export interface ChatMessagePayload {
   max_tokens?: number;
   settings?: Record<string, unknown>;
   mode?: ChatMode;
+  /** @deprecated 实验动作已迁出聊天通道，请使用 /experimental-actions/execute */
   require_confirmation?: boolean;
   metadata?: Record<string, unknown>;
 }
@@ -125,9 +127,13 @@ export interface ChatMessageResult {
   timestamp?: string;
   suggestions?: string[];
   mode?: ChatMode;
+  /** @deprecated 仅历史兼容；新链路不使用 chat message 返回动作结果 */
   status?: string;
+  /** @deprecated 见 /experimental-actions/execute */
   execution_id?: string;
+  /** @deprecated 见 /experimental-actions/execute */
   action_plan?: Record<string, unknown> | null;
+  /** @deprecated 见 /experimental-actions/execute */
   tool_results?: Record<string, unknown> | null;
   error?: string;
   raw?: Record<string, unknown>;
@@ -327,6 +333,7 @@ async function fetchSse(url: string, body: ChatMessagePayload, signal?: AbortSig
   });
 
   if (!response.ok || !response.body) {
+    notifyUnauthorized(response.status, url);
     let errorMessage = `HTTP ${response.status}`;
     let errorCode: string | undefined;
     let errorDetails: unknown;
@@ -449,6 +456,8 @@ export async function sendChatMessage(payload: ChatMessagePayload): Promise<Chat
     const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to send chat message'
     });
+    const actionPlanRaw = pickCompatField(normalized, ['action_plan'], null);
+    const toolResultsRaw = pickCompatField(normalized, ['tool_results'], null);
     return {
       success: true,
       session_id: String(pickCompatField(normalized, ['session_id'], payload.session_id || '')),
@@ -461,12 +470,8 @@ export async function sendChatMessage(payload: ChatMessagePayload): Promise<Chat
       mode: pickCompatField(normalized, ['mode'], undefined),
       status: pickCompatField(normalized, ['status'], undefined),
       execution_id: pickCompatField(normalized, ['execution_id'], undefined),
-      action_plan: isRecord(pickCompatField(normalized, ['action_plan'], null))
-        ? pickCompatField(normalized, ['action_plan'], null) as Record<string, unknown>
-        : null,
-      tool_results: isRecord(pickCompatField(normalized, ['tool_results'], null))
-        ? pickCompatField(normalized, ['tool_results'], null) as Record<string, unknown>
-        : null,
+      action_plan: isRecord(actionPlanRaw) ? actionPlanRaw : null,
+      tool_results: isRecord(toolResultsRaw) ? toolResultsRaw : null,
       error: pickCompatField(normalized, ['error'], undefined),
       raw: normalized
     };

@@ -1,4 +1,7 @@
 export default {
+  toolbar: {
+    backendHint: 'If categories fail to load, ensure the backend is running, then use Refresh in the sidebar or panel header.'
+  },
   page: {
     title: 'Config Center',
     subtitle: 'Manage AI models, test-case generation, and runtime settings'
@@ -14,7 +17,7 @@ export default {
     title: 'Configuration Items',
     loading: 'Loading configuration items...',
     empty: 'This category has no configuration items',
-    hint: 'Click save to apply your changes immediately'
+    hint: 'Takes effect after save'
   },
   section: {
     shared: 'Shared settings',
@@ -22,7 +25,12 @@ export default {
     providers: 'Model groups',
     providerHint: '{provider} specific settings',
     sharedScopeHint: 'Shared options are listed below; provider sections appear when keys are scoped to a vendor.',
-    active: 'Active'
+    active: 'Active',
+    tokenBudget: 'Token request limits',
+    tokenBudgetHint: 'Per-request max_tokens: Chat, quick replies, and Ollama use the chat limit; case generation and requirement analysis use each vendor row.',
+    tokenBudgetProviderHint: 'Case generation and requirement analysis',
+    tokenSessionGuard: 'Session token guardrails',
+    tokenSessionGuardHint: 'In-process TokenMonitor caps; breaching them blocks further LLM calls. Changes apply after save under Performance.'
   },
   actions: {
     save: 'Save',
@@ -47,14 +55,21 @@ export default {
     textPlaceholder: 'Please enter',
     numberPlaceholder: 'Please enter a number',
     passwordPlaceholder: 'Please enter secret',
-    textareaPlaceholder: 'Please enter multiline content'
+    textareaPlaceholder: 'Please enter multiline content',
+    dedupWeights: {
+      valueType: 'Weights (0–1)',
+      title: 'Title weight',
+      steps: 'Steps weight',
+      expected: 'Expected result weight',
+      preconditions: 'Preconditions weight'
+    }
   },
   state: {
     loadingCategories: 'Loading categories...',
     loadingItems: 'Loading configuration items...',
     noCategorySelected: 'Please select a category',
-    noChanges: 'No unsaved changes',
-    pendingChanges: '{count} unsaved change(s)',
+    noChanges: '',
+    pendingChanges: '{count} unsaved',
     validationRunning: 'Validating configuration'
   },
   message: {
@@ -77,6 +92,8 @@ export default {
   },
   audit: {
     title: 'Recent config changes',
+    subtitle: 'Read-only trail; entries appear after you save or reset settings',
+    navDescription: 'Review changes from saves and reloads',
     loading: 'Loading change logs...',
     empty: 'No change logs yet',
     change: 'Old: {oldValue} -> New: {newValue}'

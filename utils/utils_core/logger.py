@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from typing import Optional
 from datetime import datetime
 from pathlib import Path
@@ -90,7 +91,19 @@ def get_logger(name: str = None) -> logging.Logger:
     return logging.getLogger(name)
 
 
+def _configure_console_utf8() -> None:
+    """Windows 控制台默认 GBK，与 UTF-8 日志/IDE 终端混用时易乱码。"""
+    if sys.platform != 'win32':
+        return
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def init_logging():
+    _configure_console_utf8()
     # 从环境变量获取日志级别
     log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
     log_level = getattr(logging, log_level_str, logging.INFO)

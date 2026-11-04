@@ -3,11 +3,19 @@
 import os
 from pydantic import SecretStr
 from dotenv import load_dotenv
-from config.settings import resolve_deepseek_model, resolve_gemini_model, resolve_openai_model, settings
+from config.settings import (
+    anthropic_rejects_sampling,
+    resolve_anthropic_model,
+    resolve_deepseek_model,
+    resolve_gemini_model,
+    resolve_openai_model,
+    settings,
+)
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from utils.utils_core.logger import get_logger
 from utils.utils_core.api_error_handler import get_api_key_with_fallback
 from utils.utils_performance_monitoring.token_monitor import get_token_monitor
@@ -28,6 +36,7 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
     - openai → OpenAI 官方 API
     - gemini → 谷歌 官方 API
     - qwen → 阿里云 Qwen（通义千问）
+    - anthropic → Anthropic Claude（Messages API）
 
     Args:
         company: LLM提供商
@@ -36,7 +45,7 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
     """
     # 验证company参数（统一转换为大写）
     company = company.upper() if company else 'OPENAI'
-    valid_companies = ["OLLAMA", "DEEPSEEK", "OPENAI", "GEMINI", "QWEN"]
+    valid_companies = ["OLLAMA", "DEEPSEEK", "OPENAI", "GEMINI", "QWEN", "ANTHROPIC"]
     if company not in valid_companies:
         raise ValueError(f"Invalid company: {company}. Supported: {valid_companies}")
 
@@ -47,21 +56,25 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
             # AI聊天使用通用Token配置
             return getattr(settings, 'MAX_TOKENS', 4000)
         elif scenario in ['case_generation', 'requirement_analysis']:
-            # 用例生成和需求分析使用专用Token配置
-            if provider == 'OPENAI':
-                return getattr(settings, 'TR_OPENAI_MAX_TOKENS', 8000)
-            elif provider == 'DEEPSEEK':
-                return getattr(settings, 'TR_DEEPSEEK_MAX_TOKENS', 8000)
-            elif provider == 'GEMINI':
-                return getattr(settings, 'TR_GEMINI_MAX_TOKENS', 8000)
-            elif provider == 'QWEN':
-                return getattr(settings, 'TR_QWEN_MAX_TOKENS', 8000)
-            elif provider == 'OLLAMA':
-                # Ollama使用通用Token配置
+            if provider == 'OLLAMA':
                 return getattr(settings, 'MAX_TOKENS', 4000)
-            else:
-                # 其他提供商使用通用Token配置
-                return getattr(settings, 'MAX_TOKENS', 4000)
+            unified = getattr(settings, 'TR_MAX_TOKENS', None)
+            if unified not in (None, ''):
+                try:
+                    return int(unified)
+                except (TypeError, ValueError):
+                    pass
+            legacy_map = {
+                'OPENAI': 'TR_OPENAI_MAX_TOKENS',
+                'DEEPSEEK': 'TR_DEEPSEEK_MAX_TOKENS',
+                'GEMINI': 'TR_GEMINI_MAX_TOKENS',
+                'QWEN': 'TR_QWEN_MAX_TOKENS',
+                'ANTHROPIC': 'TR_ANTHROPIC_MAX_TOKENS',
+            }
+            legacy_key = legacy_map.get(provider)
+            if legacy_key:
+                return getattr(settings, legacy_key, 8000)
+            return getattr(settings, 'MAX_TOKENS', 4000)
         else:
             # 默认使用通用Token配置
             return getattr(settings, 'MAX_TOKENS', 4000)
@@ -209,8 +222,34 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
             timeout=timeout
         )
 
+    elif company == "ANTHROPIC":
+        api_key, source, validation_result = get_api_key_with_fallback("anthropic")
+        if api_key is None:
+            raise ValueError(f"Anthropic API Key 配置失败: {validation_result}")
+
+        logger.info(f"Anthropic API Key 来源: {source}")
+        if use_case == 'case_generation':
+            timeout = getattr(settings, 'LLM_TIMEOUT_CASE_GENERATION', 300)
+        elif use_case == 'requirement_analysis':
+            timeout = getattr(settings, 'LLM_TIMEOUT_REQUIREMENT_ANALYSIS', 300)
+        else:
+            timeout = getattr(settings, 'LLM_TIMEOUT_DEFAULT', 120)
+
+        model_name = resolve_anthropic_model(getattr(settings, 'ANTHROPIC_MODEL', None))
+        # 当前 Claude 拒绝 temperature / top_p / top_k。旧型号仍按其他厂商的 0.7。
+        anthropic_kwargs = {
+            'api_key': SecretStr(api_key),
+            'base_url': getattr(settings, 'ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
+            'model': model_name,
+            'max_tokens': max_tokens,
+            'timeout': timeout,
+        }
+        if not anthropic_rejects_sampling(model_name):
+            anthropic_kwargs['temperature'] = 0.7
+        llm = ChatAnthropic(**anthropic_kwargs)
+
     else:
-        raise ValueError(f"Invalid company name: {company}. Supported: OPENAI, OLLAMA, DEEPSEEK, GEMINI, QWEN")
+        raise ValueError(f"Invalid company name: {company}. Supported: OPENAI, OLLAMA, DEEPSEEK, GEMINI, QWEN, ANTHROPIC")
 
     # 只在首次创建时打印日志
     if use_cache:
@@ -225,6 +264,8 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
             model_name = resolve_gemini_model(getattr(settings, 'GEMINI_MODEL', None))
         elif company == "QWEN":
             model_name = getattr(settings, 'QWEN_MODEL', None) or os.getenv('QWEN_MODEL', 'qwen-flash')
+        elif company == "ANTHROPIC":
+            model_name = resolve_anthropic_model(getattr(settings, 'ANTHROPIC_MODEL', None))
         else:
             model_name = settings.MODEL
 

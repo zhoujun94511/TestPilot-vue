@@ -1,4 +1,4 @@
-import { computed, unref, type MaybeRefOrGetter } from 'vue';
+import { computed, toValue, type MaybeRefOrGetter } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 export interface AiResultLike {
@@ -92,5 +92,5 @@ export function resolveAiResultSnapshot(source: AiResultLike | null | undefined,
 export function useAiResult(source: MaybeRefOrGetter<AiResultLike | null | undefined>) {
   const { t } = useI18n();
 
-  return computed(() => resolveAiResultSnapshot(unref(source), t));
+  return computed(() => resolveAiResultSnapshot(toValue(source), t));
 }

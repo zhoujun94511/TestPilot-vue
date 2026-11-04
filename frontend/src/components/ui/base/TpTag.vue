@@ -1,20 +1,22 @@
 <template>
-  <span class="tp-tag" :class="tagClass">
+  <Badge :variant="badgeVariant" :class="props.class">
     <slot>{{ label }}</slot>
-  </span>
+  </Badge>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, type HTMLAttributes } from 'vue';
+import { Badge } from '@/components/ui/badge';
 
 type Variant = 'neutral' | 'primary' | 'ai' | 'success' | 'warning' | 'danger' | 'info';
 
 const props = withDefaults(defineProps<{
   label?: string;
   variant?: Variant;
+  class?: HTMLAttributes['class'];
 }>(), {
   variant: 'neutral'
 });
 
-const tagClass = computed(() => `tp-tag--${props.variant}`);
+const badgeVariant = computed(() => props.variant);
 </script>

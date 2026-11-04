@@ -3,6 +3,10 @@ export default {
     title: 'AI 对话助手',
     subtitle: '先把会话和消息链路做稳，再逐步补充增强能力'
   },
+  toolbar: {
+    noSessionHint: '请先新建或选择会话，再进行刷新、导出或清空。',
+    backendUnavailableHint: '会话列表加载失败时，请确认后端已连接，可使用「新建会话」或侧栏重试。'
+  },
   actions: {
     newSession: '新建会话',
     refresh: '刷新',
@@ -25,6 +29,7 @@ export default {
     emptyMessage: '点击“新建会话”开始新的对话',
     untitled: '未命名会话',
     defaultTitle: 'AI 对话助手',
+    draftTitle: '新会话',
     emptyPreview: '暂无预览',
     currentId: '当前会话',
     noSessionSelected: '尚未选择会话'
@@ -35,8 +40,56 @@ export default {
     hint: '已启用流式返回，回复会实时显示',
     streamToggle: '启用流式返回',
     smartReplyToggle: '启用智能建议',
-    templateToggle: '启用提问模板',
-    experimentalActionsToggle: '启用实验动作'
+    templateToggle: '启用提问模板'
+  },
+  experimentalTools: {
+    openStandaloneHint: '已打开「用例生成」并预填需求，确认参数后生成即可。',
+    toolLabel: '工具',
+    run: '运行工具',
+    running: '执行中…',
+    queryAudit: '[{tool}] 来自实验工具页',
+    validationFailed: '请填写必填项后再运行',
+    runSuccess: '工具执行完成',
+    runSkipped: '未执行工具（请检查参数或权限）',
+    runFailed: '工具执行失败',
+    risk: {
+      low: '低风险',
+      medium: '中风险',
+      high: '高风险',
+      unknown: '风险未标注'
+    },
+    errors: {
+      explicitRequired: '缺少或未通过校验的工具名，请从面板选择工具并填写参数。',
+      unknownTool: '工具「{tool}」未在后端注册，请检查版本或与 experimentalTools 配置是否一致。',
+      featureDisabled: '实验动作未启用，请在后端设置 ENABLE_EXPERIMENTAL_ACTIONS=true。',
+      rateLimited: '实验工具请求过于频繁，请稍后再试。'
+    },
+    fields: {
+      limit: '每组最多列出',
+      requirement_text: '需求描述',
+      requirement_id: '关联需求',
+      case_count: '模型最多补充',
+      use_llm: '让模型补充规则没覆盖的业务步骤'
+    },
+    tools: {
+      rule_skeleton_cases: '规则骨架预览',
+      ac_coverage_review: '验收覆盖与结构评审',
+      trace_matrix: '需求与用例双向追溯'
+    },
+    toolDesc: {
+      rule_skeleton_cases:
+        '搜索、登录、表单场景先由规则写出空值、不存在、特殊字符、超长、重复操作等用例，模型只补规则没覆盖的部分。先预览，确认后才入库。',
+      ac_coverage_review:
+        '按需求拆出验收点，对照已关联该需求的用例，列出覆盖、缺口和步骤结构问题。只读。',
+      trace_matrix: '列出没有用例的需求、指向不存在需求的用例和未关联需求的用例。只读。'
+    },
+    placeholders: {
+      limit: '默认 50，最大 200',
+      requirement_text: '例如：用户可通过搜索框搜索商品，关键词最多 50 个字符…',
+      requirement_id: '不关联需求（可选）',
+      requirement_id_required: '请选择需求',
+      case_count: '默认 5，最大 10'
+    }
   },
   state: {
     loadingSessions: '正在加载会话列表...',
@@ -61,6 +114,8 @@ export default {
     loadSessionsFailed: '加载会话列表失败',
     loadHistoryFailed: '加载历史消息失败',
     sendFailed: '发送消息失败',
+    actionModeNotSupported:
+      '聊天已不再支持 mode=action，请使用侧栏「实验工具」或调用 POST /api/experimental-actions/execute（tool_name + args）。',
     llmNotInitialized: '聊天模型未就绪：请在配置中心检查当前服务商与 API Key 配置后重试。',
     apiKeyInvalid: 'API Key 不可用：请在配置中心或 .env 中检查并更新后重试。',
     providerRateLimited: '模型服务请求过于频繁或配额不足，请稍后重试。',
@@ -85,11 +140,56 @@ export default {
     renameSessionFailed: '重命名会话失败',
     renameSessionEmpty: '会话名称不能为空',
     experimentalToggleSuccess: '实验动作开关已更新',
-    experimentalToggleFailed: '更新实验动作开关失败'
+    experimentalToggleFailed: '更新实验动作开关失败',
+    experimentalActionsConfigDesc: '启用实验动作运行时'
+  },
+  toolMarkdown: {
+    genericActionSuccess: '动作执行成功',
+    genericOperationSuccess: '操作成功',
+    actionConfirmed: '动作已确认执行',
+    actionCancelled: '动作已取消',
+    priority: '优先级',
+    steps: '执行步骤',
+    expectedResult: '预期结果',
+    covers: '对应验收点',
+    listTruncated: '仅展示前 {shown} 条，共 {total} 条',
+    none: '无',
+    scenarios: '识别场景',
+    scenario: {
+      search: '搜索',
+      login: '登录',
+      form: '表单'
+    },
+    ruleCases: '规则写出（{count} 条）',
+    llmCases: '模型补充（{count} 条）',
+    requirement: '需求',
+    linkedCases: '已关联用例',
+    noCriteria: '需求正文没有拆出验收点。',
+    criterion: '验收点',
+    coverageState: '状态',
+    covered: '已覆盖',
+    gap: '缺口',
+    matchedCase: '匹配用例',
+    score: '重合度',
+    structureIssues: '结构待改（{count} 条）',
+    issue: {
+      title_too_short: '标题过短',
+      steps_missing: '缺少步骤',
+      steps_too_few: '只有一步',
+      steps_vague: '步骤含糊',
+      expected_missing: '缺少预期结果'
+    },
+    trace: {
+      requirementsWithoutCases: '没有用例的需求（{count} 条）',
+      casesWithMissingRequirement: '指向不存在需求的用例（{count} 条）',
+      casesUnlinked: '未关联需求的用例（{count} 条）',
+      requirementsWithCases: '已有用例的需求（{count} 条，用例少的在前）',
+      caseCount: '{count} 条用例'
+    }
   },
   roles: {
     user: '你',
-    assistant: 'AI',
+    assistant: 'AI助手',
     system: '系统'
   },
   modelStatus: {
@@ -98,12 +198,21 @@ export default {
     connectionFailed: '连接失败',
     unknownModel: '未知模型'
   },
+  toolMeta: {
+    status: '状态',
+    tool: '工具',
+    total: '总数',
+    hits: '命中数',
+    searchStatus: '检索状态',
+    generated: '生成数量',
+    rag: 'RAG'
+  },
   history: {
     title: '历史消息'
   },
   template: {
     title: '模板',
-    placeholder: '模板与设置将在后续版本中补充',
+    placeholder: '选择模板后可插入到输入框。',
     selectLabel: '提问模板',
     loading: '正在加载模板...',
     empty: '暂无模板内容',
@@ -114,13 +223,6 @@ export default {
       automationAdvice: '自动化建议',
       performanceTest: '性能测试指导'
     }
-  },
-  setting: {
-    title: '设置',
-    placeholder: '预留给后续增强'
-  },
-  export: {
-    title: '导出'
   },
   richContent: {
     copy: '复制',
@@ -134,7 +236,9 @@ export default {
   ,
   quickReply: {
     title: '猜你想问',
-    stats: '建议 {total} / 点击 {clicked} / 点击率 {rate}'
+    stats: '建议 {total} / 点击 {clicked} / 点击率 {rate}',
+    statsHint: '本批 {count} 条',
+    statsGlobal: '累计点击 {clicks} · 记录用户 {users}'
   },
   action: {
     pendingTitle: '待确认动作',

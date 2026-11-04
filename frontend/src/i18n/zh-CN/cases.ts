@@ -7,11 +7,16 @@ export default {
     generate: '用例生成',
     manage: '用例管理'
   },
+  generateMode: {
+    aria: '生成方式'
+  },
+  toolbar: {
+    manageLead: '查看统计与列表；导出与模板下载在「更多」中。',
+    exportMenu: '导出与模板'
+  },
   actions: {
     generate: '生成用例',
-    hideGenerate: '收起生成',
     batchGenerate: '批量生成',
-    hideBatchGenerate: '收起批量生成',
     export: '导出',
     exporting: '导出中',
     exportExcel: 'Excel',
@@ -26,32 +31,35 @@ export default {
     clearInput: '清空'
   },
   single: {
-    title: '单次生成',
-    hint: '输入一段需求描述即可生成测试用例',
-    autoPriorityHint: '优先级由模型自动判断'
+    title: '单次生成'
   },
   batch: {
     title: '批量生成',
-    hint: '按行输入多个需求，每行生成一组测试用例',
-    requirementsLabel: '需求列表',
-    requirementsPlaceholder: '请输入多个需求，每行一个需求',
+    requirementsPlaceholder: '登录校验;订单退款',
+    requirementsHelper: '若存在多条需求，每条需求以 ; 做拆分！',
     processModeLabel: '处理模式',
-    processHint: '当前接口支持顺序或并行处理'
+    processModeHelper: '顺序：逐条；并行：多条同时'
+  },
+  state: {
+    generatingTitle: '正在生成用例',
+    generatingHint: '模型正在分析需求并写入用例，通常需要数十秒到数分钟，请勿关闭页面。',
+    batchGeneratingTitle: '正在批量生成',
+    batchGeneratingHint: '正在按需求逐条或并行生成，耗时与条数、是否启用知识库有关。'
   },
   form: {
     requirementLabel: '需求描述',
-    requirementPlaceholder: '请输入需求描述、业务规则或测试目标',
+    requirementPlaceholder: '如：用户登录需校验账号状态与错误提示',
+    requirementHelper: '写清功能或验收点即可；优先级由模型判断',
     caseCountLabel: '生成数量',
     caseCountOption: '{count} 个',
-    categoryLabel: '用例类别',
-    categoryAll: '全部类别',
-    useRag: '使用知识库增强',
-    useRagDisabled: '当前知识库增强不可用，将使用纯模型生成'
+    ragFollowsConfigOn: '知识库增强已开启，在配置中心修改',
+    ragFollowsConfigOff: '知识库增强已关闭，在配置中心修改',
+    ragUnavailable: '知识库未启用，按纯模型生成'
   },
   filters: {
     title: '搜索与筛选',
     keywordLabel: '关键词',
-    keywordPlaceholder: '输入标题、描述或用例编号',
+    keywordPlaceholder: '搜索',
     priorityLabel: '优先级',
     priorityAll: '全部优先级',
     statusLabel: '状态',
@@ -62,6 +70,7 @@ export default {
     selectedCount: '已选择 {count} 条'
   },
   table: {
+    title: '用例列表',
     empty: '暂无测试用例',
     loading: '正在加载测试用例...',
     noSteps: '暂无步骤',
@@ -80,12 +89,27 @@ export default {
       actions: '操作'
     },
     actions: {
+      edit: '编辑',
       regenerate: '再生成',
       exportOne: '导出',
       deleteOne: '删除'
     }
   },
+  edit: {
+    title: '编辑用例',
+    loading: '正在加载用例详情…',
+    noCase: '未选择用例',
+    descriptionLabel: '描述',
+    preconditionLabel: '前置条件',
+    stepsLabel: '测试步骤',
+    expectedLabel: '预期结果',
+    linesHelper: '每行一条',
+    tagsHelper: '多个标签可用逗号分隔',
+    tagsPlaceholder: '如：首页, 双端',
+    stepsRequired: '请至少填写一条步骤与一条预期结果'
+  },
   stats: {
+    title: '统计信息',
     loading: '正在加载统计信息...',
     empty: '暂无统计信息',
     emptyHint: '当前没有可展示的统计结果',
@@ -129,12 +153,11 @@ export default {
     deleteBatchSuccess: '已删除 {count} 条测试用例',
     deleteBatchPartial: '部分删除成功：成功 {success} 条，失败 {failed} 条',
     deleteBatchFailed: '批量删除测试用例失败',
+    updateSuccess: '用例已保存',
+    updateFailed: '保存用例失败',
     statsFailed: '加载统计信息失败',
     configFailed: '加载用例配置失败',
     requirementRequired: '请输入需求描述后再生成',
     requirementsRequired: '请输入至少一条需求后再批量生成'
-  },
-  pagination: {
-    pageInfo: '第 {page} / {pages} 页，共 {total} 条'
   }
 };

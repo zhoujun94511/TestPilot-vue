@@ -69,15 +69,17 @@ def init_default_configs():
             default_configs = [
                 # AI模型配置
                 {'key': 'DEFAULT_COMPANY', 'value': 'OPENAI', 'value_type': 'string',
-                 'category': 'ai_model', 'description': '默认AI模型提供商（统一使用大写：OPENAI/DEEPSEEK/GEMINI/QWEN/OLLAMA）', 'is_sensitive': False},
+                 'category': 'ai_model', 'description': '默认AI模型提供商（统一使用大写：OPENAI/DEEPSEEK/GEMINI/QWEN/ANTHROPIC/OLLAMA）', 'is_sensitive': False},
                 {'key': 'OPENAI_API_KEY', 'value': '', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'OpenAI API密钥', 'is_sensitive': True},
                 {'key': 'OPENAI_BASE_URL', 'value': 'https://api.openai.com/v1', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'OpenAI服务地址', 'is_sensitive': False},
                 {'key': 'OPENAI_MODEL', 'value': 'gpt-5', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'OpenAI模型名称', 'is_sensitive': False},
+                {'key': 'TR_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
+                 'category': 'ai_model', 'description': '用例生成与需求分析单次最大词元数（各厂商共用）', 'is_sensitive': False},
                 {'key': 'TR_OPENAI_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
-                 'category': 'ai_model', 'description': 'OpenAI用例生成最大Token数', 'is_sensitive': False},
+                 'category': 'ai_model', 'description': 'OpenAI 用例生成单次最大词元数', 'is_sensitive': False},
                 {'key': 'GPT5_VERBOSITY', 'value': 'low', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'GPT-5详细程度', 'is_sensitive': False},
                 {'key': 'GPT5_REASONING_EFFORT', 'value': 'minimal', 'value_type': 'string',
@@ -89,7 +91,7 @@ def init_default_configs():
                 {'key': 'DEEPSEEK_MODEL', 'value': 'deepseek-flash', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'DeepSeek模型名称', 'is_sensitive': False},
                 {'key': 'TR_DEEPSEEK_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
-                 'category': 'ai_model', 'description': 'DeepSeek用例生成最大Token数', 'is_sensitive': False},
+                 'category': 'ai_model', 'description': 'DeepSeek 用例生成单次最大词元数', 'is_sensitive': False},
                 {'key': 'OLLAMA_BASE_URL', 'value': 'http://127.0.0.1:11434', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'Ollama服务地址', 'is_sensitive': False},
                 {'key': 'OLLAMA_MODEL', 'value': 'phi:2.7b', 'value_type': 'string',
@@ -101,7 +103,7 @@ def init_default_configs():
                 {'key': 'GEMINI_MODEL', 'value': 'gemini-3.8-flash', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'Gemini模型名称', 'is_sensitive': False},
                 {'key': 'TR_GEMINI_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
-                 'category': 'ai_model', 'description': 'Gemini用例生成最大Token数', 'is_sensitive': False},
+                 'category': 'ai_model', 'description': 'Gemini 用例生成单次最大词元数', 'is_sensitive': False},
                 {'key': 'QWEN_API_KEY', 'value': '', 'value_type': 'string',
                  'category': 'ai_model', 'description': 'Qwen API密钥', 'is_sensitive': True},
                 {'key': 'QWEN_BASE_URL', 'value': 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'value_type': 'string',
@@ -111,11 +113,21 @@ def init_default_configs():
                 {'key': 'QWEN_TEMPERATURE', 'value': '0.7', 'value_type': 'float',
                  'category': 'ai_model', 'description': 'Qwen温度参数（0.0-2.0）', 'is_sensitive': False},
                 {'key': 'TR_QWEN_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
-                 'category': 'ai_model', 'description': 'Qwen用例生成最大Token数', 'is_sensitive': False},
+                 'category': 'ai_model', 'description': 'Qwen 用例生成单次最大词元数', 'is_sensitive': False},
                 {'key': 'QWEN_TIMEOUT', 'value': '180', 'value_type': 'int',
                  'category': 'ai_model', 'description': 'Qwen请求超时时间（秒），建议180秒（3分钟），用例生成可能需要更长时间', 'is_sensitive': False},
+                {'key': 'ANTHROPIC_API_KEY', 'value': '', 'value_type': 'string',
+                 'category': 'ai_model', 'description': 'Anthropic API密钥', 'is_sensitive': True},
+                {'key': 'ANTHROPIC_BASE_URL', 'value': 'https://api.anthropic.com', 'value_type': 'string',
+                 'category': 'ai_model', 'description': 'Anthropic服务地址', 'is_sensitive': False},
+                {'key': 'ANTHROPIC_MODEL', 'value': 'claude-sonnet-5-5', 'value_type': 'string',
+                 'category': 'ai_model', 'description': 'Anthropic模型名称', 'is_sensitive': False},
+                {'key': 'TR_ANTHROPIC_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
+                 'category': 'ai_model', 'description': 'Anthropic 用例生成单次最大词元数', 'is_sensitive': False},
+                {'key': 'ENABLE_ANTHROPIC', 'value': 'false', 'value_type': 'bool',
+                 'category': 'ai_model', 'description': '是否启用 Claude 服务商', 'is_sensitive': False},
                 {'key': 'MAX_TOKENS', 'value': '4000', 'value_type': 'int',
-                 'category': 'ai_model', 'description': '通用最大Token数', 'is_sensitive': False},
+                 'category': 'ai_model', 'description': '聊天、快捷回复与 Ollama 单次最大词元数', 'is_sensitive': False},
 
                 # 用例生成配置
                 {'key': 'MAX_CASE_NUM', 'value': '50', 'value_type': 'int',
@@ -155,7 +167,13 @@ def init_default_configs():
 
                 # 文件处理配置
                 {'key': 'MAX_MEMORY_MB', 'value': '500', 'value_type': 'int',
-                 'category': 'file_processing', 'description': '最大内存使用量(MB)', 'is_sensitive': False}
+                 'category': 'file_processing', 'description': '最大内存使用量(MB)', 'is_sensitive': False},
+
+                # Token 会话熔断（与 TokenMonitor 对齐，UI 与请求上限同区）
+                {'key': 'TOKEN_MAX_PER_SESSION', 'value': '50000', 'value_type': 'int',
+                 'category': 'ai_model', 'description': '单会话累计词元上限（超过则拒绝继续调用）', 'is_sensitive': False},
+                {'key': 'TOKEN_MAX_CALLS_PER_SESSION', 'value': '100', 'value_type': 'int',
+                 'category': 'ai_model', 'description': '单会话模型最大调用次数', 'is_sensitive': False},
             ]
 
             # 插入默认配置
@@ -182,6 +200,36 @@ def init_default_configs():
                     existing_config.value = retired[1]
                     logger.info(f"{config_data['key']} 已从停用名称更新为 {retired[1]}")
 
+            for migrate_key in ('TOKEN_MAX_PER_SESSION', 'TOKEN_MAX_CALLS_PER_SESSION'):
+                migrated = ConfigItem.query.filter_by(key=migrate_key).first()
+                if migrated and migrated.category != 'ai_model':
+                    migrated.category = 'ai_model'
+                    logger.info('迁移配置分类: %s -> ai_model', migrate_key)
+
+            unified_generation = ConfigItem.query.filter_by(key='TR_MAX_TOKENS').first()
+            if not unified_generation:
+                seed = ConfigItem.query.filter_by(key='TR_OPENAI_MAX_TOKENS').first()
+                seed_value = seed.value if seed and str(seed.value).strip() else '8000'
+                db.session.add(ConfigItem(
+                    key='TR_MAX_TOKENS',
+                    value=seed_value,
+                    value_type='int',
+                    category='ai_model',
+                    description='用例生成与需求分析单次最大词元数（各厂商共用）',
+                    is_sensitive=False,
+                ))
+                logger.info('添加统一词元配置 TR_MAX_TOKENS=%s', seed_value)
+            else:
+                sync_value = str(unified_generation.value or '').strip()
+                if sync_value:
+                    for legacy_key in (
+                        'TR_OPENAI_MAX_TOKENS', 'TR_DEEPSEEK_MAX_TOKENS',
+                        'TR_GEMINI_MAX_TOKENS', 'TR_QWEN_MAX_TOKENS', 'TR_ANTHROPIC_MAX_TOKENS',
+                    ):
+                        legacy = ConfigItem.query.filter_by(key=legacy_key).first()
+                        if legacy and str(legacy.value or '').strip() != sync_value:
+                            legacy.value = sync_value
+
             db.session.commit()
             logger.info("默认配置初始化成功")
             return True
@@ -200,13 +248,16 @@ def init_validation_rules():
                 # Token数量验证
                 {'config_key': 'TR_OPENAI_MAX_TOKENS', 'validation_type': 'enum',
                  'validation_config': {'values': [1000, 2000, 4000, 8000, 10000, 12000]},
-                 'error_message': 'OpenAI Token数必须在允许的范围内', 'is_required': True},
+                 'error_message': 'OpenAI 词元数必须在允许的范围内', 'is_required': True},
                 {'config_key': 'TR_DEEPSEEK_MAX_TOKENS', 'validation_type': 'enum',
                  'validation_config': {'values': [1000, 2000, 3000, 4000, 6000, 8000]},
-                 'error_message': 'DeepSeek Token数必须在允许的范围内', 'is_required': True},
+                 'error_message': 'DeepSeek 词元数必须在允许的范围内', 'is_required': True},
                 {'config_key': 'MAX_TOKENS', 'validation_type': 'enum',
                  'validation_config': {'values': [1000, 2000, 3000, 4000, 6000, 8000]},
-                 'error_message': '通用Token数必须在允许的范围内', 'is_required': True},
+                 'error_message': '聊天词元数必须在允许的范围内', 'is_required': True},
+                {'config_key': 'TR_MAX_TOKENS', 'validation_type': 'enum',
+                 'validation_config': {'values': [1000, 2000, 4000, 8000, 10000, 12000]},
+                 'error_message': '用例与需求分析词元数必须在允许的范围内', 'is_required': True},
                 # 数值范围验证
                 {'config_key': 'MAX_CASE_NUM', 'validation_type': 'range',
                  'validation_config': {'min': 1, 'max': 100},
@@ -229,6 +280,12 @@ def init_validation_rules():
                 {'config_key': 'MAX_MEMORY_MB', 'validation_type': 'range',
                  'validation_config': {'min': 100, 'max': 2000},
                  'error_message': '最大内存使用量必须在100-2000MB之间', 'is_required': True},
+                {'config_key': 'TOKEN_MAX_PER_SESSION', 'validation_type': 'range',
+                 'validation_config': {'min': 1000, 'max': 500000},
+                 'error_message': '单会话词元上限必须在 1000-500000 之间', 'is_required': True},
+                {'config_key': 'TOKEN_MAX_CALLS_PER_SESSION', 'validation_type': 'range',
+                 'validation_config': {'min': 1, 'max': 1000},
+                 'error_message': '单会话调用次数必须在 1-1000 之间', 'is_required': True},
                 # URL格式验证
                 {'config_key': 'OPENAI_BASE_URL', 'validation_type': 'regex',
                  'validation_config': {'pattern': r'^https?://.*'},
@@ -245,18 +302,24 @@ def init_validation_rules():
                 {'config_key': 'QWEN_BASE_URL', 'validation_type': 'regex',
                  'validation_config': {'pattern': r'^https?://.*'},
                  'error_message': 'Qwen服务地址必须是有效的URL', 'is_required': True},
+                {'config_key': 'ANTHROPIC_BASE_URL', 'validation_type': 'regex',
+                 'validation_config': {'pattern': r'^https?://.*'},
+                 'error_message': 'Anthropic服务地址必须是有效的URL', 'is_required': True},
                 # DEFAULT_COMPANY 枚举验证（统一使用大写）
                 {'config_key': 'DEFAULT_COMPANY', 'validation_type': 'enum',
-                 'validation_config': {'values': ['OPENAI', 'DEEPSEEK', 'GEMINI', 'QWEN', 'OLLAMA']},
-                 'error_message': 'DEFAULT_COMPANY 必须是以下值之一：OPENAI, DEEPSEEK, GEMINI, QWEN, OLLAMA（统一使用大写）', 'is_required': True},
+                 'validation_config': {'values': ['OPENAI', 'DEEPSEEK', 'GEMINI', 'QWEN', 'ANTHROPIC', 'OLLAMA']},
+                 'error_message': 'DEFAULT_COMPANY 必须是以下值之一：OPENAI, DEEPSEEK, GEMINI, QWEN, ANTHROPIC, OLLAMA（统一使用大写）', 'is_required': True},
                 # Token数量验证 - Gemini
                 {'config_key': 'TR_GEMINI_MAX_TOKENS', 'validation_type': 'enum',
                  'validation_config': {'values': [1000, 2000, 4000, 8000, 10000, 12000]},
-                 'error_message': 'Gemini Token数必须在允许的范围内', 'is_required': True},
+                 'error_message': 'Gemini 词元数必须在允许的范围内', 'is_required': True},
                 # Token数量验证 - Qwen
                 {'config_key': 'TR_QWEN_MAX_TOKENS', 'validation_type': 'enum',
                  'validation_config': {'values': [1000, 2000, 4000, 8000, 10000, 12000]},
-                 'error_message': 'Qwen Token数必须在允许的范围内', 'is_required': True},
+                 'error_message': 'Qwen 词元数必须在允许的范围内', 'is_required': True},
+                {'config_key': 'TR_ANTHROPIC_MAX_TOKENS', 'validation_type': 'enum',
+                 'validation_config': {'values': [1000, 2000, 4000, 8000, 10000, 12000]},
+                 'error_message': 'Anthropic 词元数必须在允许的范围内', 'is_required': True},
                 # Temperature验证 - Qwen
                 {'config_key': 'QWEN_TEMPERATURE', 'validation_type': 'range',
                  'validation_config': {'min': 0.0, 'max': 2.0},
@@ -292,6 +355,13 @@ def init_validation_rules():
                     validation_rule = ConfigValidationRule(**rule_data)
                     db.session.add(validation_rule)
                     logger.info(f"添加验证规则: {rule_data['config_key']}")
+                    continue
+                if rule_data['config_key'] == 'DEFAULT_COMPANY':
+                    current_values = list((existing_rule.validation_config or {}).get('values') or [])
+                    if 'ANTHROPIC' not in current_values:
+                        existing_rule.validation_config = rule_data['validation_config']
+                        existing_rule.error_message = rule_data['error_message']
+                        logger.info('DEFAULT_COMPANY 枚举已加入 ANTHROPIC')
 
             db.session.commit()
             logger.info("验证规则初始化成功")

@@ -3,7 +3,8 @@ import { watch } from 'vue';
 import App from './App.vue';
 import router, { updateDocumentTitle } from './router';
 import i18n from './i18n';
-import { pinia, useAppStore } from './stores';
+import { onUnauthorized } from './api/http';
+import { pinia, useAppStore, useAuthStore } from './stores';
 import './styles/main.css';
 
 const app = createApp(App);
@@ -13,6 +14,18 @@ app.use(router);
 app.use(i18n);
 
 const appStore = useAppStore(pinia);
+const authStore = useAuthStore(pinia);
+
+onUnauthorized(() => {
+  if (!authStore.authRequired || !authStore.isAuthenticated) return;
+  authStore.clearSession();
+  const current = router.currentRoute.value;
+  if (current.name === 'login') return;
+  void router.replace({
+    name: 'login',
+    query: { redirect: current.fullPath, expired: '1' }
+  });
+});
 
 function applyTheme(theme: 'light' | 'dark') {
   document.documentElement.dataset.theme = theme;

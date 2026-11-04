@@ -40,7 +40,7 @@ class ConfigService:
             
             # 测试类型选项
             test_type_options = self._get_test_type_options()
-            enable_case_generation_rag = self._resolve_case_generation_rag_enabled()
+            enable_case_generation_rag = self.resolve_case_generation_rag_enabled()
             
             return {
                 'case_count_options': case_count_options,
@@ -55,7 +55,7 @@ class ConfigService:
             raise Exception(f"获取用例生成配置失败: {e}")
 
     @staticmethod
-    def _resolve_case_generation_rag_enabled() -> bool:
+    def resolve_case_generation_rag_enabled() -> bool:
         if not getattr(settings, 'ENABLE_VECTOR_STORE', True):
             return False
         value = config_center_service.get_config_value('ENABLE_CASE_GENERATION_RAG', False)

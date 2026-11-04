@@ -1,0 +1,61 @@
+export default {
+  page: {
+    title: 'Sign in',
+    subtitle: 'AI-powered test case generation and management platform'
+  },
+  form: {
+    username: 'Username',
+    password: 'Password',
+    email: 'Email (optional)',
+    usernamePlaceholder: 'Enter username',
+    passwordPlaceholder: 'Enter password',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
+    emailPlaceholder: "name{'@'}example.com",
+    submitLogin: 'Sign in',
+    submitRegister: 'Register',
+    switchToRegister: 'Need an account? Register',
+    switchToLogin: 'Already have an account? Sign in',
+    tabLogin: 'Sign in',
+    tabRegister: 'Register',
+    working: 'Working…',
+    fillAllFields: 'Enter username and password',
+    confirmPassword: 'Confirm password',
+    confirmPasswordPlaceholder: 'Enter password again',
+    usernameRule: "3–64 chars: letters, digits, CJK, and . _ - {'@'}",
+    passwordRule: '8–128 chars with a letter, a digit, and a symbol',
+    passwordRuleSimple: '8–128 chars'
+  },
+  password: {
+    title: 'Change password',
+    subtitle: 'You will be signed out after a successful change',
+    old: 'Current password',
+    new: 'New password (min. 8 characters)',
+    submit: 'Update password'
+  },
+  message: {
+    credentialsRequired: 'Username and password are required',
+    invalidCredentials: 'Invalid username or password',
+    registerDisabled: 'Registration is disabled. Contact an administrator',
+    weakCredentials: "Username 3–64 chars (letters, digits, CJK, . _ - {'@'}); password 8–128 chars with letter, digit, and symbol",
+    weakPassword: 'Password must be 8–128 chars with a letter, a digit, and a symbol',
+    passwordMismatch: 'Passwords do not match',
+    invalidEmail: 'Invalid email address',
+    accountLocked: 'Too many failed attempts. Account temporarily locked.',
+    accountInactive: 'This account is not active yet or has been disabled. Contact an administrator.',
+    duplicateUser: 'Username or email already exists',
+    loginSuccess: 'Signed in successfully',
+    registerOk: 'Registration succeeded. Sign in with your new account.',
+    registerPending: 'Registration succeeded. You can sign in once an administrator activates your account.',
+    loginRateLimited: 'Too many sign-in attempts. Try again in {seconds}s.',
+    registerRateLimited: 'Too many registration attempts. Try again in {seconds}s.',
+    sessionExpired: 'Your session has expired. Please sign in again.',
+    lastSuperAdmin: 'At least one active super admin must remain',
+    cannotDeleteLastSuperAdmin: 'At least one super admin must remain. The last super admin cannot be deleted.',
+    cannotDeactivateSelf: 'You cannot deactivate the account you are signed in with',
+    cannotDeleteSelf: 'You cannot delete the account you are signed in with',
+    invalidRole: 'Invalid role',
+    invalidParams: 'Invalid request parameters',
+    adminRequiresAuth: 'Enable AUTH_REQUIRE_AUTH on the server first'
+  }
+};

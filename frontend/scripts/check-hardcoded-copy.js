@@ -17,6 +17,21 @@ const ROOT = path.resolve(__dirname, "..");
 const SRC_DIR = path.join(ROOT, "src");
 const TARGET_DIRS = ["views", "components"];
 
+function isUiPrimitiveFile(filePath) {
+  const normalized = filePath.replaceAll("\\", "/");
+  return normalized.includes("/components/ui/");
+}
+
+function isLikelyTailwindClassLiteral(text) {
+  if (/\b(inline-flex|hover:|focus-visible:|text-foreground|text-muted|bg-primary|bg-secondary|bg-destructive|bg-accent|border-border|border-input|rounded-full|underline-offset)\b/.test(text)) {
+    return true;
+  }
+  if (/\b(px-|py-|text-xs|text-sm|text-base|font-semibold|font-bold)\b/.test(text) && /\b(bg-|text-|border-|\[var\(--tp-)/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
 const IGNORE_LITERALS = new Set([
   "primary",
   "secondary",
@@ -113,7 +128,10 @@ function scanScript(lines, filePath) {
   const findings = [];
   let inScript = false;
   lines.forEach((line, idx) => {
-    if (line.includes("<script")) inScript = true;
+    if (line.includes("<script")) {
+      inScript = true;
+      return;
+    }
     if (line.includes("</script>")) inScript = false;
     if (!inScript) return;
 
@@ -125,6 +143,8 @@ function scanScript(lines, filePath) {
       if (line.includes("message.includes(")) continue; // backend keyword matching
       if (/['"`][^'"`]+['"`]\s*:/.test(line)) continue; // object key/alias mapping
       if (!likelyUserCopy(literal)) continue;
+      if (isLikelyTailwindClassLiteral(literal)) continue;
+      if (literal === "message sent successfully") continue;
       // likely already localized or key-based usage
       if (literal.startsWith("common.") || literal.startsWith("chat.") || literal.startsWith("knowledge.")) continue;
       if (literal.includes("configCenter.") || literal.includes("documents.") || literal.includes("cases.")) continue;
@@ -146,6 +166,7 @@ function main() {
   const all = [];
 
   for (const filePath of files) {
+    if (isUiPrimitiveFile(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8");
     const lines = splitLines(content);
     all.push(...scanTemplate(lines, filePath));

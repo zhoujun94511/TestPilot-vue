@@ -3,9 +3,16 @@
 import re
 import time
 import tiktoken
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from utils.utils_core.logger import get_logger
 from config.settings import settings
+from utils.utils_performance_monitoring.token_session import (
+    TokenSessionLimitExceeded,
+    session_level,
+    usage_percent,
+    warning_message_key,
+    TOKEN_SESSION_WARN_RATIO,
+)
 
 logger = get_logger(__name__)
 
@@ -19,8 +26,9 @@ class TokenMonitor:
         self.session_start = time.time()
         self.total_tokens = 0
         self.call_count = 0
-        self.max_tokens_per_session = 50000  # 单次会话最大Token限制
-        self.max_calls_per_session = 100  # 单次会话最大调用次数
+        self.max_tokens_per_session = 50000
+        self.max_calls_per_session = 100
+        self.apply_session_limits_from_settings()
 
         # 新增：模型名称和TikToken编码器
         self.model_name = model_name
@@ -31,10 +39,25 @@ class TokenMonitor:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cost = 0.0
+        self.session_notice_signature: Optional[str] = None
 
         # 新增：价格配置（每1K tokens）
         self.input_price = 0.005
         self.output_price = 0.015
+
+    def apply_session_limits_from_settings(self):
+        """从 settings / 配置中心同步会话级熔断阈值。"""
+        try:
+            tokens_limit = int(getattr(settings, 'TOKEN_MAX_PER_SESSION', 50000))
+            calls_limit = int(getattr(settings, 'TOKEN_MAX_CALLS_PER_SESSION', 100))
+        except (TypeError, ValueError):
+            tokens_limit = 50000
+            calls_limit = 100
+        if tokens_limit > 0:
+            self.max_tokens_per_session = tokens_limit
+        if calls_limit > 0:
+            self.max_calls_per_session = calls_limit
+        self.refresh_session_notice()
 
     def _init_encoding(self):
         """初始化TikToken编码器"""
@@ -137,12 +160,18 @@ class TokenMonitor:
             self.total_output_tokens += output_tokens
             self.total_cost += cost
 
+        self.apply_session_limits_from_settings()
+
         # 检查限制（使用实际总计）
         if self.total_tokens > self.max_tokens_per_session:
-            raise Exception(f"Token消耗超过限制: {self.total_tokens:,} > {self.max_tokens_per_session:,}")
+            raise TokenSessionLimitExceeded(
+                "tokens", self.total_tokens, self.max_tokens_per_session
+            )
 
         if self.call_count > self.max_calls_per_session:
-            raise Exception(f"调用次数超过限制: {self.call_count} > {self.max_calls_per_session}")
+            raise TokenSessionLimitExceeded(
+                "calls", self.call_count, self.max_calls_per_session
+            )
 
         # 根据类型显示不同的日志
         if is_actual or actual_tokens or (input_text or output_text):
@@ -159,6 +188,13 @@ class TokenMonitor:
             # 预估Token消耗改为debug级别，不显示在INFO日志中
             logger.debug(f"预估Token消耗: {estimated_tokens:,} tokens (总计: {self.total_tokens:,})")
 
+        return {
+            'input_tokens': int(input_tokens),
+            'output_tokens': int(output_tokens),
+            'total_tokens': int(input_tokens + output_tokens),
+            'counted': bool(is_actual or actual_tokens or input_text or output_text),
+        }
+
     def get_stats(self) -> Dict:
         """获取统计信息 - 增强版本"""
         session_duration = time.time() - self.session_start
@@ -173,6 +209,62 @@ class TokenMonitor:
             "average_cost_per_call": self.total_cost / self.call_count if self.call_count > 0 else 0
         }
 
+    def refresh_session_notice(self) -> None:
+        """根据当前累计用量更新会话预警签名（配置变更或 record_call 后调用）。"""
+        level = session_level(
+            self.total_tokens,
+            self.max_tokens_per_session,
+            self.call_count,
+            self.max_calls_per_session,
+        )
+        if level == "warning":
+            self.session_notice_signature = (
+                f"warning:{self.total_tokens}:{self.call_count}:"
+                f"{self.max_tokens_per_session}:{self.max_calls_per_session}"
+            )
+        else:
+            self.session_notice_signature = None
+
+    def session_status_payload(self) -> Dict[str, Any]:
+        """供 /api/stats/token-session 与前端预警使用。"""
+        level = session_level(
+            self.total_tokens,
+            self.max_tokens_per_session,
+            self.call_count,
+            self.max_calls_per_session,
+        )
+        message_key = warning_message_key(
+            self.total_tokens,
+            self.max_tokens_per_session,
+            self.call_count,
+            self.max_calls_per_session,
+        )
+        return {
+            "level": level,
+            "warn_threshold_percent": int(TOKEN_SESSION_WARN_RATIO * 100),
+            "tokens": {
+                "used": self.total_tokens,
+                "max": self.max_tokens_per_session,
+                "percent": usage_percent(self.total_tokens, self.max_tokens_per_session),
+            },
+            "calls": {
+                "used": self.call_count,
+                "max": self.max_calls_per_session,
+                "percent": usage_percent(self.call_count, self.max_calls_per_session),
+            },
+            "message_key": message_key,
+            "message_params": {
+                "tokenUsed": self.total_tokens,
+                "tokenMax": self.max_tokens_per_session,
+                "tokenPercent": usage_percent(self.total_tokens, self.max_tokens_per_session),
+                "callUsed": self.call_count,
+                "callMax": self.max_calls_per_session,
+                "callPercent": usage_percent(self.call_count, self.max_calls_per_session),
+                "warnPercent": int(TOKEN_SESSION_WARN_RATIO * 100),
+            },
+            "notice_signature": self.session_notice_signature,
+        }
+
     def reset(self):
         """重置监控器"""
         self.session_start = time.time()
@@ -181,40 +273,98 @@ class TokenMonitor:
         self.total_output_tokens = 0
         self.total_cost = 0.0
         self.call_count = 0
+        self.session_notice_signature = None
 
 
 # 全局监控器实例
-_token_monitor = None
+_token_monitor: Optional[TokenMonitor] = None
 
 
-def get_token_monitor(model_name: str = None):
+def get_token_monitor(model_name: str = None) -> TokenMonitor:
     """获取Token监控器 - 支持模型名称参数"""
     if model_name is None:
         model_name = settings.MODEL  # 从配置获取
     global _token_monitor
-    if _token_monitor is None or _token_monitor.model_name != model_name:
-        _token_monitor = TokenMonitor(model_name)
-    return _token_monitor
+    monitor = _token_monitor
+    if monitor is None or monitor.model_name != model_name:
+        monitor = TokenMonitor(model_name)
+        _token_monitor = monitor
+    else:
+        monitor.apply_session_limits_from_settings()
+    return monitor
 
 
-def record_llm_call(estimated_tokens: int = 1000, is_actual: bool = False,
-                    input_text: str = "", output_text: str = "",
-                    actual_tokens: Optional[Dict] = None, model_name: str = None):
-    if model_name is None:
-        model_name = settings.MODEL
+def refresh_token_monitor_session_limits() -> None:
+    """配置中心更新 performance Token 熔断项后调用。"""
+    global _token_monitor
+    monitor = _token_monitor
+    if monitor is None:
+        return
+    monitor.apply_session_limits_from_settings()
+
+
+def get_token_session_status() -> Dict[str, Any]:
+    """当前进程内 TokenMonitor 会话用量（未初始化时返回零值）。"""
+    global _token_monitor
+    monitor = _token_monitor
+    if monitor is None:
+        return {
+            "level": "ok",
+            "warn_threshold_percent": int(TOKEN_SESSION_WARN_RATIO * 100),
+            "tokens": {"used": 0, "max": int(getattr(settings, 'TOKEN_MAX_PER_SESSION', 50000)), "percent": 0.0},
+            "calls": {"used": 0, "max": int(getattr(settings, 'TOKEN_MAX_CALLS_PER_SESSION', 100)), "percent": 0.0},
+            "message_key": None,
+            "message_params": {},
+            "notice_signature": None,
+        }
+    monitor.apply_session_limits_from_settings()
+    return monitor.session_status_payload()
+
+
+def record_llm_call(
+    estimated_tokens: int = 1000,
+    is_actual: bool = False,
+    input_text: str = "",
+    output_text: str = "",
+    actual_tokens: Optional[Dict] = None,
+    model_name: str = None,
+    source: str = "llm",
+):
     """
-    记录LLM调用 - 增强版本，保持向后兼容
+    记录 LLM 调用（会话熔断 + 全站 Token 落库）。
 
     Args:
-        estimated_tokens: 预估token数量（向后兼容）
-        is_actual: 是否为实际token数据（向后兼容）
-        input_text: 输入文本（新增）
-        output_text: 输出文本（新增）
-        actual_tokens: 实际token数据（新增）
-        model_name: 模型名称（新增）
+        estimated_tokens: 预估 token 数（无 input/output/actual 时作回退）
+        is_actual: 是否将 estimated_tokens 视为实际消耗
+        input_text: 输入文本（用于 TikToken 计量）
+        output_text: 输出文本（用于 TikToken 计量）
+        actual_tokens: 提供商返回的 usage（prompt/completion/total）
+        model_name: 模型名，默认 settings.MODEL
+        source: 业务场景 chat / case_generation / document_analysis / agent / llm
     """
+    if model_name is None:
+        model_name = settings.MODEL
     monitor = get_token_monitor(model_name)
-    monitor.record_call(estimated_tokens, is_actual, input_text, output_text, actual_tokens)
+    breakdown = monitor.record_call(
+        estimated_tokens, is_actual, input_text, output_text, actual_tokens
+    )
+    if not breakdown.get("counted"):
+        return
+    total = int(breakdown.get("total_tokens") or 0)
+    if total <= 0:
+        return
+    try:
+        from services.llm_usage_service import log_llm_usage
+
+        log_llm_usage(
+            total,
+            model_name,
+            source,
+            input_tokens=int(breakdown.get("input_tokens") or 0),
+            output_tokens=int(breakdown.get("output_tokens") or 0),
+        )
+    except Exception as error:
+        logger.warning("全站 Token 落库失败: %s", error)
 
 
 def count_tokens(text: str, model_name: str = None) -> int:

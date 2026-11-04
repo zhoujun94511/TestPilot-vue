@@ -227,7 +227,7 @@ class KnowledgeService:
         if not file_path_obj.exists():
             return {
                 'success': False,
-                'message': f'文件不存在: {file_path}',
+                'message': f'文件不存在: {file_path_obj.name}',
                 'error': 'file_not_found'
             }
         
@@ -310,6 +310,8 @@ class KnowledgeService:
         # 处理哈希值：空字符串转换为 None（让数据库处理 NULL）
         hash_value = file_hash if file_hash and file_hash.strip() else None
         
+        from services.auth_service import stamp_ownership
+
         rag_record = RagFileRecord(
             file_name=original_filename,
             file_path=str(file_path_obj.relative_to(upload_folder)),
@@ -321,10 +323,21 @@ class KnowledgeService:
             description=description,
             category=category
         )
+        stamp_ownership(rag_record)
         db.session.add(rag_record)
         
         try:
             db.session.commit()
+            try:
+                from services.knowledge_vector_scope import patch_vector_metadata_for_record
+                from flask import has_app_context, current_app
+
+                vdb = vector_db
+                if vdb is None and has_app_context():
+                    vdb = getattr(current_app, 'vector_db', None)
+                patch_vector_metadata_for_record(rag_record, vdb)
+            except Exception as meta_error:
+                logger.warning('上传后向量 metadata 回填跳过: %s', meta_error)
             logger.info(f"数据库提交成功 - 记录ID: {rag_record.id}, 哈希值: {repr(hash_value)}")
             
             # 如果保存时哈希值为空，尝试补充（文件已保存到磁盘，应该可以计算）
@@ -473,7 +486,9 @@ class KnowledgeService:
                             return cleaned
                         return value
                     
-                    doc_metadata = {
+                    from services.knowledge_vector_scope import stamp_chunk_metadata
+
+                    doc_metadata = stamp_chunk_metadata({
                         'source': clean_metadata_value(str(file_path)),
                         'file_name': clean_metadata_value(Path(file_path).name),
                         'chunk_id': clean_metadata_value(str(chunk.metadata.chunk_id)),
@@ -481,7 +496,7 @@ class KnowledgeService:
                         'quality_score': float(chunk.metadata.quality_score),
                         'semantic_coherence': float(chunk.metadata.semantic_coherence),
                         'keywords': clean_metadata_value(keywords_str)
-                    }
+                    })
                     
                     # 最终验证：确保cleaned_content是有效的字符串
                     if not isinstance(cleaned_content, str):
@@ -875,7 +890,9 @@ class KnowledgeService:
             if top_k is None:
                 top_k = getattr(settings, 'RAG_TOP_K', 5)
             if score_threshold is None:
-                score_threshold = getattr(settings, 'RAG_SCORE_THRESHOLD', 0.7)
+                from services.rag_threshold_utils import get_rag_score_threshold
+
+                score_threshold = get_rag_score_threshold()
                 
             if not query.strip():
                 return {
@@ -895,13 +912,18 @@ class KnowledgeService:
             start_time = self.performance_monitor.start_timer()
 
             # 使用智能检索策略
+            from services.knowledge_vector_scope import merged_vector_search_kwargs
+
+            vector_kwargs = merged_vector_search_kwargs()
+
             if use_smart_retrieval:
                 # 执行智能检索，直接传入 top_k 参数
                 smart_results = self.smart_retrieval.retrieve(
                     query=query,
                     vector_db=vector_db,
                     context=context,
-                    top_k=top_k
+                    top_k=top_k,
+                    vector_search_kwargs=vector_kwargs,
                 )
                 
                 # 转换为标准格式，并补充文件信息
@@ -934,9 +956,21 @@ class KnowledgeService:
                 ]
                 
             else:
-                # 使用传统搜索
+                # 使用传统搜索（必须带分数，避免默认 1.0 绕过阈值）
                 search_start_time = time.time()
-                results = vector_db.similarity_search(query, k=top_k)
+                from utils.utils_core.common_utils import clean_text
+
+                search_results = []
+                try:
+                    scored = vector_db.similarity_search_with_score(
+                        query, k=top_k, **vector_kwargs
+                    )
+                except (AttributeError, TypeError, ValueError) as search_error:
+                    logger.debug(
+                        "传统知识库 similarity_search_with_score 失败: %s",
+                        search_error,
+                    )
+                    scored = []
                 search_duration = time.time() - search_start_time
                 
                 # 记录embedding性能指标
@@ -949,12 +983,9 @@ class KnowledgeService:
                     device="auto"
                 )
 
-                # 处理搜索结果 + 阈值过滤
-                from utils.utils_core.common_utils import clean_text
-                search_results = []
-                for i, doc in enumerate(results):
-                    score = getattr(doc, 'score', 1.0)  # 默认得分 1.0
-                    if score < score_threshold:
+                for i, (doc, score) in enumerate(scored):
+                    score = float(score or 0)
+                    if score < float(score_threshold):
                         continue
                     # 清理搜索结果内容，移除乱码
                     cleaned_content = clean_text(doc.page_content) if doc.page_content else ''
@@ -1200,9 +1231,13 @@ class KnowledgeService:
             
             logger.info("开始重建知识库...")
             
-            # 获取所有活跃的知识库文件
-            files = RagFileRecord.query.filter(
-                RagFileRecord.status == 'active'
+            from services.data_scope import apply_data_scope
+
+            # 获取当前数据范围内、状态为 active 的知识库文件
+            files = apply_data_scope(
+                RagFileRecord.query.filter(RagFileRecord.status == 'active'),
+                RagFileRecord,
+                'knowledge',
             ).all()
             
             if not files:

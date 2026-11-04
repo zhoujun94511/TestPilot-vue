@@ -10,6 +10,9 @@ import zhAi from './zh-CN/ai';
 import zhValidation from './zh-CN/validation';
 import zhEnums from './zh-CN/enums';
 import zhConfigCenter from './zh-CN/config-center';
+import zhAuth from './zh-CN/auth';
+import zhAdmin from './zh-CN/admin';
+import zhExperimentalToolsPage from './zh-CN/experimental-tools-page';
 import enCommon from './en/common';
 import enDashboard from './en/dashboard';
 import enChat from './en/chat';
@@ -21,6 +24,9 @@ import enAi from './en/ai';
 import enValidation from './en/validation';
 import enEnums from './en/enums';
 import enConfigCenter from './en/config-center';
+import enAuth from './en/auth';
+import enAdmin from './en/admin';
+import enExperimentalToolsPage from './en/experimental-tools-page';
 
 export type Locale = 'zh-CN' | 'en';
 export const LOCALE_STORAGE_KEY = 'testpilot_locale';
@@ -47,7 +53,10 @@ const messages = {
     ai: zhAi,
     validation: zhValidation,
     enums: zhEnums,
-    configCenter: zhConfigCenter
+    configCenter: zhConfigCenter,
+    auth: zhAuth,
+    admin: zhAdmin,
+    experimentalToolsPage: zhExperimentalToolsPage
   },
   en: {
     common: enCommon,
@@ -60,7 +69,10 @@ const messages = {
     ai: enAi,
     validation: enValidation,
     enums: enEnums,
-    configCenter: enConfigCenter
+    configCenter: enConfigCenter,
+    auth: enAuth,
+    admin: enAdmin,
+    experimentalToolsPage: enExperimentalToolsPage
   }
 };
 

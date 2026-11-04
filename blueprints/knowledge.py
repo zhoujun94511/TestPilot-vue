@@ -1,18 +1,25 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 import ast
-import uuid
 from pathlib import Path
 from datetime import datetime
 from werkzeug.exceptions import BadRequest
 from models.models import db, RagFileRecord
+from services.auth_service import auth_required, current_user
+from services.data_scope import apply_data_scope, can_access_record, filter_knowledge_search_results
 from services.knowledge_service import KnowledgeService
 from flask import Blueprint, request, jsonify, current_app
 from utils.utils_core.path_helper import get_knowledge_uploads_path
+from utils.utils_core.path_display import sanitize_search_document
+from utils.utils_core.upload_storage import build_versioned_storage_filename
 from config.settings import settings as config_settings
 
 # 创建蓝图
 knowledge_bp = Blueprint('knowledge', __name__)
+
+
+def _knowledge_access_denied():
+    return jsonify({'success': False, 'message': '无权访问该知识库文件'}), 403
 
 # 初始化服务
 knowledge_service = KnowledgeService()
@@ -37,20 +44,6 @@ def allowed_file(filename):
     """检查文件类型是否允许"""
     return '.' in filename and \
         filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
-
-
-def _safe_filename(input_filename: str) -> str:
-    """创建安全的文件名，保留中文字符"""
-    import os
-    import re
-
-    name, ext = os.path.splitext(input_filename)
-    safe_name = re.sub(r'[^\w\u4e00-\u9fff\-_]', '_', name)
-    safe_name = re.sub(r'_+', '_', safe_name)
-    safe_name = safe_name.strip('_')
-    if not safe_name:
-        safe_name = 'document'
-    return safe_name + ext
 
 
 def _safe_folder_name(folder_name: str) -> str:
@@ -99,20 +92,13 @@ def _process_knowledge_upload(file, description: str, category: str, relative_pa
     if not allowed_file(original_filename):
         raise BadRequest("不支持的文件类型")
 
-    file_ext = ''
-    if '.' in original_filename:
-        file_ext = '.' + original_filename.rsplit('.', 1)[1].lower()
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_id = str(uuid.uuid4())[:8]
-    safe_original = _safe_filename(original_filename)
-    new_filename = f"{timestamp}_{file_id}_{safe_original}"
-    if not new_filename.endswith(file_ext) and file_ext:
-        new_filename = new_filename.rsplit('.', 1)[0] + file_ext
+    new_filename, _ = build_versioned_storage_filename(original_filename, default_stem='document')
 
     file_hash = knowledge_service.calculate_file_hash(file_stream=file)
     if file_hash:
-        existing_record = RagFileRecord.query.filter_by(
+        existing_record = apply_data_scope(
+            RagFileRecord.query, RagFileRecord, 'knowledge'
+        ).filter_by(
             file_hash=file_hash,
             status='active'
         ).first()
@@ -345,27 +331,16 @@ def search_knowledge():
             enriched_documents = knowledge_service.enrich_search_results_with_file_info(
                 documents, current_app
             )
-            
+            enriched_documents = filter_knowledge_search_results(enriched_documents)
+
             total = len(enriched_documents)
             total_pages = (total + per_page - 1) // per_page if total > 0 else 0
             start_idx = (page - 1) * per_page
             end_idx = start_idx + per_page
             paged_documents = enriched_documents[start_idx:end_idx]
 
-            # 脱敏处理：搜索结果不返回本地绝对路径
-            sanitized_documents = []
-            for item in paged_documents:
-                if isinstance(item, dict):
-                    next_item = dict(item)
-                    raw_source = str(next_item.get('source', '') or '')
-                    if raw_source:
-                        source_name = Path(raw_source.replace('\\', '/')).name
-                        next_item['source'] = source_name or raw_source
-                        if not next_item.get('file_name'):
-                            next_item['file_name'] = source_name or raw_source
-                    sanitized_documents.append(next_item)
-                else:
-                    sanitized_documents.append(item)
+            # 脱敏处理：顶层和 metadata 里的本机绝对路径都只留文件名
+            sanitized_documents = [sanitize_search_document(item) for item in paged_documents]
 
             return jsonify({
                 'success': True,
@@ -419,15 +394,14 @@ def list_knowledge_files():
         search = request.args.get('search', '').strip()
 
         # 构建查询
-        query = RagFileRecord.query
+        query = apply_data_scope(RagFileRecord.query, RagFileRecord, 'knowledge')
 
         # 添加筛选条件
-        if file_type:
-            query = query.filter(RagFileRecord.file_type == file_type)
-        if category:
-            query = query.filter(RagFileRecord.category == category)
-        if status:
-            query = query.filter(RagFileRecord.status == status)
+        from services.sql_query_helpers import filter_column_eq
+
+        query = filter_column_eq(query, RagFileRecord.file_type, file_type)
+        query = filter_column_eq(query, RagFileRecord.category, category or None)
+        query = filter_column_eq(query, RagFileRecord.status, status or None)
         if search:
             query = query.filter(
                 RagFileRecord.file_name.contains(search) |
@@ -436,7 +410,9 @@ def list_knowledge_files():
 
         # 排序和分页
         query = query.order_by(RagFileRecord.created_time.desc())
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        pagination = query.paginate(  # type: ignore[attr-defined]
+            page=page, per_page=per_page, error_out=False
+        )
 
         # 转换为字典格式
         files = []
@@ -487,6 +463,8 @@ def get_knowledge_file(file_id):
                 'success': False,
                 'message': '文件不存在'
             }), 404
+        if not can_access_record(record, 'knowledge'):
+            return _knowledge_access_denied()
 
         file_dict = record.to_dict()
         
@@ -558,6 +536,8 @@ def delete_knowledge_file(file_id):
                 'success': False,
                 'message': '文件不存在'
             }), 404
+        if not can_access_record(record, 'knowledge'):
+            return _knowledge_access_denied()
 
         # 从向量数据库中删除文档
         if record.ids:
@@ -628,6 +608,8 @@ def update_knowledge_file(file_id):
                 'success': False,
                 'message': '文件不存在'
             }), 404
+        if not can_access_record(record, 'knowledge'):
+            return _knowledge_access_denied()
 
         # 获取更新数据
         data = request.get_json()
@@ -725,17 +707,22 @@ def get_knowledge_config():
 def get_knowledge_stats():
     """获取知识库统计信息"""
     try:
+        from services.stats_scope import scoped_knowledge_files_query
+
+        scoped_active = scoped_knowledge_files_query()
+
         # 文件总数
-        total_files = RagFileRecord.query.filter(RagFileRecord.status == 'active').count()
+        total_files = scoped_active.count()
 
         # 按分类统计
-        category_stats = db.session.query(
-            RagFileRecord.category,
-            db.func.count(RagFileRecord.id)
-        ).filter(RagFileRecord.status == 'active').group_by(RagFileRecord.category).all()
+        category_stats = (
+            scoped_active.with_entities(RagFileRecord.category, db.func.count(RagFileRecord.id))
+            .group_by(RagFileRecord.category)
+            .all()
+        )
 
         # 计算总文档数量和总文件大小
-        active_records = RagFileRecord.query.filter(RagFileRecord.status == 'active').all()
+        active_records = scoped_active.all()
         total_chunks = 0
         storage_size = 0
         last_update = None
@@ -760,16 +747,23 @@ def get_knowledge_stats():
         from datetime import datetime, timedelta
         upload_trend = []
         today = datetime.now().date()
+        from services.sql_query_helpers import filter_expression
+
         for i in range(6, -1, -1):
             target_date = today - timedelta(days=i)
-            count = RagFileRecord.query.filter(
-                RagFileRecord.status == 'active',
-                db.func.date(RagFileRecord.created_time) == target_date
-            ).count()
+            day_query = filter_expression(
+                scoped_active,
+                db.func.date(RagFileRecord.created_time) == target_date,
+            )
             upload_trend.append({
                 'date': target_date.isoformat(),
-                'count': count
+                'count': day_query.count(),
             })
+
+        category_distribution = {
+            (row[0] if row[0] is not None else 'other'): int(row[1])
+            for row in category_stats
+        }
 
         return jsonify({
             'success': True,
@@ -778,7 +772,7 @@ def get_knowledge_stats():
                 'total_chunks': total_chunks,
                 'storage_size': storage_size,
                 'last_update': last_update.isoformat() if last_update else None,
-                'category_distribution': dict(category_stats),
+                'category_distribution': category_distribution,
                 'upload_trend': upload_trend
             }
         })
@@ -813,6 +807,9 @@ def batch_delete_knowledge_files():
             try:
                 record = RagFileRecord.query.get(file_id)
                 if not record:
+                    failed_count += 1
+                    continue
+                if not can_access_record(record, 'knowledge'):
                     failed_count += 1
                     continue
 
@@ -887,6 +884,14 @@ def rebuild_knowledge_base():
         data = request.get_json() or {}
         force_rebuild = data.get('force', False)
         clear_all = data.get('clear_all', False)  # 是否完全清空向量数据库
+
+        if clear_all and auth_required():
+            user = current_user()
+            if not user or user.get('role') != 'super_admin':
+                return jsonify({
+                    'success': False,
+                    'message': '仅超级管理员可清空全库向量数据',
+                }), 403
 
         # 执行重建
         result = knowledge_service.rebuild_knowledge_base(

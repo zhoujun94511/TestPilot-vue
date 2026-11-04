@@ -2,8 +2,14 @@
 """
 TestPilot 数据库初始化脚本
 用于创建数据库表和初始化数据
+
+RBAC / 认证：本脚本通过 create_app() 间接执行 models.init_database() →
+run_auth_migrations()（部门表、users 表、业务表 dept_id 列、引导 super_admin）。
+业务表 legacy 结构迁移见 migrate / full-migrate，与 auth_migrations 互补。
+详见 docs/AUTH-RBAC.md
+
 # 用法
-# 初始化数据库（只创建表，不清空数据）
+# 初始化数据库（只创建表，不清空数据；含 RBAC 迁移）
 python scripts/init_db.py init
 # 清空数据库中的所有数据（保留表结构）
 python scripts/init_db.py clear
@@ -671,34 +677,46 @@ def create_initial_data():
 def clear_database():
     """清空数据库中的所有数据（保留表结构）"""
     try:
-        from models.models import TestCase, Requirement, ChatHistory, RagFileRecord, SystemLog, PerformanceMetric, ChatSession
+        from models.models import (
+            TestCase, Requirement, ChatHistory, RagFileRecord, SystemLog, PerformanceMetric,
+            ChatSession, ToolExecutionLog, LlmUsageLog,
+        )
         from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule
-        
+        from models.auth_models import AuthAuditLog, Department, User, UserSession
+
         app = create_app()
 
         with app.app_context():
             logger.warning("开始清空数据库数据...")
 
-            # 清空所有表的数据（按依赖顺序）
-            # 先清空有外键依赖的表
+            # 按外键依赖顺序：子表先于父表；users 在 departments 之前
             deleted_counts = {
                 'chat_history': ChatHistory.query.delete(),
                 'chat_sessions': ChatSession.query.delete(),
+                'tool_execution_logs': ToolExecutionLog.query.delete(),
+                'llm_usage_logs': LlmUsageLog.query.delete(),
                 'performance_metrics': PerformanceMetric.query.delete(),
                 'system_logs': SystemLog.query.delete(),
-                # 清空主要业务表
                 'test_cases': TestCase.query.delete(),
                 'requirements': Requirement.query.delete(),
                 'rag_file_records': RagFileRecord.query.delete(),
-                # 清空配置中心表
                 'config_audit_logs': ConfigAuditLog.query.delete(),
                 'config_validation_rules': ConfigValidationRule.query.delete(),
-                'config_items': ConfigItem.query.delete()
+                'config_items': ConfigItem.query.delete(),
+                # 下次启动 run_auth_migrations() 会重建默认部门和引导超管
+                'user_sessions': UserSession.query.delete(),
+                'auth_audit_logs': AuthAuditLog.query.delete(),
+                'users': User.query.delete(),
+                'departments': Department.query.delete(),
             }
             
             # 提交更改
             db.session.commit()
-            
+
+            # 删除记录不会缩小 SQLite 文件；VACUUM 不能在事务内执行
+            with db.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                conn.execute(text("VACUUM"))
+
             logger.info("已清空所有数据库表的数据")
             logger.info(f"清空统计: {deleted_counts}")
             

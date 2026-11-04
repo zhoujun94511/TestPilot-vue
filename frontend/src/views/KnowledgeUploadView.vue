@@ -1,42 +1,31 @@
 <template>
-  <section class="tp-knowledge-upload-page">
-    <div v-if="notice" class="tp-risk-block tp-mb-3" :class="noticeClass">
-      <div class="tp-flex tp-align-start tp-justify-between tp-gap-3">
-        <div class="tp-flex-grow-1">
-          <div>{{ notice.message }}</div>
-          <div v-if="notice.details?.length" class="tp-mt-2">
-            <TpButton variant="ghost" size="sm" @click="noticeDetailsExpanded = !noticeDetailsExpanded">
-              {{ noticeDetailsExpanded ? t('common.actions.collapse') : t('common.actions.expand') }}
-            </TpButton>
-            <ul v-if="noticeDetailsExpanded" class="tp-mb-0 tp-mt-2 tp-ps-3 tp-small">
-              <li v-for="(detail, idx) in notice.details" :key="idx">{{ detail }}</li>
-            </ul>
-          </div>
-        </div>
-        <TpButton variant="ghost" size="sm" :aria-label="t('common.actions.close')" @click="notice = null">
-          {{ t('common.actions.close') }}
-        </TpButton>
-      </div>
-    </div>
+  <section :class="pageRootMarkedClass(pageMarkerKnowledgeUpload)">
+    <PageNoticeBanner
+      :notice="pageBanner"
+      @close="clearPageBanner"
+    />
 
-    <div class="tp-surface tp-p-3">
-      <div class="tp-flex tp-justify-between tp-align-start tp-gap-2 tp-mb-3">
-        <div>
-          <div class="tp-card__title">{{ t('knowledge.upload.title') }}</div>
-          <div class="tp-card__subtitle">{{ t('knowledge.upload.dragHint') }}</div>
-          <div class="tp-upload-category tp-mt-2">
-            <label class="tp-form-label tp-mb-1">{{ t('knowledge.upload.category') }}</label>
-            <select v-model="uploadForm.category" class="tp-select">
-              <option v-for="option in categoryOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </div>
-        </div>
+    <KnowledgeVectorDisabledState v-if="vectorDisabled" />
+    <PagePanel
+      v-else
+      :title="t('knowledge.upload.title')"
+      :subtitle="t('knowledge.upload.dragHint')"
+    >
+      <template #actions>
         <TpTag v-if="selectedFiles.length" variant="neutral">
           {{ selectedFiles.length === 1 ? selectedFiles[0].name : t('knowledge.upload.filesSelected', { count: selectedFiles.length }) }}
         </TpTag>
-      </div>
+      </template>
+
+      <TpInput
+        v-model="uploadForm.category"
+        as="select"
+        :class="uploadCategoryFieldClass"
+        :label="t('knowledge.upload.category')"
+        :placeholder="t('knowledge.upload.categoryPlaceholder')"
+        :options="categoryOptions"
+        :disabled="vectorDisabled"
+      />
 
       <BaseUpload
         v-model="selectedFiles"
@@ -44,57 +33,68 @@
         :choose-text="t('common.actions.chooseFile')"
         :submit-text="t('knowledge.upload.submit')"
         :loading-text="t('knowledge.actions.uploading')"
-        :hint="t('knowledge.upload.fileHint')"
+        :hint="uploadFileHint"
         :empty-text="t('knowledge.upload.empty')"
         :clear-text="t('common.actions.cancel')"
         accept=".txt,.csv,.docx,.pdf,.json,.md"
         :multiple="true"
         :loading="uploadLoading"
+        :disabled="vectorDisabled"
         @submit="handleUpload"
       />
-      <div v-if="uploadLoading" class="tp-upload-progress tp-mt-2">
-        <div class="tp-upload-progress__label">
+      <div v-if="uploadLoading" class="mt-2">
+        <div :class="uploadProgressLabelClass">
           {{ t('knowledge.upload.progress') }} {{ uploadProgress }}%
         </div>
-        <div class="tp-upload-progress__bar">
-          <div class="tp-upload-progress__bar-inner" :style="{ width: `${uploadProgress}%` }"></div>
+        <div :class="uploadProgressTrackClass">
+          <div :class="uploadProgressFillClass" :style="{ width: `${uploadProgress}%` }"></div>
         </div>
       </div>
 
-      <div class="tp-row tp-g-3 tp-mt-1">
-        <div class="tp-col-12">
-          <label class="tp-form-label">{{ t('knowledge.upload.description') }}</label>
-          <textarea
-            v-model.trim="uploadForm.description"
-            class="tp-textarea"
-            rows="4"
-            :placeholder="t('knowledge.upload.descriptionPlaceholder')"
-          ></textarea>
-        </div>
-      </div>
-    </div>
+      <TpInput
+        v-model="uploadForm.description"
+        as="textarea"
+        class="mt-4"
+        :label="t('knowledge.upload.description')"
+        :rows="4"
+        :placeholder="t('knowledge.upload.descriptionPlaceholder')"
+        :disabled="vectorDisabled"
+      />
+    </PagePanel>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
+import KnowledgeVectorDisabledState from '@/components/knowledge/KnowledgeVectorDisabledState.vue';
 import BaseUpload from '@/components/common/BaseUpload.vue';
-import TpButton from '@/components/ui/base/TpButton.vue';
+import PageNoticeBanner from '@/components/common/PageNoticeBanner.vue';
+import PagePanel from '@/components/common/PagePanel.vue';
+import TpInput from '@/components/ui/base/TpInput.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
+import { pageMarkerKnowledgeUpload, pageRootMarkedClass } from '@/lib/page-layout-ui';
 import {
+  uploadCategoryFieldClass,
+  uploadProgressFillClass,
+  uploadProgressLabelClass,
+  uploadProgressTrackClass
+} from '@/lib/upload-ui';
+import { cn } from '@/lib/utils';
+import { useKnowledgeVectorGate } from '@/composables/useKnowledgeVectorNotice';
+import { usePageNotifier } from '@/composables/usePageNotifier';
+import {
+  getKnowledgeConfig,
   uploadKnowledge,
-  type KnowledgeCategory
+  type KnowledgeCategory,
+  type KnowledgeConfig
 } from '@/api/knowledge';
 import { ApiError } from '@/api/http';
+import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
+import { formatBytes } from '@/lib/format';
 
 type NoticeType = 'success' | 'danger' | 'warning' | 'info';
-interface NoticeState {
-  type: NoticeType;
-  message: string;
-  details?: string[];
-}
 
 interface SelectOption {
   value: string;
@@ -103,15 +103,30 @@ interface SelectOption {
 
 const { t } = useI18n();
 const router = useRouter();
+const { vectorDisabled } = useKnowledgeVectorGate();
+const {
+  banner: pageBanner,
+  clearBanner: clearPageBanner,
+  showNotice: notifyShowNotice
+} = usePageNotifier();
+
 const selectedFiles = ref<File[]>([]);
 const uploadLoading = ref(false);
 const uploadProgress = ref(0);
-const notice = ref<NoticeState | null>(null);
-const noticeDetailsExpanded = ref(false);
 
 const uploadForm = reactive({
   category: 'test_cases' as KnowledgeCategory | string,
   description: ''
+});
+
+const serverConfig = ref<KnowledgeConfig | null>(null);
+
+const uploadFileHint = computed(() => {
+  const base = t('knowledge.upload.fileHint');
+  const cfg = serverConfig.value;
+  if (!cfg?.max_file_size && !(cfg?.allowed_extensions?.length)) return base;
+  const types = (cfg.allowed_extensions || []).map((item) => item.toUpperCase()).join(' / ') || '-';
+  return `${base} · ${t('knowledge.upload.serverHint', { size: formatBytes(cfg.max_file_size, { zero: '-' }), types })}`;
 });
 
 const categoryOptions = computed<SelectOption[]>(() => [
@@ -123,19 +138,8 @@ const categoryOptions = computed<SelectOption[]>(() => [
   { value: 'other', label: t('knowledge.category.other') }
 ]);
 
-const noticeClass = computed(() => {
-  const type = notice.value?.type || 'info';
-  return {
-    'tp-risk-block--info': type === 'info',
-    'tp-risk-block--danger': type === 'danger',
-    'tp-risk-block--warning': type === 'warning',
-    'tp-risk-block--success': type === 'success'
-  };
-});
-
 function showNotice(type: NoticeType, message: string, details?: string[]) {
-  notice.value = { type, message, details };
-  noticeDetailsExpanded.value = false;
+  notifyShowNotice(type, message, details?.length ? { details } : undefined);
 }
 
 function extractBatchFailureDetails(response: Record<string, unknown>) {
@@ -154,9 +158,15 @@ function extractBatchFailureDetails(response: Record<string, unknown>) {
 }
 
 async function handleUpload(fileOrFiles: File | File[]) {
+  if (vectorDisabled.value) return;
   const filesToUpload = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
   if (!filesToUpload.length) {
     showNotice('warning', t('knowledge.message.selectFileFirst'));
+    return;
+  }
+  const oversize = filesToUpload.find((file) => file.size <= 0);
+  if (oversize) {
+    showNotice('warning', t('knowledge.message.validateFailed'));
     return;
   }
 
@@ -197,7 +207,10 @@ async function handleUpload(fileOrFiles: File | File[]) {
       }
     } else {
       const isDuplicate = Boolean(response.file_info && (response.file_info as Record<string, unknown>).is_duplicate);
-      showNotice('success', isDuplicate ? t('knowledge.message.uploadDuplicate') : t('knowledge.message.uploadSuccess'));
+      showNotice(
+        'success',
+        isDuplicate ? t('knowledge.message.uploadDuplicate') : t('knowledge.message.uploadSuccess')
+      );
       await router.push('/knowledge/files');
     }
 
@@ -205,36 +218,19 @@ async function handleUpload(fileOrFiles: File | File[]) {
     uploadForm.category = 'test_cases';
     uploadForm.description = '';
   } catch (error) {
-    showNotice('danger', error instanceof ApiError ? error.message : t('knowledge.message.uploadFailed'));
+    showNotice('danger', getUserFacingErrorMessage(error, t('knowledge.message.uploadFailed')));
   } finally {
     uploadLoading.value = false;
     uploadProgress.value = 0;
   }
 }
+
+onMounted(async () => {
+  try {
+    serverConfig.value = await getKnowledgeConfig();
+  } catch {
+    serverConfig.value = null;
+  }
+});
 </script>
 
-<style scoped>
-.tp-upload-progress__label {
-  font-size: 12px;
-  color: var(--tp-color-text-500);
-  margin-bottom: 6px;
-}
-
-.tp-upload-progress__bar {
-  width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--tp-bg-subtle);
-  overflow: hidden;
-}
-
-.tp-upload-progress__bar-inner {
-  height: 100%;
-  background: var(--tp-color-primary-500);
-  transition: width 0.2s ease;
-}
-
-.tp-upload-category {
-  max-width: 280px;
-}
-</style>

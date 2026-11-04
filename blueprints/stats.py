@@ -8,7 +8,8 @@ from utils.utils_core.logger import get_logger
 from services.stats_service import StatsService
 from flask import Blueprint, request, jsonify, current_app
 from utils.utils_core.common_utils import get_network_info
-from models.models import db, TestCase, Requirement, ChatHistory, PerformanceMetric, SystemLog, ChatSession
+from models.models import db, TestCase, Requirement, ChatHistory, PerformanceMetric, SystemLog
+import services.stats_scope as stats_scope
 
 # 创建蓝图
 stats_bp = Blueprint('stats', __name__)
@@ -29,30 +30,35 @@ def get_overview_stats():
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
-        # 基础统计
-        total_cases = TestCase.query.count()
-        total_requirements = Requirement.query.count()
-        total_chat_sessions = ChatSession.query.filter(ChatSession.is_deleted == False).count()
-        
-        # 知识库文件统计
-        from models.models import RagFileRecord
-        total_knowledge_files = RagFileRecord.query.filter(RagFileRecord.status == 'active').count()
+        cases_q = stats_scope.scoped_cases_query()
+        req_q = stats_scope.scoped_requirements_query()
+        sessions_q = stats_scope.scoped_chat_sessions_query()
+        knowledge_q = stats_scope.scoped_knowledge_files_query()
 
-        # 最近活动统计
-        recent_cases = TestCase.query.filter(TestCase.created_time >= start_date).count()
-        recent_requirements = Requirement.query.filter(Requirement.created_time >= start_date).count()
-        recent_chats = ChatHistory.query.filter(ChatHistory.created_time >= start_date).count()
+        total_cases = cases_q.count()
+        total_requirements = req_q.count()
+        total_chat_sessions = sessions_q.count()
+        total_knowledge_files = knowledge_q.count()
 
-        # 状态分布
+        recent_cases = cases_q.filter(TestCase.created_time >= start_date).count()
+        recent_requirements = req_q.filter(Requirement.created_time >= start_date).count()
+        recent_chats = stats_scope.scoped_chat_history_query().filter(
+            ChatHistory.created_time >= start_date
+        ).count()
+
         case_status_stats = db.session.query(
             TestCase.status,
-            func.count(TestCase.id)
-        ).group_by(TestCase.status).all()
+            func.count(TestCase.id),
+        ).filter(TestCase.id.in_(cases_q.with_entities(TestCase.id))).group_by(
+            TestCase.status
+        ).all()
 
         priority_stats = db.session.query(
             TestCase.priority,
-            func.count(TestCase.id)
-        ).group_by(TestCase.priority).all()
+            func.count(TestCase.id),
+        ).filter(TestCase.id.in_(cases_q.with_entities(TestCase.id))).group_by(
+            TestCase.priority
+        ).all()
 
         return jsonify({
             'success': True,
@@ -93,6 +99,12 @@ def get_performance_stats():
     try:
         # 获取时间范围参数
         hours = request.args.get('hours', 24, type=int)
+        if not stats_scope.platform_metrics_visible():
+            return jsonify({
+                'success': True,
+                'performance': stats_scope.empty_performance_stats(hours),
+            })
+
         end_time = datetime.now()
         start_time = end_time - timedelta(hours=hours)
 
@@ -156,37 +168,33 @@ def get_usage_stats():
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
-        # 按日期统计用例生成数量
+        cases_q = stats_scope.scoped_cases_query().filter(TestCase.created_time >= start_date)
+        req_q = stats_scope.scoped_requirements_query().filter(Requirement.created_time >= start_date)
+        chat_q = stats_scope.scoped_chat_history_query().filter(ChatHistory.created_time >= start_date)
+
+        case_ids = cases_q.with_entities(TestCase.id).subquery()
+        req_ids = req_q.with_entities(Requirement.id).subquery()
+        chat_ids = chat_q.with_entities(ChatHistory.id).subquery()
+
         daily_cases = db.session.query(
             func.date(TestCase.created_time).label('date'),
-            func.count(TestCase.id).label('count')
-        ).filter(
-            TestCase.created_time >= start_date
-        ).group_by(func.date(TestCase.created_time)).all()
+            func.count(TestCase.id).label('count'),
+        ).filter(TestCase.id.in_(case_ids)).group_by(func.date(TestCase.created_time)).all()
 
-        # 按日期统计需求分析数量
         daily_requirements = db.session.query(
             func.date(Requirement.created_time).label('date'),
-            func.count(Requirement.id).label('count')
-        ).filter(
-            Requirement.created_time >= start_date
-        ).group_by(func.date(Requirement.created_time)).all()
+            func.count(Requirement.id).label('count'),
+        ).filter(Requirement.id.in_(req_ids)).group_by(func.date(Requirement.created_time)).all()
 
-        # 按日期统计聊天消息数量
         daily_chats = db.session.query(
             func.date(ChatHistory.created_time).label('date'),
-            func.count(ChatHistory.id).label('count')
-        ).filter(
-            ChatHistory.created_time >= start_date
-        ).group_by(func.date(ChatHistory.created_time)).all()
+            func.count(ChatHistory.id).label('count'),
+        ).filter(ChatHistory.id.in_(chat_ids)).group_by(func.date(ChatHistory.created_time)).all()
 
-        # 按分类统计用例数量
         category_stats = db.session.query(
             TestCase.category,
-            func.count(TestCase.id)
-        ).filter(
-            TestCase.created_time >= start_date
-        ).group_by(TestCase.category).all()
+            func.count(TestCase.id),
+        ).filter(TestCase.id.in_(case_ids)).group_by(TestCase.category).all()
 
         return jsonify({
             'success': True,
@@ -212,69 +220,48 @@ def get_usage_stats():
         }), 500
 
 
+@stats_bp.route('/token-session', methods=['GET'])
+def get_token_session():
+    """当前后端进程内 TokenMonitor 会话用量与预警级别（非聊天历史统计）。"""
+    try:
+        from utils.utils_performance_monitoring.token_monitor import get_token_session_status
+        from utils.utils_core.api_response import api_success
+
+        if not stats_scope.platform_metrics_visible():
+            return api_success(
+                data=stats_scope.limited_token_session_status(),
+                code='TOKEN_SESSION_STATUS_SUCCESS',
+                message_key='common.tokenSession.statusLoaded',
+                message='Token session status loaded',
+            )
+
+        return api_success(
+            data=get_token_session_status(),
+            code='TOKEN_SESSION_STATUS_SUCCESS',
+            message_key='common.tokenSession.statusLoaded',
+            message='Token session status loaded',
+        )
+    except Exception as e:
+        current_app.logger.error('获取词元会话状态失败: %s', e)
+        return jsonify({
+            'success': False,
+            'message': '获取词元会话状态失败',
+            'error': 'INTERNAL_SERVER_ERROR',
+            'error_code': 'INTERNAL_SERVER_ERROR',
+            'retryable': False
+        }), 500
+
+
 @stats_bp.route('/tokens', methods=['GET'])
 def get_token_stats():
-    """获取Token使用统计"""
+    """获取全站 Token 使用统计（llm_usage_logs：Chat + 用例 + 文档分析等）"""
     try:
-        # 获取时间范围参数
+        from services.llm_usage_service import build_global_token_stats
+
         days = request.args.get('days', 7, type=int)
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-
-        # Token使用统计
-        token_stats = db.session.query(
-            func.sum(ChatHistory.tokens_used).label('total_tokens'),
-            func.avg(ChatHistory.tokens_used).label('avg_tokens'),
-            func.count(ChatHistory.id).label('message_count')
-        ).filter(
-            ChatHistory.created_time >= start_date,
-            ChatHistory.tokens_used > 0
-        ).first()
-
-        # 按模型统计Token使用
-        model_stats = db.session.query(
-            ChatHistory.model_name,
-            func.sum(ChatHistory.tokens_used).label('total_tokens'),
-            func.count(ChatHistory.id).label('message_count')
-        ).filter(
-            ChatHistory.created_time >= start_date,
-            ChatHistory.tokens_used > 0
-        ).group_by(ChatHistory.model_name).all()
-
-        # 按日期统计Token使用
-        daily_tokens = db.session.query(
-            func.date(ChatHistory.created_time).label('date'),
-            func.sum(ChatHistory.tokens_used).label('total_tokens')
-        ).filter(
-            ChatHistory.created_time >= start_date,
-            ChatHistory.tokens_used > 0
-        ).group_by(func.date(ChatHistory.created_time)).all()
-
         return jsonify({
             'success': True,
-            'tokens': {
-                'period_days': days,
-                'summary': {
-                    'total_tokens': int(token_stats.total_tokens or 0),
-                    'avg_tokens_per_message': round(float(token_stats.avg_tokens or 0), 2),
-                    'total_messages': int(token_stats.message_count or 0)
-                },
-                'by_model': [
-                    {
-                        'model': model,
-                        'total_tokens': int(tokens),
-                        'message_count': int(count)
-                    }
-                    for model, tokens, count in model_stats
-                ],
-                'daily_usage': [
-                    {
-                        'date': str(date),
-                        'total_tokens': int(tokens or 0)
-                    }
-                    for date, tokens in daily_tokens
-                ]
-            }
+            'tokens': build_global_token_stats(days),
         })
 
     except Exception as e:
@@ -294,6 +281,12 @@ def get_log_stats():
     try:
         # 获取时间范围参数
         hours = request.args.get('hours', 24, type=int)
+        if not stats_scope.platform_metrics_visible():
+            return jsonify({
+                'success': True,
+                'logs': stats_scope.empty_log_stats(hours),
+            })
+
         end_time = datetime.now()
         start_time = end_time - timedelta(hours=hours)
 
@@ -366,13 +359,9 @@ def export_stats():
 
         # 获取数据
         if export_type == 'overview':
-            # 获取概览数据
-            total_cases = TestCase.query.count()
-            total_requirements = Requirement.query.count()
-            total_chat_sessions = db.session.query(func.count(func.distinct(ChatHistory.session_id))) \
-                .join(ChatSession, ChatHistory.session_id == ChatSession.session_id) \
-                .filter(ChatSession.is_deleted == False) \
-                .scalar()
+            total_cases = stats_scope.scoped_cases_query().count()
+            total_requirements = stats_scope.scoped_requirements_query().count()
+            total_chat_sessions = stats_scope.scoped_chat_sessions_query().count()
 
             data = {
                 'export_type': 'overview',
@@ -386,7 +375,13 @@ def export_stats():
                 'period_days': days
             }
         elif export_type == 'performance':
-            # 获取性能数据
+            if not stats_scope.platform_metrics_visible():
+                return jsonify({
+                    'success': False,
+                    'message': '没有权限导出平台性能数据',
+                    'message_key': 'common.errors.http403',
+                }), 403
+
             end_time = datetime.now()
             start_time = end_time - timedelta(days=days)
 
@@ -406,9 +401,15 @@ def export_stats():
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days)
 
-            recent_cases = TestCase.query.filter(TestCase.created_time >= start_date).count()
-            recent_requirements = Requirement.query.filter(Requirement.created_time >= start_date).count()
-            recent_chats = ChatHistory.query.filter(ChatHistory.created_time >= start_date).count()
+            recent_cases = stats_scope.scoped_cases_query().filter(
+                TestCase.created_time >= start_date
+            ).count()
+            recent_requirements = stats_scope.scoped_requirements_query().filter(
+                Requirement.created_time >= start_date
+            ).count()
+            recent_chats = stats_scope.scoped_chat_history_query().filter(
+                ChatHistory.created_time >= start_date
+            ).count()
 
             data = {
                 'export_type': 'usage',
@@ -422,28 +423,15 @@ def export_stats():
                 'export_time': datetime.now().isoformat()
             }
         elif export_type == 'tokens':
-            # 获取Token使用数据
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
+            from services.llm_usage_service import build_global_token_stats
 
-            token_stats = db.session.query(
-                func.sum(ChatHistory.tokens_used).label('total_tokens'),
-                func.avg(ChatHistory.tokens_used).label('avg_tokens'),
-                func.count(ChatHistory.id).label('message_count')
-            ).filter(
-                ChatHistory.created_time >= start_date,
-                ChatHistory.tokens_used > 0
-            ).first()
-
+            token_payload = build_global_token_stats(days)
             data = {
                 'export_type': 'tokens',
                 'period_days': days,
                 'format': format_type,
-                'token_stats': {
-                    'total_tokens': int(token_stats.total_tokens or 0),
-                    'avg_tokens_per_message': round(float(token_stats.avg_tokens or 0), 2),
-                    'total_messages': int(token_stats.message_count or 0)
-                },
+                'token_stats': token_payload.get('summary') or {},
+                'token_by_source': token_payload.get('by_source') or [],
                 'export_time': datetime.now().isoformat()
             }
         else:
@@ -627,9 +615,9 @@ def _export_to_excel(data, export_type):
 
         # 数据行
         data_rows = [
-            ("总Token使用量", data['token_stats']['total_tokens'], "个", f"最近{data['period_days']}天使用的总Token数"),
-            ("平均每条消息Token", data['token_stats']['avg_tokens_per_message'], "个", "每条消息平均使用的Token数"),
-            ("总消息数", data['token_stats']['total_messages'], "条", f"最近{data['period_days']}天的总消息数")
+            ("全站 Token 总量", data['token_stats']['total_tokens'], "个", f"最近{data['period_days']}天 AI 聊天/用例/文档等 LLM 消耗合计"),
+            ("平均每次调用 Token", data['token_stats'].get('avg_tokens_per_call', data['token_stats']['avg_tokens_per_message']), "个", "每次 LLM 调用平均 tokens"),
+            ("LLM 调用次数", data['token_stats'].get('total_calls', data['token_stats']['total_messages']), "次", f"最近{data['period_days']}天有记录的 LLM 调用次数")
         ]
 
         for i, (name, value, unit, desc) in enumerate(data_rows, 8):
@@ -698,14 +686,14 @@ def _export_to_csv(data, export_type):
             ['近期聊天', data['usage_stats']['recent_chats'], '条', f'最近{data["period_days"]}天的聊天记录'])
 
     elif export_type == 'tokens':
-        writer.writerow(['Token使用统计'])
+        writer.writerow(['全站 Token 使用统计'])
         writer.writerow(['指标名称', '数值', '单位', '说明'])
         writer.writerow(
-            ['总Token使用量', data['token_stats']['total_tokens'], '个', f'最近{data["period_days"]}天使用的总Token数'])
+            ['全站 Token 总量', data['token_stats']['total_tokens'], '个', f'最近{data["period_days"]}天 AI 聊天/用例/文档等 LLM 消耗合计'])
         writer.writerow(
-            ['平均每条消息Token', data['token_stats']['avg_tokens_per_message'], '个', '每条消息平均使用的Token数'])
+            ['平均每次调用 Token', data['token_stats'].get('avg_tokens_per_call', data['token_stats']['avg_tokens_per_message']), '个', '每次 LLM 调用平均 tokens'])
         writer.writerow(
-            ['总消息数', data['token_stats']['total_messages'], '条', f'最近{data["period_days"]}天的总消息数'])
+            ['LLM 调用次数', data['token_stats'].get('total_calls', data['token_stats']['total_messages']), '次', f'最近{data["period_days"]}天有记录的 LLM 调用次数'])
 
     output.seek(0)
 
@@ -721,6 +709,13 @@ def _export_to_csv(data, export_type):
 def record_metric():
     """记录性能指标"""
     try:
+        if not stats_scope.platform_metrics_visible():
+            return jsonify({
+                'success': False,
+                'message': '没有权限记录平台性能指标',
+                'message_key': 'common.errors.http403',
+            }), 403
+
         data = request.get_json()
         if not data:
             raise BadRequest("请求数据不能为空")
@@ -766,10 +761,37 @@ def record_metric():
         }), 500
 
 
+@stats_bp.route('/feature-flags', methods=['GET'])
+def get_feature_flags():
+    """只读功能开关，供 SPA 同步 UI（如知识库向量状态）。"""
+    try:
+        from config.settings import settings
+
+        return jsonify({
+            'success': True,
+            'feature_flags': {
+                'enable_vector_store': bool(getattr(settings, 'ENABLE_VECTOR_STORE', True)),
+                'experimental_actions_enabled': bool(getattr(settings, 'ENABLE_EXPERIMENTAL_ACTIONS', False)),
+            }
+        })
+    except Exception as e:
+        current_app.logger.error(f"获取功能开关失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': '获取功能开关失败',
+            'error': 'INTERNAL_SERVER_ERROR',
+            'error_code': 'INTERNAL_SERVER_ERROR',
+            'retryable': False
+        }), 500
+
+
 @stats_bp.route('/health', methods=['GET'])
 def get_system_health():
     """获取系统健康状态"""
     try:
+        if not stats_scope.platform_metrics_visible():
+            return jsonify(stats_scope.limited_system_health())
+
         # 执行系统健康检查
         health_result = stats_service.get_system_health(db.session)
 
@@ -799,6 +821,13 @@ def get_system_health():
 def get_network_info_api():
     """获取网络信息API"""
     try:
+        if not stats_scope.platform_metrics_visible():
+            return jsonify({
+                'success': False,
+                'message': '没有权限查看网络信息',
+                'message_key': 'common.errors.http403',
+            }), 403
+
         network_info = get_network_info()
         return jsonify({
             'success': True,
@@ -826,57 +855,60 @@ def get_recent_activities():
         activities = []
         
         # 最近创建的测试用例
-        recent_cases = TestCase.query.filter(
+        recent_cases = stats_scope.scoped_cases_query().filter(
             TestCase.created_time >= start_date
         ).order_by(TestCase.created_time.desc()).limit(5).all()
         
         for case in recent_cases:
+            title = (case.title or '').strip()
             activities.append({
                 'type': 'case',
-                'message': f'生成了测试用例: {case.title[:30]}...' if len(case.title) > 30 else f'生成了测试用例: {case.title}',
+                'subject': title,
                 'time': case.created_time,
                 'icon': 'fas fa-flask',
                 'color': 'text-primary'
             })
         
         # 最近创建的需求文档
-        recent_requirements = Requirement.query.filter(
+        recent_requirements = stats_scope.scoped_requirements_query().filter(
             Requirement.created_time >= start_date
         ).order_by(Requirement.created_time.desc()).limit(5).all()
         
         for req in recent_requirements:
+            title = (req.title or '').strip()
             activities.append({
                 'type': 'requirement',
-                'message': f'分析了需求文档: {req.title[:30]}...' if len(req.title) > 30 else f'分析了需求文档: {req.title}',
+                'subject': title,
                 'time': req.created_time,
                 'icon': 'fas fa-file-alt',
                 'color': 'text-success'
             })
         
         # 最近的知识库文件上传
-        recent_knowledge = RagFileRecord.query.filter(
+        recent_knowledge = stats_scope.scoped_knowledge_files_query().filter(
             RagFileRecord.created_time >= start_date,
-            RagFileRecord.status == 'active'
         ).order_by(RagFileRecord.created_time.desc()).limit(3).all()
         
         for file in recent_knowledge:
+            name = (file.file_name or '').strip()
             activities.append({
                 'type': 'knowledge',
-                'message': f'上传了知识库文件: {file.file_name[:30]}...' if len(file.file_name) > 30 else f'上传了知识库文件: {file.file_name}',
+                'subject': name,
                 'time': file.created_time,
                 'icon': 'fas fa-brain',
                 'color': 'text-info'
             })
         
         # 最近的聊天会话
-        recent_chats = ChatHistory.query.filter(
+        recent_chats = stats_scope.scoped_chat_history_query().filter(
             ChatHistory.created_time >= start_date
         ).order_by(ChatHistory.created_time.desc()).limit(3).all()
         
         for chat in recent_chats:
+            content = (chat.content or '').strip()
             activities.append({
                 'type': 'chat',
-                'message': f'AI助手会话: {chat.content[:30]}...' if len(chat.content) > 30 else f'AI助手会话: {chat.content}',
+                'subject': content,
                 'time': chat.created_time,
                 'icon': 'fas fa-comments',
                 'color': 'text-warning'
@@ -916,7 +948,13 @@ def get_system_status():
         start_time = time.time()
         
         try:
-            from config.settings import resolve_deepseek_model, resolve_gemini_model, resolve_openai_model, settings
+            from config.settings import (
+                resolve_anthropic_model,
+                resolve_deepseek_model,
+                resolve_gemini_model,
+                resolve_openai_model,
+                settings,
+            )
             llm = get_llm(settings.DEFAULT_COMPANY)
             if llm:
                 # 尝试获取模型名称
@@ -937,6 +975,8 @@ def get_system_status():
                         ai_model_name = resolve_gemini_model(getattr(settings, 'GEMINI_MODEL', None))
                     elif company_upper == 'QWEN':
                         ai_model_name = getattr(settings, 'QWEN_MODEL', None) or os.getenv('QWEN_MODEL', 'qwen-flash')
+                    elif company_upper == 'ANTHROPIC':
+                        ai_model_name = resolve_anthropic_model(getattr(settings, 'ANTHROPIC_MODEL', None))
                     else:
                         ai_model_name = '未知模型'
                 
@@ -966,14 +1006,19 @@ def get_system_status():
             ai_model_name = "连接失败"
             ai_response_time = int((time.time() - start_time) * 1000)
         
+        platform_visible = stats_scope.platform_metrics_visible()
+
         # 知识库状态检测
         try:
             # 获取知识库文档数量
-            knowledge_docs = RagFileRecord.query.filter(RagFileRecord.status == 'active').count()
+            knowledge_docs = stats_scope.scoped_knowledge_files_query().count()
             
             # 尝试连接向量数据库获取向量数量
             vector_db = getattr(current_app, 'vector_db', None)
-            if vector_db:
+            if not platform_visible:
+                # 向量库总数是全站数据，非超管只统计可见文件登记的 chunk
+                knowledge_vectors = stats_scope.scoped_knowledge_chunk_count()
+            elif vector_db:
                 try:
                     # 优先尝试使用 count() 方法（SQLiteVectorStore 和 ThreadSafeVectorDB 都支持）
                     if hasattr(vector_db, 'count'):
@@ -1039,38 +1084,20 @@ def get_system_status():
             knowledge_docs = 0
             knowledge_vectors = 0
         
-        # 系统性能监控
-        try:
-            # CPU使用率
-            cpu_percent = psutil.cpu_percent(interval=1)
-            
-            # 内存使用情况
-            memory = psutil.virtual_memory()
-            memory_used_gb = round(memory.used / (1024**3), 2)
-            memory_percent = memory.percent
-            memory_total_gb = round(memory.total / (1024**3), 2)
-            
-            # 磁盘使用情况
-            disk = psutil.disk_usage('/')
-            disk_percent = round(disk.used / disk.total * 100, 1)
-            
-            # 判断系统性能状态
-            if cpu_percent > 95 or memory_percent > 95 or disk_percent > 95:
-                performance_status = "危险"
-            elif cpu_percent > 80 or memory_percent > 80 or disk_percent > 90:
-                performance_status = "警告"
-            else:
-                performance_status = "良好"
-        except (OSError, RuntimeError, AttributeError, ValueError, TypeError):
-            # 系统调用失败或数据处理异常
-            current_app.logger.error("系统性能监控失败")
-            cpu_percent = 0
-            memory_used_gb = 0
-            memory_percent = 0
-            memory_total_gb = 0
-            disk_percent = 0
-            performance_status = "检测失败"
-        
+        # 系统性能监控（主机指标仅超管可见）
+        performance_limited = not platform_visible
+        if performance_limited:
+            cpu_percent = None
+            memory_used_gb = None
+            memory_percent = None
+            memory_total_gb = None
+            disk_percent = None
+            performance_status = 'limited'
+        else:
+            cpu_percent, memory_used_gb, memory_percent, memory_total_gb, disk_percent, performance_status = (
+                _host_performance_snapshot(psutil)
+            )
+
         return jsonify({
             'success': True,
             'system': {
@@ -1090,7 +1117,8 @@ def get_system_status():
                     'memory_percent': memory_percent,
                     'memory_total': memory_total_gb,
                     'disk': disk_percent,
-                    'status': performance_status
+                    'status': performance_status,
+                    'limited_visibility': performance_limited,
                 },
                 'timestamp': datetime.now().isoformat()
             }
@@ -1120,3 +1148,28 @@ def get_system_status():
                 'performance': {'cpu': 0, 'memory': 0, 'disk': 0, 'status': '检测失败'}
             }
         }), 500
+
+
+def _host_performance_snapshot(psutil):
+    """主机 CPU / 内存 / 磁盘：(cpu%, 已用内存GB, 内存%, 总内存GB, 磁盘%, 状态)。"""
+    try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+
+        memory = psutil.virtual_memory()
+        memory_used_gb = round(memory.used / (1024**3), 2)
+        memory_percent = memory.percent
+        memory_total_gb = round(memory.total / (1024**3), 2)
+
+        disk = psutil.disk_usage('/')
+        disk_percent = round(disk.used / disk.total * 100, 1)
+
+        if cpu_percent > 95 or memory_percent > 95 or disk_percent > 95:
+            performance_status = "危险"
+        elif cpu_percent > 80 or memory_percent > 80 or disk_percent > 90:
+            performance_status = "警告"
+        else:
+            performance_status = "良好"
+        return cpu_percent, memory_used_gb, memory_percent, memory_total_gb, disk_percent, performance_status
+    except (OSError, RuntimeError, AttributeError, ValueError, TypeError):
+        current_app.logger.error("系统性能监控失败")
+        return 0, 0, 0, 0, 0, "检测失败"

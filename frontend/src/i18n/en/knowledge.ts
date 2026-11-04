@@ -8,9 +8,20 @@ export default {
     files: 'Knowledge File Management',
     search: 'Knowledge Search'
   },
+  toolbar: {
+    filesLead: 'Maintain vector files; select rows to delete in bulk or rebuild the index when needed.'
+  },
+  banner: {
+    vectorDisabledTitle: 'Vector store is disabled',
+    vectorDisabledMessage:
+      'ENABLE_VECTOR_STORE is off. All knowledge APIs (file list, stats, upload, search, and index rebuild) are blocked. Enable it in Config Center, save, and refresh this page.',
+    vectorDisabledAction: 'Open Config Center',
+    vectorDisabledStateTitle: 'Knowledge base unavailable',
+    vectorDisabledStateMessage:
+      'With the vector store off, the backend rejects every knowledge API. Enable ENABLE_VECTOR_STORE and refresh to browse files, upload, and search.'
+  },
   actions: {
     upload: 'Upload File',
-    hideUpload: 'Hide Upload',
     refresh: 'Refresh',
     rebuild: 'Rebuild Index',
     search: 'Search',
@@ -22,10 +33,15 @@ export default {
     preview: 'Preview',
     closeResults: 'Close'
   },
+  searchPage: {
+    threshold: 'Similarity Threshold',
+    openInFiles: 'Open in file management'
+  },
   filters: {
     title: 'Filter & Search',
+    subtitle: 'Filter knowledge files by keyword, category, and status',
     keywordLabel: 'Search Keyword',
-    keywordPlaceholder: 'Enter file name, description, or keywords',
+    keywordPlaceholder: 'Search',
     categoryLabel: 'Category',
     categoryAll: 'All Categories',
     statusLabel: 'Status',
@@ -36,6 +52,7 @@ export default {
     title: 'Upload Knowledge File',
     file: 'Choose File(s)',
     fileHint: 'Supported: TXT / CSV / DOCX / PDF / JSON / MD',
+    serverHint: 'Max {size} per file; allowed types: {types}',
     category: 'File Category',
     categoryPlaceholder: 'Select a category',
     description: 'File Description',
@@ -45,6 +62,12 @@ export default {
     dragHint: 'Select multiple files at once. The system will parse and ingest them automatically.',
     progress: 'Upload Progress',
     filesSelected: '{count} files selected'
+  },
+  edit: {
+    title: 'Edit file metadata',
+    empty: 'No file selected',
+    success: 'File metadata updated',
+    failed: 'Failed to update file metadata'
   },
   preview: {
     title: 'Document Preview',
@@ -94,9 +117,6 @@ export default {
     source: 'Source',
     relevance: 'Relevance',
     snippet: 'Snippet'
-  },
-  pagination: {
-    pageInfo: 'Page {page} / {pages}'
   },
   confirm: {
     deleteSelected: 'Delete the selected knowledge files?',

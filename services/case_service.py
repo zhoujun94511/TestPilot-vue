@@ -155,7 +155,11 @@ class CaseService:
                     
                     # 初始化 search_results（确保在所有分支中都有定义）
                     search_results = []
-                    
+
+                    from services.knowledge_vector_scope import merged_vector_search_kwargs
+
+                    scope_kwargs = merged_vector_search_kwargs()
+
                     # 使用智能检索策略（如果可用）
                     if self._use_smart_retrieval and self.smart_retrieval:
                         try:
@@ -163,7 +167,8 @@ class CaseService:
                             smart_results = self.smart_retrieval.retrieve(
                                 query=requirement_text,
                                 vector_db=vector_db,
-                                context=None  # 可以传入上下文
+                                context=None,
+                                vector_search_kwargs=scope_kwargs,
                             )
                             
                             # 转换为文档格式（兼容现有代码）
@@ -197,7 +202,8 @@ class CaseService:
                             try:
                                 search_with_scores = vector_db.similarity_search_with_score(
                                     enhanced_query,
-                                    k=settings.RAG_TOP_K * 2  # 检索更多结果，后续过滤
+                                    k=settings.RAG_TOP_K * 2,  # 检索更多结果，后续过滤
+                                    **scope_kwargs,
                                 )
                                 # 转换为文档列表并添加相似度得分
                                 search_results = []
@@ -211,9 +217,14 @@ class CaseService:
                                 # 降级：如果带得分的搜索失败，使用不带得分的搜索
                                 search_results = vector_db.similarity_search(
                                     enhanced_query,
-                                    k=settings.RAG_TOP_K * 2
+                                    k=settings.RAG_TOP_K * 2,
+                                    **scope_kwargs,
                                 )
-                    
+
+                    from services.data_scope import filter_scoped_retrieval_items
+
+                    search_results = filter_scoped_retrieval_items(search_results)
+
                     search_duration = time.time() - start_time
                     
                     # 记录embedding性能指标

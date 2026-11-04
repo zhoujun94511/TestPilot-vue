@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "description": "关键 GET 响应 data 层字段快照（集成/白盒）；更新请设 UPDATE_API_GET_SNAPSHOTS=1",
+  "endpoints": [
+    {
+      "path": "/api/stats/feature-flags",
+      "data_keys": ["enable_vector_store", "experimental_actions_enabled"]
+    },
+    {
+      "path": "/api/stats/health",
+      "data_keys": []
+    },
+    {
+      "path": "/api/chat/config",
+      "data_keys": ["experimental_actions_enabled"]
+    },
+    {
+      "path": "/api/cases/config",
+      "data_keys": []
+    },
+    {
+      "path": "/api/knowledge/config",
+      "data_keys": []
+    },
+    {
+      "path": "/api/config/categories",
+      "data_keys": []
+    }
+  ]
+}

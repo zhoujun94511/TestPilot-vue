@@ -10,6 +10,8 @@ from flask import Blueprint, request, jsonify, current_app
 from utils.utils_business_logic.case_id_generator import generate_case_id_from_data
 from utils.utils_core.api_error_handler import build_internal_error_result
 from config.settings import settings as config_settings
+from services.auth_service import stamp_ownership
+from services.data_scope import apply_data_scope, can_access_record
 import re
 
 # 创建蓝图
@@ -78,7 +80,7 @@ def _new_test_case(case_data, requirement_id=None):
         tag_text = tags
     else:
         tag_text = ','.join(str(tag) for tag in tags if tag is not None)
-    return TestCase(
+    test_case = TestCase(
         case_id=generate_case_id_from_data(case_data),
         display_id=case_data.get('display_id') or '',
         title=case_data.get('title', ''),
@@ -95,6 +97,8 @@ def _new_test_case(case_data, requirement_id=None):
         created_by='system',
         requirement_id=requirement_id
     )
+    stamp_ownership(test_case)
+    return test_case
 
 
 def _hallucination_payload(result):
@@ -166,13 +170,17 @@ def generate_test_cases():
             return jsonify(payload)
         else:
             status_code = int(result.get('status_code') or 500)
-            return jsonify({
+            error_body = {
                 'success': False,
                 'message': result.get('message', '生成用例失败'),
                 'error': result.get('error'),
                 'error_code': result.get('error_code'),
                 'retryable': bool(result.get('retryable', False))
-            }), status_code
+            }
+            if result.get('message_key'):
+                error_body['message_key'] = result.get('message_key')
+                error_body['message_params'] = result.get('message_params') or {}
+            return jsonify(error_body), status_code
 
     except BadRequest as e:
         return jsonify({
@@ -194,7 +202,10 @@ def generate_test_cases():
 
 @cases_bp.route('/batch-generate', methods=['POST'])
 def batch_generate_cases():
-    """批量生成测试用例"""
+    """批量生成测试用例
+
+    请求体 requirements 为字符串数组；Vue 批量页约定用户在 textarea 内用 ; / ； 分隔条目。
+    """
     try:
         data = request.get_json()
         if not data:
@@ -283,15 +294,14 @@ def list_test_cases():
         search = request.args.get('search', '').strip()
 
         # 构建查询
-        query = TestCase.query
+        query = apply_data_scope(TestCase.query, TestCase, 'cases')
 
         # 添加筛选条件
-        if category:
-            query = query.filter(TestCase.category == category)
-        if priority:
-            query = query.filter(TestCase.priority == priority)
-        if status:
-            query = query.filter(TestCase.status == status)
+        from services.sql_query_helpers import filter_column_eq
+
+        query = filter_column_eq(query, TestCase.category, category)
+        query = filter_column_eq(query, TestCase.priority, priority)
+        query = filter_column_eq(query, TestCase.status, status)
         if search:
             query = query.filter(
                 TestCase.title.contains(search) |
@@ -302,7 +312,9 @@ def list_test_cases():
 
         # 排序和分页
         query = query.order_by(TestCase.created_time.desc())
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        pagination = query.paginate(  # type: ignore[attr-defined]
+            page=page, per_page=per_page, error_out=False
+        )
 
         # 转换为字典格式
         cases = [case.to_dict() for case in pagination.items]
@@ -348,6 +360,12 @@ def get_test_case(case_id):
                 'success': False,
                 'message': '测试用例不存在'
             }), 404
+        if not can_access_record(test_case, 'cases'):
+            return jsonify({
+                'success': False,
+                'message': '没有权限访问该用例',
+                'message_key': 'common.errors.http403',
+            }), 403
 
         return jsonify({
             'success': True,
@@ -373,6 +391,12 @@ def update_test_case(case_id):
                 'success': False,
                 'message': '测试用例不存在'
             }), 404
+        if not can_access_record(test_case, 'cases'):
+            return jsonify({
+                'success': False,
+                'message': '没有权限修改该用例',
+                'message_key': 'common.errors.http403',
+            }), 403
 
         data = request.get_json()
         if not data:
@@ -397,6 +421,10 @@ def update_test_case(case_id):
             test_case.tags = ','.join(data['tags']) if isinstance(data['tags'], list) else data['tags']
         if 'status' in data:
             test_case.status = data['status']
+        if 'module' in data:
+            test_case.module = data['module']
+        if 'test_method' in data:
+            test_case.test_method = data['test_method']
 
         test_case.updated_time = datetime.now(timezone.utc)
         db.session.commit()
@@ -435,6 +463,12 @@ def delete_test_case(case_id):
                 'success': False,
                 'message': '测试用例不存在'
             }), 404
+        if not can_access_record(test_case, 'cases'):
+            return jsonify({
+                'success': False,
+                'message': '没有权限删除该用例',
+                'message_key': 'common.errors.http403',
+            }), 403
 
         db.session.delete(test_case)
         db.session.commit()
@@ -484,34 +518,40 @@ def get_case_config():
 def get_cases_stats():
     """获取测试用例统计信息"""
     try:
-        # 总数统计
-        total_cases = TestCase.query.count()
+        from services.stats_scope import scoped_cases_query
 
-        # 按状态统计
-        status_stats = db.session.query(
-            TestCase.status,
-            db.func.count(TestCase.id)
-        ).group_by(TestCase.status).all()
+        scoped = scoped_cases_query()
+        total_cases = scoped.count()
 
-        # 按优先级统计
-        priority_stats = db.session.query(
-            TestCase.priority,
-            db.func.count(TestCase.id)
-        ).group_by(TestCase.priority).all()
+        status_stats = (
+            scoped.with_entities(TestCase.status, db.func.count(TestCase.id))
+            .group_by(TestCase.status)
+            .all()
+        )
+        priority_stats = (
+            scoped.with_entities(TestCase.priority, db.func.count(TestCase.id))
+            .group_by(TestCase.priority)
+            .all()
+        )
+        category_stats = (
+            scoped.with_entities(TestCase.category, db.func.count(TestCase.id))
+            .group_by(TestCase.category)
+            .all()
+        )
 
-        # 按分类统计
-        category_stats = db.session.query(
-            TestCase.category,
-            db.func.count(TestCase.id)
-        ).group_by(TestCase.category).all()
+        def _bucket(rows):
+            return {
+                (row[0] if row[0] is not None else 'unknown'): int(row[1])
+                for row in rows
+            }
 
         return jsonify({
             'success': True,
             'stats': {
                 'total_cases': total_cases,
-                'by_status': dict(status_stats),
-                'by_priority': dict(priority_stats),
-                'by_category': dict(category_stats)
+                'by_status': _bucket(status_stats),
+                'by_priority': _bucket(priority_stats),
+                'by_category': _bucket(category_stats),
             }
         })
 

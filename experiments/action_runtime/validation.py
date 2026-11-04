@@ -12,6 +12,8 @@ class ExecuteRequestModel(BaseModel):
     session_id: Optional[str] = Field(default=None, max_length=100)
     user_id: Optional[str] = Field(default=None, max_length=100)
     require_confirmation: bool = True
+    tool_name: Optional[str] = Field(default=None, max_length=64)
+    args: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

@@ -68,6 +68,43 @@ def resolve_openai_model(model: str | None) -> str:
         return 'gpt-5'
     return RETIRED_OPENAI_MODELS.get(name, name)
 
+
+# 与 ai_test_gen 的 AnthropicProvider.MODELS 对齐：短别名和已退役型号落到当前 Claude。
+# Opus 5.5 / Sonnet 5.5 / Haiku 5.5 / Fable 5.1 拒绝 temperature、top_p、top_k。
+ANTHROPIC_MODEL_ALIASES = {
+    'opus': 'claude-opus-5-5',
+    'sonnet': 'claude-sonnet-5-5',
+    'haiku': 'claude-haiku-5-5',
+    'fable': 'claude-fable-5-1',
+    'claude-3-5-sonnet': 'claude-sonnet-5-5',
+    'claude-3-5-sonnet-latest': 'claude-sonnet-5-5',
+    'claude-3-5-haiku-20241022': 'claude-haiku-5-5',
+    'claude-3-sonnet': 'claude-sonnet-5-5',
+    'claude-3-haiku': 'claude-haiku-5-5',
+    'claude-3-opus': 'claude-opus-5-5',
+    'claude-sonnet-4-5': 'claude-sonnet-5-5',
+    'claude-sonnet-4-5-20250929': 'claude-sonnet-5-5',
+    'claude-opus-4-1': 'claude-opus-5-5',
+}
+ANTHROPIC_NO_SAMPLING_PREFIXES = (
+    'claude-opus-5',
+    'claude-sonnet-5',
+    'claude-haiku-5',
+    'claude-fable-5',
+)
+
+
+def resolve_anthropic_model(model: str | None) -> str:
+    name = str(model or '').strip()
+    if not name:
+        return 'claude-sonnet-5-5'
+    return ANTHROPIC_MODEL_ALIASES.get(name, name)
+
+
+def anthropic_rejects_sampling(model: str | None) -> bool:
+    resolved = resolve_anthropic_model(model)
+    return resolved.startswith(ANTHROPIC_NO_SAMPLING_PREFIXES)
+
 # 项目根目录
 BASE_DIR = Path(__file__).parent.parent
 ROOT_DIR = BASE_DIR.parent
@@ -109,6 +146,36 @@ class Config:
     SESSION_USE_SIGNER = True
     SESSION_FILE_DIR = str(BASE_DIR / 'sessions')
 
+    # 认证与 RBAC（默认关闭 REQUIRE_AUTH，兼容单机匿名使用）
+    AUTH_REQUIRE_AUTH = os.getenv('AUTH_REQUIRE_AUTH', 'false').strip().lower() in (
+        'true', '1', 'yes', 'on',
+    )
+    AUTH_REGISTER_ENABLED = os.getenv('AUTH_REGISTER_ENABLED', 'false').strip().lower() in (
+        'true', '1', 'yes', 'on',
+    )
+    # 自助注册的账号先停用，等管理员在用户管理里启用；关掉后注册即可登录并读写默认部门数据
+    AUTH_REGISTER_REQUIRE_APPROVAL = os.getenv(
+        'AUTH_REGISTER_REQUIRE_APPROVAL', 'true'
+    ).strip().lower() in ('true', '1', 'yes', 'on')
+    # 仅在前面有可信反向代理时开启，否则客户端可伪造 X-Forwarded-For 绕过按 IP 限流
+    AUTH_TRUST_PROXY_HEADERS = os.getenv('AUTH_TRUST_PROXY_HEADERS', 'false').strip().lower() in (
+        'true', '1', 'yes', 'on',
+    )
+    AUTH_LOCK_ENABLED = os.getenv('AUTH_LOCK_ENABLED', 'true').strip().lower() in (
+        'true', '1', 'yes', 'on',
+    )
+    AUTH_LOCK_MAX_FAILURES = int(os.getenv('AUTH_LOCK_MAX_FAILURES', '5') or '5')
+    AUTH_LOCK_DURATION_SECONDS = int(os.getenv('AUTH_LOCK_DURATION_SECONDS', '900') or '900')
+    AUTH_AUDIT_ENABLED = os.getenv('AUTH_AUDIT_ENABLED', 'true').strip().lower() in (
+        'true', '1', 'yes', 'on',
+    )
+    AUTH_PASSWORD_REQUIRE_COMPLEXITY = os.getenv(
+        'AUTH_PASSWORD_REQUIRE_COMPLEXITY', 'true'
+    ).strip().lower() in ('true', '1', 'yes', 'on')
+    VECTOR_METADATA_RETRY_INTERVAL_SECONDS = int(
+        os.getenv('VECTOR_METADATA_RETRY_INTERVAL_SECONDS', '300') or '0'
+    )
+
     # 文件上传配置
     UPLOAD_FOLDER = BASE_DIR / 'uploads'
     MAX_CONTENT_LENGTH = 3072 * 1024 * 1024  # 约3G (增加以支持大文件和批量上传)
@@ -121,8 +188,11 @@ class Config:
     # AI模型配置
     DEFAULT_COMPANY = os.getenv('DEFAULT_COMPANY', 'OPENAI').upper()
     MAX_TOKENS = int(os.getenv('MAX_TOKENS', '4000'))  # AI聊天Token数
-    
+    TOKEN_MAX_PER_SESSION = int(os.getenv('TOKEN_MAX_PER_SESSION', '50000'))
+    TOKEN_MAX_CALLS_PER_SESSION = int(os.getenv('TOKEN_MAX_CALLS_PER_SESSION', '100'))
+
     # 用例生成专用Token配置
+    TR_MAX_TOKENS = int(os.getenv('TR_MAX_TOKENS', '8000'))  # 用例生成与需求分析共用最大词元数
     TR_OPENAI_MAX_TOKENS = int(os.getenv('TR_OPENAI_MAX_TOKENS', '8000'))  # OpenAI用例生成Token数
     TR_DEEPSEEK_MAX_TOKENS = int(os.getenv('TR_DEEPSEEK_MAX_TOKENS', '8000'))  # DeepSeek用例生成Token数
 
@@ -139,6 +209,8 @@ class Config:
             return resolve_gemini_model(getattr(self, 'GEMINI_MODEL', None))
         elif company == 'QWEN':
             return getattr(self, 'QWEN_MODEL', None) or os.getenv('QWEN_MODEL', 'qwen-flash')
+        elif company == 'ANTHROPIC':
+            return resolve_anthropic_model(getattr(self, 'ANTHROPIC_MODEL', None))
         else:
             return 'gpt-5'  # 默认fallback
 
@@ -163,6 +235,8 @@ class Config:
             return ['gemini-3.8-flash']
         elif company == 'QWEN':
             return ['qwen-flash', 'qwen-plus', 'qwen-max']
+        elif company == 'ANTHROPIC':
+            return ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5']
         else:
             return ['gpt-5']
 
@@ -173,7 +247,7 @@ class Config:
         company = self.DEFAULT_COMPANY.upper() if self.DEFAULT_COMPANY else 'OPENAI'
         return {
             'supports_streaming': True,
-            'supports_knowledge': company in ['OPENAI', 'DEEPSEEK', 'GEMINI', 'QWEN'],
+            'supports_knowledge': company in ['OPENAI', 'DEEPSEEK', 'GEMINI', 'QWEN', 'ANTHROPIC'],
             'supports_context': True,
             'max_tokens': getattr(self, 'MAX_TOKENS', 4000)  # 使用统一的MAX_TOKENS配置
         }
@@ -197,6 +271,7 @@ class Config:
             enable_ollama = config_center_service.get_config_value('ENABLE_OLLAMA')
             enable_gemini = config_center_service.get_config_value('ENABLE_GEMINI')
             enable_qwen = config_center_service.get_config_value('ENABLE_QWEN')
+            enable_anthropic = config_center_service.get_config_value('ENABLE_ANTHROPIC')
             default_company = config_center_service.get_config_value('DEFAULT_COMPANY')
             
             # 转换布尔值
@@ -205,9 +280,12 @@ class Config:
             enable_ollama = str(enable_ollama).lower() == 'true' if enable_ollama else False
             enable_gemini = str(enable_gemini).lower() == 'true' if enable_gemini else False
             enable_qwen = str(enable_qwen).lower() == 'true' if enable_qwen else False
+            enable_anthropic = str(enable_anthropic).lower() == 'true' if enable_anthropic else False
             
             # 检查是否所有AI都被禁用
-            all_disabled = not (enable_openai or enable_deepseek or enable_ollama or enable_gemini or enable_qwen)
+            all_disabled = not (
+                enable_openai or enable_deepseek or enable_ollama or enable_gemini or enable_qwen or enable_anthropic
+            )
             
             # 如果配置中心有DEFAULT_COMPANY配置且不是所有AI都禁用，使用配置中心的值
             if default_company and not all_disabled:
@@ -224,6 +302,7 @@ class Config:
                 'OPENAI_API_KEY': 'OPENAI_API_KEY',
                 'OPENAI_BASE_URL': 'OPENAI_BASE_URL',
                 'OPENAI_MODEL': 'OPENAI_MODEL',
+                'TR_MAX_TOKENS': 'TR_MAX_TOKENS',
                 'TR_OPENAI_MAX_TOKENS': 'TR_OPENAI_MAX_TOKENS',
                 'DEEPSEEK_API_KEY': 'DEEPSEEK_API_KEY',
                 'DEEPSEEK_BASE_URL': 'DEEPSEEK_BASE_URL',
@@ -241,7 +320,13 @@ class Config:
                 'QWEN_TEMPERATURE': 'QWEN_TEMPERATURE',
                 'TR_QWEN_MAX_TOKENS': 'TR_QWEN_MAX_TOKENS',
                 'QWEN_TIMEOUT': 'QWEN_TIMEOUT',
+                'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY',
+                'ANTHROPIC_BASE_URL': 'ANTHROPIC_BASE_URL',
+                'ANTHROPIC_MODEL': 'ANTHROPIC_MODEL',
+                'TR_ANTHROPIC_MAX_TOKENS': 'TR_ANTHROPIC_MAX_TOKENS',
                 'MAX_TOKENS': 'MAX_TOKENS',
+                'TOKEN_MAX_PER_SESSION': 'TOKEN_MAX_PER_SESSION',
+                'TOKEN_MAX_CALLS_PER_SESSION': 'TOKEN_MAX_CALLS_PER_SESSION',
                 'ENABLE_EXPERIMENTAL_ACTIONS': 'ENABLE_EXPERIMENTAL_ACTIONS',
                 'GPT5_VERBOSITY': 'GPT5_VERBOSITY',
                 'GPT5_REASONING_EFFORT': 'GPT5_REASONING_EFFORT',
@@ -264,7 +349,7 @@ class Config:
                 value = config_center_service.get_config_value(config_key)
                 if value is not None and value != '':
                     # 对于数值类型的配置，进行类型转换
-                    if attr_name in ['MAX_TOKENS', 'TR_OPENAI_MAX_TOKENS', 'TR_DEEPSEEK_MAX_TOKENS', 'TR_GEMINI_MAX_TOKENS', 'TR_QWEN_MAX_TOKENS', 'QWEN_TIMEOUT', 'MAX_CASE_NUM', 'CHUNK_SIZE', 'MAX_WORKERS', 'MAX_MEMORY_MB', 'RAG_TOP_K']:
+                    if attr_name in ['MAX_TOKENS', 'TR_MAX_TOKENS', 'TR_OPENAI_MAX_TOKENS', 'TR_DEEPSEEK_MAX_TOKENS', 'TR_GEMINI_MAX_TOKENS', 'TR_QWEN_MAX_TOKENS', 'TR_ANTHROPIC_MAX_TOKENS', 'QWEN_TIMEOUT', 'TOKEN_MAX_PER_SESSION', 'TOKEN_MAX_CALLS_PER_SESSION', 'MAX_CASE_NUM', 'CHUNK_SIZE', 'MAX_WORKERS', 'MAX_MEMORY_MB', 'RAG_TOP_K']:
                         try:
                             value = int(value)
                         except (ValueError, TypeError):
@@ -293,6 +378,12 @@ class Config:
                         if resolved != str(value).strip():
                             print(f"[INFO] OpenAI 模型 {value} 已从 API 移除，改用 {resolved}")
                             self._persist_model_name(config_center_service, 'OPENAI_MODEL', resolved, 'OpenAI模型名称')
+                        value = resolved
+                    elif attr_name == 'ANTHROPIC_MODEL':
+                        resolved = resolve_anthropic_model(str(value))
+                        if resolved != str(value).strip():
+                            print(f"[INFO] Anthropic 模型 {value} 已映射为 {resolved}")
+                            self._persist_model_name(config_center_service, 'ANTHROPIC_MODEL', resolved, 'Anthropic模型名称')
                         value = resolved
                     setattr(self, attr_name, value)
             
@@ -358,6 +449,12 @@ class Config:
     
     # 保持向后兼容（Qwen特定配置）
     QWEN_TIMEOUT = int(os.getenv('QWEN_TIMEOUT', str(LLM_TIMEOUT_CASE_GENERATION)))
+
+    # Anthropic / Claude。调用走 Messages API，不走 OpenAI 兼容地址。
+    ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+    ANTHROPIC_BASE_URL = os.getenv('ANTHROPIC_BASE_URL', 'https://api.anthropic.com')
+    ANTHROPIC_MODEL = resolve_anthropic_model(os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-5-5'))
+    TR_ANTHROPIC_MAX_TOKENS = int(os.getenv('TR_ANTHROPIC_MAX_TOKENS', '8000'))
 
     # 性能配置
     CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', '1000'))
@@ -527,6 +624,8 @@ class Config:
 
     # 实验功能开关（默认关闭，避免影响主业务）
     ENABLE_EXPERIMENTAL_ACTIONS = os.getenv('ENABLE_EXPERIMENTAL_ACTIONS', 'false').strip().lower() in ('true', '1', 'yes')
+    # execute 自然语言猜工具（默认关闭；显式 tool_name/args 为正式路径）
+    EXPERIMENTAL_ACTIONS_ALLOW_NL = os.getenv('EXPERIMENTAL_ACTIONS_ALLOW_NL', 'false').strip().lower() in ('true', '1', 'yes')
 
     # ===========================================
     # 内容去重配置

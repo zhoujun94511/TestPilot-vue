@@ -1,7 +1,10 @@
 <template>
-  <div v-if="pages > 1" class="tp-pager">
-    <div class="tp-small" style="color: var(--tp-color-text-500)">{{ text }}</div>
-    <div class="tp-flex tp-gap-2">
+  <div
+    v-if="visible"
+    :class="cn('flex flex-wrap items-center gap-2', showSummary ? 'justify-between' : 'justify-end', props.class)"
+  >
+    <div v-if="showSummary" class="text-xs text-muted-foreground">{{ text }}</div>
+    <div class="flex gap-2">
       <TpButton
         variant="secondary"
         size="sm"
@@ -24,7 +27,12 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { formatListPaginationSummary, shouldShowPager } from '@/lib/pagination-ui';
+import { cn } from '@/lib/utils';
 import TpButton from './TpButton.vue';
+
+defineOptions({ inheritAttrs: false });
 
 const props = withDefaults(defineProps<{
   page: number;
@@ -34,10 +42,14 @@ const props = withDefaults(defineProps<{
   hasPrev: boolean;
   hasNext: boolean;
   loading?: boolean;
+  /** 为 false 时仅展示翻页按钮（列表页 toolbar 已有条数摘要） */
+  showSummary?: boolean;
   previousText?: string;
   nextText?: string;
+  class?: string;
 }>(), {
   loading: false,
+  showSummary: true,
   previousText: 'Prev',
   nextText: 'Next'
 });
@@ -46,20 +58,26 @@ const emit = defineEmits<{
   (event: 'change', page: number): void;
 }>();
 
-const text = computed(() => {
-  if (!props.total) return '0 / 0';
-  const start = (props.page - 1) * props.perPage + 1;
-  const end = Math.min(props.page * props.perPage, props.total);
-  return `${start}-${end} / ${props.total}`;
-});
-</script>
+const { t } = useI18n();
 
-<style scoped>
-.tp-pager {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-</style>
+const visible = computed(() =>
+  shouldShowPager({
+    page: props.page,
+    per_page: props.perPage,
+    total: props.total,
+    pages: props.pages
+  })
+);
+
+const text = computed(() =>
+  formatListPaginationSummary(
+    {
+      page: props.page,
+      per_page: props.perPage,
+      total: props.total,
+      pages: props.pages
+    },
+    (key, params) => t(key, params)
+  )
+);
+</script>

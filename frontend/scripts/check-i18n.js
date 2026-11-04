@@ -15,6 +15,72 @@ const I18N_DIR = path.join(ROOT, "src", "i18n");
 const SRC_DIR = path.join(ROOT, "src");
 const REFERENCE_LOCALE = "en";
 
+/** 与 src/i18n/index.ts 中 messages 的 namespace 一致（文件名 ≠ message 前缀时在此映射） */
+const MESSAGE_NAMESPACE_BY_FILE = {
+  "config-center.ts": "configCenter",
+  "experimental-tools-page.ts": "experimentalToolsPage",
+};
+
+/** 代码中以模板/配置键动态拼接的 prefix，源码中出现 prefix 即视为已引用 */
+const DYNAMIC_MESSAGE_PREFIXES = [
+  "configCenter.itemLabel.",
+  "configCenter.itemDescription.",
+  "configCenter.category.",
+  "configCenter.categoryDescription.",
+  "configCenter.provider.",
+  "configCenter.providerUi.",
+  "enums.",
+  "ai.",
+];
+
+function messageNamespaceForFile(fileName) {
+  return MESSAGE_NAMESPACE_BY_FILE[fileName] || fileName.replace(/\.ts$/, "");
+}
+
+function loadReservedKeys() {
+  const reservedPath = path.join(__dirname, "i18n-reserved-keys.json");
+  if (!fs.existsSync(reservedPath)) return new Set();
+  try {
+    const list = JSON.parse(fs.readFileSync(reservedPath, "utf8"));
+    return new Set(Array.isArray(list) ? list : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const RESERVED_KEYS = loadReservedKeys();
+
+function isKeyReferenced(fullKey, sourceContent) {
+  if (RESERVED_KEYS.has(fullKey)) return true;
+
+  const quoted = [`t('${fullKey}')`, `t("${fullKey}")`, `'${fullKey}'`, `"${fullKey}"`];
+  if (quoted.some((needle) => sourceContent.includes(needle))) return true;
+  if (sourceContent.includes(fullKey)) return true;
+
+  if (sourceContent.includes("translateKey(") && fullKey.startsWith("configCenter.")) {
+    if (sourceContent.includes("configCenter.")) return true;
+  }
+  if (sourceContent.includes("translateEnum(") && fullKey.startsWith("enums.")) {
+    const parts = fullKey.split(".");
+    if (parts.length >= 4) {
+      const enumPrefix = `${parts[0]}.${parts[1]}.${parts[2]}.`;
+      if (sourceContent.includes(enumPrefix)) return true;
+    }
+  }
+  if (sourceContent.includes("descriptionKey:") && fullKey.includes("providerUi.modelDescriptions.")) {
+    return true;
+  }
+  if (sourceContent.includes("nameKey:") && fullKey.startsWith("configCenter.provider")) {
+    return true;
+  }
+
+  for (const prefix of DYNAMIC_MESSAGE_PREFIXES) {
+    if (fullKey.startsWith(prefix) && sourceContent.includes(prefix)) return true;
+  }
+
+  return false;
+}
+
 function valueType(value) {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
@@ -93,10 +159,11 @@ function listSourceFiles(dir, acc = []) {
   return acc;
 }
 
-function reportPossiblyUnusedKeys(commonFiles, refDir) {
+function reportPossiblyUnusedKeys(refFiles, refDir, options) {
+  const verbose = options?.verbose === true;
   const allKeys = [];
-  for (const file of commonFiles) {
-    const namespace = file.replace(/\.ts$/, "");
+  for (const file of refFiles) {
+    const namespace = messageNamespaceForFile(file);
     const obj = loadTsDefaultObject(path.join(refDir, file));
     const keys = collectKeys(obj);
     for (const [keyPath] of keys) {
@@ -110,16 +177,14 @@ function reportPossiblyUnusedKeys(commonFiles, refDir) {
     sourceContent += `${fs.readFileSync(sourceFile, "utf8")}\n`;
   }
 
-  const maybeUnused = allKeys.filter((fullKey) => {
-    return !(
-      sourceContent.includes(`t('${fullKey}')`) ||
-      sourceContent.includes(`t("${fullKey}")`) ||
-      sourceContent.includes(fullKey)
-    );
-  });
+  const maybeUnused = allKeys.filter((fullKey) => !isKeyReferenced(fullKey, sourceContent));
   if (!maybeUnused.length) return;
-  console.log("\n--- 可能未使用的 key（仅供参考）---");
-  maybeUnused.forEach((key) => console.log(`  ${key}`));
+  console.log(`\n--- 可能未使用的 key: ${maybeUnused.length} 个（仅供参考）---`);
+  if (verbose) {
+    maybeUnused.forEach((key) => console.log(`  ${key}`));
+  } else {
+    console.log("  使用 npm run i18n:check -- --verbose 查看完整列表");
+  }
 }
 
 function main() {
@@ -204,7 +269,9 @@ function main() {
   console.log(`  locale 数量: ${locales.length}`);
   console.log(`  namespace 数量: ${refFiles.length}`);
   console.log(`  总 key 数 (参考语言): ${totalKeys}`);
-  reportPossiblyUnusedKeys(refFiles, localeDirs[REFERENCE_LOCALE]);
+  reportPossiblyUnusedKeys(refFiles, localeDirs[REFERENCE_LOCALE], {
+    verbose: process.argv.includes("--verbose"),
+  });
   console.log("\nSummary: 成功");
 }
 

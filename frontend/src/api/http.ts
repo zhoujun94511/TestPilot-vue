@@ -1,11 +1,14 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import i18n from '@/i18n';
+import { messageFromApiEnvelope, resolveTransportErrorMessage } from '@/lib/user-facing-error';
 import { pinia, useAppStore } from '@/stores';
 import type { Locale } from '@/i18n';
 
 export interface ApiLegacyEnvelope<T> {
   success?: boolean;
   message?: string;
+  message_key?: string;
+  message_params?: Record<string, unknown>;
   data?: T;
   error?: string;
   code?: number | string;
@@ -15,15 +18,43 @@ export interface ApiLegacyEnvelope<T> {
 export class ApiError extends Error {
   code?: number;
   errorCode?: string;
+  messageKey?: string;
+  messageParams?: Record<string, unknown>;
   details?: unknown;
 
-  constructor(message: string, options: { code?: number; errorCode?: string; details?: unknown } = {}) {
+  constructor(
+    message: string,
+    options: {
+      code?: number;
+      errorCode?: string;
+      messageKey?: string;
+      messageParams?: Record<string, unknown>;
+      details?: unknown;
+    } = {}
+  ) {
     super(message);
     this.name = 'ApiError';
     this.code = options.code;
     this.errorCode = options.errorCode;
+    this.messageKey = options.messageKey;
+    this.messageParams = options.messageParams;
     this.details = options.details;
   }
+}
+
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+/** /auth/* 自己处理 401（如登录失败、原密码错误），不触发全局跳转 */
+export function onUnauthorized(handler: UnauthorizedHandler) {
+  unauthorizedHandler = handler;
+}
+
+export function notifyUnauthorized(status: number | undefined, url: string | undefined) {
+  if (status !== 401 || !unauthorizedHandler) return;
+  const path = String(url || '');
+  if (/(^|\/)auth\//.test(path)) return;
+  unauthorizedHandler();
 }
 
 const http: AxiosInstance = axios.create({
@@ -74,34 +105,36 @@ function isBlob(value: unknown): value is Blob {
 }
 
 async function readBlobError(response: AxiosResponse<Blob>) {
-  const contentType = response.headers['content-type'] || '';
+  const contentType = String(response.headers['content-type'] || '');
   if (contentType.includes('application/json')) {
     const text = await response.data.text();
     try {
       const parsed = JSON.parse(text) as ApiLegacyEnvelope<unknown>;
-      return parsed.message || parsed.error || 'Request failed';
+      return parsed.message || parsed.error || resolveTransportErrorMessage(undefined, response.status);
     } catch {
-      return text || 'Request failed';
+      return text || resolveTransportErrorMessage(undefined, response.status);
     }
   }
-  return response.statusText || 'Request failed';
+  return resolveTransportErrorMessage(response.statusText, response.status);
 }
 
 function extractMessage(payload: ApiLegacyEnvelope<unknown> | undefined, fallback = 'Request failed') {
-  if (!payload) return fallback;
-  return payload.message || payload.error || fallback;
+  return messageFromApiEnvelope(payload, fallback);
 }
 
-function throwApiError(payload: ApiLegacyEnvelope<unknown> | undefined, fallback = 'Request failed') {
+function throwApiError(payload: ApiLegacyEnvelope<unknown> | undefined, fallback = 'Request failed'): never {
   const message = extractMessage(payload, fallback);
   const normalizedCode = typeof payload?.code === 'number'
     ? payload.code
     : (typeof payload?.code === 'string' && /^-?\d+$/.test(payload.code) ? Number(payload.code) : undefined);
-  throw new ApiError(message, {
-    code: normalizedCode,
-    errorCode: payload?.error_code,
-    details: payload?.data
-  });
+    const errorSlug = typeof payload?.error === 'string' ? payload.error : undefined;
+    throw new ApiError(message, {
+      code: normalizedCode,
+      errorCode: payload?.error_code || errorSlug,
+      messageKey: payload?.message_key,
+      messageParams: payload?.message_params,
+      details: payload?.data ?? payload
+    });
 }
 
 http.interceptors.response.use(
@@ -125,6 +158,7 @@ http.interceptors.response.use(
   },
   async (error: AxiosError) => {
     const response = error.response as AxiosResponse<Blob | ApiLegacyEnvelope<unknown>> | undefined;
+    notifyUnauthorized(response?.status, response?.config?.url);
 
     if (response?.config?.responseType === 'blob' && isBlob(response.data)) {
       const message = await readBlobError(response as AxiosResponse<Blob>);
@@ -132,12 +166,16 @@ http.interceptors.response.use(
     }
 
     const payload = response?.data as ApiLegacyEnvelope<unknown> | undefined;
-    const message = extractMessage(payload, error.message || 'Network error');
+    const payloadMessage = extractMessage(payload, '').trim();
+    const message = payloadMessage
+      || resolveTransportErrorMessage(error.message, response?.status);
     return Promise.reject(
       new ApiError(message, {
-        code: payload?.code ?? response?.status,
-        errorCode: payload?.error_code,
-        details: payload?.data
+        code: typeof payload?.code === 'number' ? payload.code : response?.status,
+        errorCode: payload?.error_code || (typeof payload?.error === 'string' ? payload.error : undefined),
+        messageKey: payload?.message_key,
+        messageParams: payload?.message_params,
+        details: payload?.data ?? payload
       })
     );
   }
@@ -148,7 +186,7 @@ export async function request<T = unknown>(config: AxiosRequestConfig): Promise<
   return response.data as T;
 }
 
-export function get<T = unknown>(url: string, params?: Record<string, unknown>) {
+export function get<T = unknown>(url: string, params?: object) {
   return request<T>({ url, method: 'GET', params });
 }
 

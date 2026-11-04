@@ -1,274 +1,266 @@
-<template>
-  <section class="tp-container-fluid tp-py-3 tp-page tp-page-shell tp-cases-page">
-    <div v-if="notice" class="tp-risk-block tp-cases-toast" :class="noticeClass" role="status" aria-live="polite">
-      <div class="tp-flex-grow-1">
-        <div class="tp-risk-block__title">{{ notice.title }}</div>
-        <div class="tp-risk-block__text">{{ notice.message }}</div>
-      </div>
-      <TpButton variant="ghost" size="sm" :aria-label="t('common.actions.close')" @click="clearNotice">
-        {{ t('common.actions.close') }}
-      </TpButton>
-    </div>
+﻿<template>
+  <section :class="pageRootMarkedClass(pageMarkerCases)">
+    <PageNoticeBanner
+      :notice="pageBanner"
+      @close="clearPageBanner"
+    />
 
-    <div v-if="isManageMode" class="tp-surface tp-p-3 tp-mb-3">
-      <div class="tp-flex tp-flex-wrap tp-justify-end tp-align-center tp-gap-2">
-        <template v-if="isManageMode">
-          <select v-model="exportFormat" class="tp-select tp-cases-export-format">
-            <option value="excel">{{ t('cases.actions.exportExcel') }}</option>
-            <option value="csv">{{ t('cases.actions.exportCsv') }}</option>
-            <option value="json">{{ t('cases.actions.exportJson') }}</option>
-          </select>
-          <TpButton variant="success" :loading="exporting" @click="handleExport">
-            {{ exporting ? t('cases.actions.exporting') : t('cases.actions.export') }}
-          </TpButton>
-          <TpButton variant="ghost" :loading="templateDownloading" @click="handleDownloadTemplate">
-            {{ templateDownloading ? t('cases.actions.templateDownloading') : t('cases.actions.downloadTemplate') }}
-          </TpButton>
-        </template>
-        <TpButton variant="secondary" :loading="listLoading || statsLoading" @click="handleRefresh">
-          {{ t('cases.actions.refresh') }}
-        </TpButton>
-      </div>
-    </div>
+    <PagePanel
+      v-if="isGenerateMode && (generateLoading || batchLoading)"
+      class="mb-4"
+      :title="batchLoading ? t('cases.state.batchGeneratingTitle') : t('cases.state.generatingTitle')"
+    >
+      <BaseState
+        variant="loading"
+        :title="batchLoading ? t('cases.actions.batchGenerating') : t('cases.actions.generating')"
+        :message="batchLoading ? t('cases.state.batchGeneratingHint') : t('cases.state.generatingHint')"
+      />
+    </PagePanel>
 
-    <div v-if="isGenerateMode && showSinglePanel" class="tp-surface tp-p-3 tp-mb-3">
-      <div class="tp-flex tp-flex-wrap tp-justify-between tp-align-start tp-gap-2 tp-mb-3">
-        <div>
-          <div class="tp-card__title">{{ t('cases.single.title') }}</div>
-          <div class="tp-card__subtitle">{{ t('cases.single.hint') }}</div>
-          <div class="tp-cases-inline-count tp-mt-2">
-            <label class="tp-form-label tp-mb-1">{{ t('cases.form.caseCountLabel') }}</label>
-            <select v-model.number="singleForm.caseCount" class="tp-select">
-              <option v-for="option in caseCountOptions" :key="`single-inline-${option.value}`" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
+    <PagePanel v-if="isGenerateMode && generateKind === 'single'" class="mb-4">
+      <form novalidate @submit.prevent="openGenerateConfirm">
+        <TpInput
+          v-model="singleForm.requirementText"
+          as="textarea"
+          class="mb-4"
+          :label="t('cases.form.requirementLabel')"
+          :helper="t('cases.form.requirementHelper')"
+          helper-placement="label"
+          :rows="8"
+          :placeholder="t('cases.form.requirementPlaceholder')"
+          required
+          :error="singleRequirementError"
+        />
+        <div :class="[grid12Class, 'mb-4']">
+          <div :class="colSpan12Md6">
+            <TpInput
+              v-model="singleForm.caseCount"
+              as="select"
+              :label="t('cases.form.caseCountLabel')"
+              :options="caseCountOptions"
+            />
           </div>
         </div>
-        <div class="tp-card__subtitle tp-cases-panel-note">
-          {{ t('cases.single.autoPriorityHint') }}
-        </div>
-      </div>
-
-      <form class="tp-row tp-g-3" @submit.prevent="openGenerateConfirm">
-        <div class="tp-col-12">
-          <label class="tp-form-label">{{ t('cases.form.requirementLabel') }}</label>
-          <textarea
-            v-model.trim="singleForm.requirementText"
-            class="tp-textarea"
-            rows="6"
-            :placeholder="t('cases.form.requirementPlaceholder')"
-            required
-          ></textarea>
-        </div>
-
-
-        <div class="tp-col-12 tp-flex tp-flex-wrap tp-justify-end tp-gap-2">
+        <p v-if="caseRagStatusLabel" class="mb-4 text-[0.78rem] leading-snug text-muted-foreground">{{ caseRagStatusLabel }}</p>
+        <div :class="formActionsClass">
           <TpButton variant="ghost" type="button" @click="clearSingleRequirementInput">
             {{ t('cases.actions.clearInput') }}
-          </TpButton>
-          <TpButton variant="secondary" type="button" @click="resetSingleForm">
-            {{ t('common.actions.cancel') }}
           </TpButton>
           <TpButton type="submit" :loading="generateLoading" :disabled="generateLoading || !singleForm.requirementText.trim()">
             {{ generateLoading ? t('cases.actions.generating') : t('cases.actions.generate') }}
           </TpButton>
         </div>
       </form>
-    </div>
+    </PagePanel>
 
-    <div v-if="isGenerateMode && showBatchPanel" class="tp-surface tp-p-3 tp-mb-3">
-      <div class="tp-flex tp-flex-wrap tp-justify-between tp-align-start tp-gap-2 tp-mb-3">
-        <div>
-          <div class="tp-card__title">{{ t('cases.batch.title') }}</div>
-          <div class="tp-card__subtitle">{{ t('cases.batch.hint') }}</div>
+    <PagePanel v-if="isGenerateMode && generateKind === 'batch'" class="mb-4">
+      <form novalidate @submit.prevent="openBatchConfirm">
+        <TpInput
+          v-model="batchForm.requirementsText"
+          as="textarea"
+          class="mb-4"
+          :label="t('cases.form.requirementLabel')"
+          :helper="t('cases.batch.requirementsHelper')"
+          helper-placement="label"
+          :rows="8"
+          :placeholder="t('cases.batch.requirementsPlaceholder')"
+          required
+          :error="batchRequirementsError"
+        />
+        <div :class="[grid12Class, 'mb-4']">
+          <div :class="colSpan12Md6">
+            <TpInput
+              v-model="batchForm.caseCountPerRequirement"
+              as="select"
+              :label="t('cases.form.caseCountLabel')"
+              :options="caseCountOptions"
+            />
+          </div>
+          <div :class="colSpan12Md6">
+            <TpInput
+              v-model="batchForm.processMode"
+              as="select"
+              :label="t('cases.batch.processModeLabel')"
+              :helper="t('cases.batch.processModeHelper')"
+              :options="processModeOptions"
+            />
+          </div>
         </div>
-        <div class="tp-card__subtitle tp-cases-panel-note">
-          {{ t('cases.batch.processHint') }}
-        </div>
-      </div>
-
-      <form class="tp-row tp-g-3 tp-align-end" @submit.prevent="openBatchConfirm">
-        <div class="tp-col-12">
-          <label class="tp-form-label">{{ t('cases.batch.requirementsLabel') }}</label>
-          <textarea
-            v-model.trim="batchForm.requirementsText"
-            class="tp-textarea"
-            rows="6"
-            :placeholder="t('cases.batch.requirementsPlaceholder')"
-            required
-          ></textarea>
-        </div>
-
-        <div class="tp-col-12 tp-col-md-4">
-          <label class="tp-form-label">{{ t('cases.form.caseCountLabel') }}</label>
-          <select v-model.number="batchForm.caseCountPerRequirement" class="tp-select">
-            <option v-for="option in caseCountOptions" :key="`batch-${option.value}`" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </div>
-
-        <div class="tp-col-12 tp-col-md-4">
-          <label class="tp-form-label">{{ t('cases.batch.processModeLabel') }}</label>
-          <select v-model="batchForm.processMode" class="tp-select">
-            <option v-for="option in processModeOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </div>
-
-
-        <div class="tp-col-12 tp-flex tp-flex-wrap tp-justify-end tp-gap-2">
-          <TpButton variant="secondary" type="button" @click="resetBatchForm">
-            {{ t('common.actions.cancel') }}
+        <p v-if="caseRagStatusLabel" class="mb-4 text-[0.78rem] leading-snug text-muted-foreground">{{ caseRagStatusLabel }}</p>
+        <div :class="formActionsClass">
+          <TpButton variant="ghost" type="button" @click="resetBatchForm">
+            {{ t('cases.actions.clearInput') }}
           </TpButton>
           <TpButton type="submit" :loading="batchLoading" :disabled="batchLoading || !batchForm.requirementsText.trim()">
             {{ batchLoading ? t('cases.actions.batchGenerating') : t('cases.actions.batchGenerate') }}
           </TpButton>
         </div>
       </form>
-    </div>
+    </PagePanel>
 
-    <div v-if="isManageMode" class="tp-row tp-g-3 tp-mb-3">
-      <div v-for="card in statsCards" :key="card.key" class="tp-col-12 tp-col-md-6 tp-col-xxl-3">
-        <TpCard>
-          <div class="tp-kpi-label">{{ card.label }}</div>
-          <div class="tp-kpi-value">{{ card.value }}</div>
-          <div v-if="card.hint" class="tp-kpi-hint">{{ card.hint }}</div>
-        </TpCard>
-      </div>
-    </div>
-
-    <div v-if="isManageMode" class="tp-surface tp-p-3 tp-mb-3">
-      <div v-if="statsLoading || statsError || !stats" class="tp-mb-3">
-        <BaseState
-          v-if="statsLoading"
-          variant="loading"
-          :title="t('cases.stats.loading')"
-        />
-        <BaseState
-          v-else-if="statsError"
-          variant="error"
-          :title="t('common.status.error')"
-          :message="statsError"
-          :retry-text="t('common.actions.retry')"
-          @retry="loadStats"
-        />
-        <BaseState
-          v-else
-          variant="empty"
-          :title="t('cases.stats.empty')"
-          :message="t('cases.stats.emptyHint')"
-        />
-      </div>
-
-      <div v-else class="tp-row tp-g-3 tp-cases-distribution-row">
-        <div class="tp-col-12 tp-col-xl-6">
-          <div class="tp-cases-distribution-item tp-p-3 tp-h-100">
-            <div class="tp-card__title tp-mb-2">{{ t('cases.stats.priorityDistribution') }}</div>
-            <div v-if="!priorityBreakdown.length" class="tp-card__subtitle">{{ t('cases.stats.emptyDistribution') }}</div>
-            <div v-else class="tp-flex tp-flex-wrap tp-gap-2">
-              <span
-                v-for="item in priorityBreakdown"
-                :key="item.key"
-                class="tp-tag tp-tag--neutral"
-              >
-                {{ item.label }}: {{ item.value }}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div class="tp-col-12 tp-col-xl-6">
-          <div class="tp-cases-distribution-item tp-p-3 tp-h-100">
-            <div class="tp-card__title tp-mb-2">{{ t('cases.stats.categoryDistribution') }}</div>
-            <div v-if="!categoryBreakdown.length" class="tp-card__subtitle">{{ t('cases.stats.emptyDistribution') }}</div>
-            <div v-else class="tp-flex tp-flex-wrap tp-gap-2">
-              <span
-                v-for="item in categoryBreakdown"
-                :key="item.key"
-                class="tp-tag tp-tag--neutral"
-              >
-                {{ item.label }}: {{ item.value }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="isManageMode" class="tp-surface tp-p-3 tp-mb-3">
-      <div class="tp-flex tp-flex-wrap tp-justify-between tp-align-start tp-gap-2 tp-mb-3">
-        <div>
-          <div class="tp-card__title">{{ t('cases.filters.title') }}</div>
-          <div class="tp-card__subtitle">{{ paginationText }}</div>
-        </div>
-        <div class="tp-flex tp-flex-wrap tp-align-center tp-gap-2">
-          <div class="tp-card__subtitle">
-            {{ t('cases.filters.selectedCount', { count: selectedCaseIds.length }) }}
-          </div>
-          <TpButton
-            variant="danger"
-            size="sm"
-            :disabled="selectedCaseIds.length === 0 || listLoading || generateLoading || batchLoading"
-            @click="openDeleteSelectedConfirm"
-          >
-            {{ t('cases.actions.deleteSelected') }}
+    <PagePanel
+      v-if="isManageMode"
+      :class="manageSyncedHighlight && casesSyncHighlightClass"
+      :title="t('cases.tabs.manage')"
+      :subtitle="t('cases.toolbar.manageLead')"
+    >
+      <template #actions>
+        <div :class="pageToolbarStripClass">
+          <TpButton variant="ghost" size="sm" :loading="listRefreshLoading" @click="handleRefresh">
+            {{ t('common.actions.refresh') }}
           </TpButton>
+          <TpButton variant="primary" size="sm" :loading="exporting" :disabled="exporting" @click="handleExport">
+            {{ exporting ? t('cases.actions.exporting') : t('cases.actions.export') }}
+          </TpButton>
+          <ToolbarOverflowMenu>
+            <DropdownMenuLabel>{{ t('cases.actions.export') }}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup v-model="exportFormat">
+              <DropdownMenuRadioItem value="excel">
+                {{ t('cases.actions.exportExcel') }}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="csv">
+                {{ t('cases.actions.exportCsv') }}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="json">
+                {{ t('cases.actions.exportJson') }}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem :disabled="templateDownloading" @select="handleDownloadTemplate">
+              {{
+                templateDownloading
+                  ? t('cases.actions.templateDownloading')
+                  : t('cases.actions.downloadTemplate')
+              }}
+            </DropdownMenuItem>
+          </ToolbarOverflowMenu>
+        </div>
+      </template>
+
+      <div :class="statsSummaryPanelClass">
+        <div :class="sectionTitleClass">{{ t('cases.stats.title') }}</div>
+        <div :class="[grid12Class, 'mt-3']">
+          <div v-for="card in statsCards" :key="card.key" :class="colSpan12Md6Min1400_3">
+            <KnowledgeStatsCard
+              :label="card.label"
+              :value="card.value"
+              :hint="card.hint"
+              :icon="card.icon"
+            />
+          </div>
         </div>
       </div>
 
-      <form class="tp-row tp-g-3 tp-align-end" @submit.prevent="handleSearch">
-        <div class="tp-col-12 tp-col-lg-5">
-          <label class="tp-form-label">{{ t('cases.filters.keywordLabel') }}</label>
-          <input
-            v-model.trim="filters.search"
-            type="search"
-            class="tp-input"
-            :placeholder="t('cases.filters.keywordPlaceholder')"
+      <div :class="pageSectionDivideClass">
+        <div v-if="statsLoading || statsError || !stats">
+          <BaseState
+            v-if="statsLoading"
+            variant="loading"
+            :title="t('cases.stats.loading')"
+          />
+          <BaseState
+            v-else-if="statsError"
+            variant="error"
+            :title="t('common.status.error')"
+            :message="statsError"
+            :retry-text="t('common.actions.retry')"
+            @retry="loadStats"
+          />
+          <BaseState
+            v-else
+            variant="empty"
+            :title="t('cases.stats.empty')"
+            :message="t('cases.stats.emptyHint')"
           />
         </div>
 
-        <div class="tp-col-12 tp-col-lg-2">
-          <label class="tp-form-label">{{ t('cases.filters.priorityLabel') }}</label>
-          <select v-model="filters.priority" class="tp-select">
-            <option value="">{{ t('cases.filters.priorityAll') }}</option>
-            <option v-for="option in priorityOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
+        <div v-else :class="grid12Class">
+          <div :class="colSpan12Xl6">
+            <div :class="casesDistributionItemClass">
+              <div :class="[panelTitleClass, 'mb-2']">{{ t('cases.stats.priorityDistribution') }}</div>
+              <div v-if="!priorityBreakdown.length" :class="panelSubtitleClass">{{ t('cases.stats.emptyDistribution') }}</div>
+              <div v-else class="flex flex-wrap gap-2">
+                <TpTag
+                  v-for="item in priorityBreakdown"
+                  :key="item.key"
+                  variant="neutral"
+                >
+                  {{ item.label }}: {{ item.value }}
+                </TpTag>
+              </div>
+            </div>
+          </div>
+          <div :class="colSpan12Xl6">
+            <div :class="casesDistributionItemClass">
+              <div :class="[panelTitleClass, 'mb-2']">{{ t('cases.stats.categoryDistribution') }}</div>
+              <div v-if="!categoryBreakdown.length" :class="panelSubtitleClass">{{ t('cases.stats.emptyDistribution') }}</div>
+              <div v-else class="flex flex-wrap gap-2">
+                <TpTag
+                  v-for="item in categoryBreakdown"
+                  :key="item.key"
+                  variant="neutral"
+                >
+                  {{ item.label }}: {{ item.value }}
+                </TpTag>
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
 
-        <div class="tp-col-12 tp-col-lg-2">
-          <label class="tp-form-label">{{ t('cases.filters.statusLabel') }}</label>
-          <select v-model="filters.status" class="tp-select">
-            <option value="">{{ t('cases.filters.statusAll') }}</option>
-            <option v-for="option in statusOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </div>
+      <div :class="pageSectionDivideClass">
+        <TableToolbar :title="t('cases.filters.title')">
+          <template #actions>
+            <span :class="tableToolbarSubtitle()">
+              {{ t('cases.filters.selectedCount', { count: selectedCaseIds.length }) }}
+            </span>
+            <TpButton
+              variant="danger"
+              size="sm"
+              :disabled="selectedCaseIds.length === 0 || listLoading || generateLoading || batchLoading"
+              @click="openDeleteSelectedConfirm"
+            >
+              {{ t('cases.actions.deleteSelected') }}
+            </TpButton>
+          </template>
+          <template #filters>
+            <TableFilterForm @submit="handleSearch">
+              <TableFilterInput
+                v-model="filters.search"
+                :placeholder="t('cases.filters.keywordPlaceholder')"
+                :aria-label="t('cases.filters.keywordLabel')"
+              />
+              <TableFilterSelect
+                v-model="filters.priority"
+                :aria-label="t('cases.filters.priorityLabel')"
+              >
+                <option value="">{{ t('cases.filters.priorityAll') }}</option>
+                <option v-for="option in priorityOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </TableFilterSelect>
+              <TableFilterSelect v-model="filters.status" :aria-label="t('cases.filters.statusLabel')">
+                <option value="">{{ t('cases.filters.statusAll') }}</option>
+                <option v-for="option in statusOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </TableFilterSelect>
+              <TableFilterSelect v-model="filters.category" :aria-label="t('cases.filters.categoryLabel')">
+                <option value="">{{ t('cases.filters.categoryAll') }}</option>
+                <option v-for="option in categoryOptions" :key="`filter-cat-${option.value}`" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </TableFilterSelect>
+              <TpButton type="submit" :loading="listLoading">
+                {{ t('cases.filters.apply') }}
+              </TpButton>
+            </TableFilterForm>
+          </template>
+        </TableToolbar>
+      </div>
 
-        <div class="tp-col-12 tp-col-lg-2">
-          <label class="tp-form-label">{{ t('cases.filters.categoryLabel') }}</label>
-          <select v-model="filters.category" class="tp-select">
-            <option value="">{{ t('cases.filters.categoryAll') }}</option>
-            <option v-for="option in categoryOptions" :key="`filter-cat-${option.value}`" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </div>
-
-        <div class="tp-col-12 tp-col-lg-1 tp-grid">
-          <TpButton type="submit" :loading="listLoading">
-            {{ t('cases.filters.apply') }}
-          </TpButton>
-        </div>
-      </form>
-    </div>
-
-    <div v-if="isManageMode" class="tp-surface tp-p-3" :class="{ 'tp-cases-sync-highlight': manageSyncedHighlight }">
-      <div v-if="listError" class="tp-mb-3">
+      <div :class="pageSectionDivideClass">
+      <div v-if="listError" class="mb-4">
         <BaseState
           variant="error"
           :title="t('common.status.error')"
@@ -284,6 +276,7 @@
         :data="cases"
         :row-class="resolveCaseRowClass"
         :loading="listLoading"
+        keep-content-while-loading
         :loading-title="t('cases.table.loading')"
         :empty-title="t('cases.table.empty')"
         :empty-message="''"
@@ -292,26 +285,33 @@
         row-key="case_id"
         @update:selectedKeys="handleSelectionUpdate"
       >
+        <template #toolbar>
+          <TableToolbar :title="t('cases.table.title')" :pagination="pagination" />
+        </template>
         <template #cell-caseId="{ row }">
-          <div class="tp-data-title tp-cases-cell-id" :title="resolveCaseId(row as CaseRecord)">
+          <div :class="[dataTitleClass, casesCellClamp2Class]" :title="resolveCaseId(row as CaseRecord)">
             {{ resolveCaseId(row as CaseRecord) }}
           </div>
         </template>
         <template #cell-title="{ row }">
-          <div class="tp-data-title tp-cases-cell-title" :title="(row as CaseRecord).title">
+          <div :class="[dataTitleClass, casesCellClamp3Class]" :title="(row as CaseRecord).title">
             {{ (row as CaseRecord).title }}
           </div>
-          <div v-if="(row as CaseRecord).description" class="tp-data-subtitle tp-cases-cell-desc">
+          <div
+            v-if="(row as CaseRecord).description"
+            :class="[dataSubtitleDenseClass, casesCellMetaClass]"
+            :title="(row as CaseRecord).description || undefined"
+          >
             {{ (row as CaseRecord).description }}
           </div>
         </template>
         <template #cell-priority="{ row }">
-          <TpTag :variant="priorityTagVariant((row as CaseRecord).priority)">
+          <TpTag :variant="casePriorityTagVariant((row as CaseRecord).priority)">
             {{ resolvePriorityLabel((row as CaseRecord).priority) }}
           </TpTag>
         </template>
         <template #cell-status="{ row }">
-          <TpTag :variant="statusTagVariant((row as CaseRecord).status)">
+          <TpTag :variant="caseStatusTagVariant((row as CaseRecord).status)">
             {{ resolveStatusLabel((row as CaseRecord).status) }}
           </TpTag>
         </template>
@@ -322,21 +322,37 @@
           {{ resolveTestMethodLabel((row as CaseRecord).test_method) }}
         </template>
         <template #cell-module="{ row }">
-          <div class="tp-data-subtitle tp-cases-cell-meta">{{ resolveModuleLabel((row as CaseRecord).module) }}</div>
+          <div
+            :class="[dataSubtitleDenseClass, casesCellMetaClass]"
+            :title="resolveModuleLabel((row as CaseRecord).module)"
+          >
+            {{ resolveModuleLabel((row as CaseRecord).module) }}
+          </div>
         </template>
         <template #cell-tags="{ row }">
-          <div class="tp-data-subtitle tp-cases-cell-meta">{{ resolveTagsLabel((row as CaseRecord).tags) }}</div>
+          <div
+            :class="[dataSubtitleDenseClass, casesCellMetaClass]"
+            :title="resolveTagsLabel((row as CaseRecord).tags)"
+          >
+            {{ resolveTagsLabel((row as CaseRecord).tags) }}
+          </div>
         </template>
         <template #cell-steps="{ row }">
-          <div class="tp-data-subtitle tp-cases-cell-steps">
+          <div
+            :class="[dataSubtitleDenseClass, casesCellMetaClass]"
+            :title="resolveStepsPreview(row as CaseRecord)"
+          >
             {{ resolveStepsPreview(row as CaseRecord) }}
           </div>
         </template>
         <template #cell-updatedAt="{ row }">
-          {{ formatDateTime((row as CaseRecord).updated_time || (row as CaseRecord).created_time) }}
+          {{ formatCaseDateTime((row as CaseRecord).updated_time || (row as CaseRecord).created_time) }}
         </template>
         <template #cell-actions="{ row }">
-          <div class="tp-flex tp-justify-end tp-gap-2 tp-cases-actions">
+          <div :class="casesActionsClass">
+            <TpButton variant="primary" size="sm" @click.stop="openCaseEditor(row as CaseRecord)">
+              {{ t('cases.table.actions.edit') }}
+            </TpButton>
             <TpButton variant="ai" size="sm" :disabled="generateLoading" @click.stop="openRowGenerateConfirm(row as CaseRecord)">
               {{ t('cases.table.actions.regenerate') }}
             </TpButton>
@@ -348,31 +364,32 @@
             </TpButton>
           </div>
         </template>
+        <template #footer>
+          <ListTablePager :pagination="pagination" :loading="listLoading" @change="changePage" />
+        </template>
       </BaseTable>
-      <div v-if="pagination.pages > 1" class="tp-flex tp-flex-wrap tp-justify-between tp-align-center tp-gap-2 tp-mt-3">
-        <div class="tp-small" style="color: var(--tp-color-text-500)">{{ paginationText }}</div>
-        <TpPager
-          :page="pagination.page"
-          :per-page="pagination.per_page"
-          :total="pagination.total"
-          :pages="pagination.pages"
-          :has-prev="Boolean(pagination.has_prev)"
-          :has-next="Boolean(pagination.has_next)"
-          :previous-text="t('common.actions.previous')"
-          :next-text="t('common.actions.next')"
-          @change="changePage"
-        />
       </div>
-    </div>
+    </PagePanel>
 
     <ConfirmDialog
-      v-model="confirm.visible"
-      :title="confirm.title"
-      :message="confirm.message"
-      :confirm-text="confirm.confirmText"
-      :cancel-text="confirm.cancelText"
-      :confirm-variant="confirm.variant"
-      @confirm="runConfirmedAction"
+      v-model="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :confirm-variant="confirmDialog.variant"
+      @confirm="confirmDialog.handleConfirm"
+      @cancel="confirmDialog.handleCancel"
+    />
+
+    <CaseEditDrawer
+      :visible="caseEditVisible"
+      :record="editingCase"
+      :priority-options="priorityOptions"
+      :status-options="statusOptions"
+      @close="closeCaseEditor"
+      @saved="handleCaseSaved"
+      @error="(message) => showNotice('danger', t('common.status.error'), message)"
     />
   </section>
 </template>
@@ -380,15 +397,70 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
+import { usePageNotifier } from '@/composables/usePageNotifier';
 import { useAppStore } from '@/stores';
 import { resolveCaseCategoryDisplayName } from '@/utils/caseCategoryI18n';
 import BaseState from '@/components/common/BaseState.vue';
+import KnowledgeStatsCard from '@/components/common/KnowledgeStatsCard.vue';
+import PageNoticeBanner from '@/components/common/PageNoticeBanner.vue';
+import PagePanel from '@/components/common/PagePanel.vue';
+import TableToolbar from '@/components/common/TableToolbar.vue';
+import ToolbarOverflowMenu from '@/components/common/ToolbarOverflowMenu.vue';
+import {
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator
+} from '@/components/ui/dropdown-menu';
+import { TableFilterForm, TableFilterInput, TableFilterSelect } from '@/components/common/table';
+import {
+  dataSubtitleDenseClass,
+  dataTitleClass,
+  sectionTitleClass
+} from '@/lib/page-typography';
+import { statsSummaryPanelClass } from '@/lib/stats-ui';
+import { type ListFetchMode } from '@/lib/list-fetch-mode';
+import { casePriorityTagVariant, caseStatusTagVariant } from '@/lib/enum-tag-ui';
+import { useListPageChange } from '@/composables/useListPageChange';
+import { usePaginatedList } from '@/composables/usePaginatedList';
+import { useTimedHighlight } from '@/composables/useTimedHighlight';
+import ListTablePager from '@/components/common/ListTablePager.vue';
+import { useConfirmAction } from '@/composables/useConfirmAction';
+import { formatDateTime } from '@/lib/format';
+import { triggerBlobDownload } from '@/lib/download';
+import { formActionsClass, pageToolbarStripClass } from '@/lib/page-chrome-ui';
+import {
+  casesDistributionItemClass,
+  colSpan12Md6,
+  colSpan12Md6Min1400_3,
+  colSpan12Xl6,
+  grid12Class,
+  pageMarkerCases,
+  pageRootMarkedClass,
+  pageSectionDivideClass
+} from '@/lib/page-layout-ui';
+import {
+  casesActionsClass,
+  casesCellClamp2Class,
+  casesCellClamp3Class,
+  casesCellMetaClass,
+  casesExportFormatClass,
+  casesRowHighlightClass,
+  casesSyncHighlightClass
+} from '@/lib/cases-ui';
+import { parseBatchRequirementText } from '@/lib/cases-batch-requirements';
+import { selectVariants } from '@/lib/field-control';
+import { cn } from '@/lib/utils';
+import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
+import { panelSubtitleClass, panelTitleClass } from '@/lib/panel-ui';
+import { tableToolbarSubtitle } from '@/lib/table-ui';
 import BaseTable, { type BaseTableColumn } from '@/components/common/BaseTable.vue';
+import CaseEditDrawer from '@/components/cases/CaseEditDrawer.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import TpButton from '@/components/ui/base/TpButton.vue';
-import TpCard from '@/components/ui/base/TpCard.vue';
-import TpPager from '@/components/ui/base/TpPager.vue';
+import TpInput from '@/components/ui/base/TpInput.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
 import {
   batchGenerateCases,
@@ -409,12 +481,6 @@ import {
   type CaseStats,
   type CaseProcessMode
 } from '@/api/cases';
-
-interface NoticeState {
-  type: 'success' | 'danger' | 'warning' | 'info';
-  title: string;
-  message: string;
-}
 
 interface SelectOption {
   value: string;
@@ -439,6 +505,11 @@ const props = withDefaults(defineProps<{
 });
 
 const { t, locale } = useI18n();
+const casesDateLocale = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'));
+
+function formatCaseDateTime(value: string | null | undefined) {
+  return formatDateTime(value, casesDateLocale.value);
+}
 const router = useRouter();
 const route = useRoute();
 const appStore = useAppStore();
@@ -448,22 +519,24 @@ const stats = ref<CaseStats | null>(null);
 const config = ref<CaseGenerationConfig | null>(null);
 const lastGenerationResult = ref<CaseGenerateResult | CaseBatchGenerateResult | null>(null);
 const selectedCaseIds = ref<Array<string | number>>([]);
-const listLoading = ref(false);
+const listRefreshLoading = ref(false);
 const statsLoading = ref(false);
 const generateLoading = ref(false);
 const batchLoading = ref(false);
 const exporting = ref(false);
 const templateDownloading = ref(false);
-const listError = ref('');
 const statsError = ref('');
-const notice = ref<NoticeState | null>(null);
-const noticeTimer = ref<number | null>(null);
+const {
+  banner: pageBanner,
+  clearBanner: clearPageBanner,
+  showNotice: notifyShowNotice
+} = usePageNotifier();
 const manageSyncedTimer = ref<number | null>(null);
 const manageSyncedHighlight = ref(false);
-const highlightCaseIds = ref<Set<string>>(new Set());
-const highlightRowsTimer = ref<number | null>(null);
-const showSinglePanel = ref(true);
-const showBatchPanel = ref(false);
+const caseRowHighlight = useTimedHighlight(4600);
+type GenerateKind = 'single' | 'batch';
+
+const generateKind = ref<GenerateKind>('single');
 const pendingAction = ref<PendingActionState>({ action: null, payload: undefined, row: null });
 const exportFormat = ref<CaseExportFormat>('excel');
 const isGenerateMode = computed(() => props.mode === 'generate');
@@ -480,13 +553,25 @@ const filters = reactive({
 
 const singleForm = reactive({
   requirementText: '',
-  caseCount: 5,
+  caseCount: 5
 });
 
 const batchForm = reactive({
   requirementsText: '',
   caseCountPerRequirement: 3,
   processMode: 'sequential' as CaseProcessMode
+});
+
+const singleRequirementError = ref('');
+const batchRequirementsError = ref('');
+
+const ragAvailable = computed(() => appStore.featureFlags.enableVectorStore);
+const caseRagStatusLabel = computed(() => {
+  if (!config.value && ragAvailable.value) return '';
+  if (!ragAvailable.value) return t('cases.form.ragUnavailable');
+  return config.value?.enable_case_generation_rag
+    ? t('cases.form.ragFollowsConfigOn')
+    : t('cases.form.ragFollowsConfigOff');
 });
 
 const pagination = ref({
@@ -498,14 +583,12 @@ const pagination = ref({
   has_next: false
 });
 
-const confirm = reactive({
-  visible: false,
-  title: '',
-  message: '',
-  confirmText: '',
-  cancelText: t('common.actions.cancel'),
-  variant: 'primary' as 'primary' | 'danger' | 'warning'
+const { listLoading, listError, loadPage: loadCasesPage } = usePaginatedList(cases, {
+  refreshLoading: listRefreshLoading,
+  pagination
 });
+
+const confirmDialog = useConfirmAction(t('common.actions.cancel'));
 
 const caseCountOptions = computed<CountOption[]>(() => {
   const options = config.value?.case_count_options || [];
@@ -570,14 +653,41 @@ const tableColumns = computed<BaseTableColumn[]>(() => [
   { key: 'tags', label: t('cases.table.columns.tags'), width: '240px' },
   { key: 'steps', label: t('cases.table.columns.steps'), width: '320px' },
   { key: 'updatedAt', label: t('cases.table.columns.updatedAt'), width: '160px' },
-  { key: 'actions', label: t('cases.table.columns.actions'), width: '180px', headerClass: 'text-end', cellClass: 'text-end' }
+  { key: 'actions', label: t('cases.table.columns.actions'), width: '300px', headerClass: 'text-end', cellClass: 'text-end' }
 ]);
 
+const caseEditVisible = ref(false);
+const editingCase = ref<CaseRecord | null>(null);
+
 const statsCards = computed(() => [
-  { key: 'total', label: t('cases.stats.total'), value: formatNumber(stats.value?.total_cases ?? 0), hint: t('cases.stats.totalHint') },
-  { key: 'draft', label: t('cases.stats.draft'), value: formatNumber(stats.value?.by_status?.draft ?? 0), hint: t('cases.stats.statusHint') },
-  { key: 'active', label: t('cases.stats.active'), value: formatNumber(stats.value?.by_status?.active ?? 0), hint: t('cases.stats.statusHint') },
-  { key: 'deprecated', label: t('cases.stats.deprecated'), value: formatNumber(stats.value?.by_status?.deprecated ?? 0), hint: t('cases.stats.statusHint') }
+  {
+    key: 'total',
+    label: t('cases.stats.total'),
+    value: formatNumber(stats.value?.total_cases ?? 0),
+    hint: t('cases.stats.totalHint'),
+    icon: 'TC'
+  },
+  {
+    key: 'draft',
+    label: t('cases.stats.draft'),
+    value: formatNumber(stats.value?.by_status?.draft ?? 0),
+    hint: t('cases.stats.statusHint'),
+    icon: 'DR'
+  },
+  {
+    key: 'active',
+    label: t('cases.stats.active'),
+    value: formatNumber(stats.value?.by_status?.active ?? 0),
+    hint: t('cases.stats.statusHint'),
+    icon: 'OK'
+  },
+  {
+    key: 'deprecated',
+    label: t('cases.stats.deprecated'),
+    value: formatNumber(stats.value?.by_status?.deprecated ?? 0),
+    hint: t('cases.stats.statusHint'),
+    icon: 'AR'
+  }
 ]);
 
 const priorityBreakdown = computed(() => {
@@ -602,26 +712,6 @@ const categoryBreakdown = computed(() => {
     }))
     .filter((item) => item.value > 0)
     .sort((left, right) => left.label.localeCompare(right.label));
-});
-
-const paginationText = computed(() => {
-  const safePages = Math.max(1, pagination.value.pages || 0);
-  const safePage = Math.min(Math.max(1, pagination.value.page || 1), safePages);
-  return t('cases.pagination.pageInfo', {
-    page: safePage,
-    pages: safePages,
-    total: formatNumber(pagination.value.total)
-  });
-});
-
-const noticeClass = computed(() => {
-  if (!notice.value) return '';
-  return {
-    'tp-risk-block--info': notice.value.type === 'info',
-    'tp-risk-block--danger': notice.value.type === 'danger',
-    'tp-risk-block--warning': notice.value.type === 'warning',
-    'tp-risk-block--success': notice.value.type === 'success'
-  };
 });
 
 function translateEnum(key: string, fallback: string) {
@@ -670,36 +760,6 @@ function translateTestMethod(value: string | undefined) {
 function prioritySort(left: string, right: string) {
   const order: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 };
   return (order[left] ?? 99) - (order[right] ?? 99);
-}
-
-function priorityTagVariant(priority: string | undefined) {
-  switch (priority) {
-    case 'P0':
-      return 'danger';
-    case 'P1':
-      return 'warning';
-    case 'P2':
-      return 'info';
-    case 'P3':
-      return 'neutral';
-    case 'P4':
-      return 'neutral';
-    default:
-      return 'neutral';
-  }
-}
-
-function statusTagVariant(status: string | undefined) {
-  switch (status) {
-    case 'active':
-      return 'success';
-    case 'draft':
-      return 'neutral';
-    case 'deprecated':
-      return 'danger';
-    default:
-      return 'neutral';
-  }
 }
 
 function resolvePriorityLabel(priority: string | undefined) {
@@ -754,41 +814,18 @@ function formatBoolean(value: boolean | undefined) {
   return value ? t('common.boolean.yes') : t('common.boolean.no');
 }
 
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-US' : 'zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date);
+function showNotice(type: 'success' | 'danger' | 'warning' | 'info', title: string, message: string) {
+  notifyShowNotice(type, message, { title });
 }
 
-function showNotice(type: NoticeState['type'], title: string, message: string) {
-  // 成功/信息类反馈不再打断页面，保留告警与错误即可
-  if (type === 'success' || type === 'info') {
-    return;
+function syncGenerateKindFromRoute() {
+  if (!isGenerateMode.value) return;
+  const kind = typeof route.query.kind === 'string' ? route.query.kind : '';
+  generateKind.value = kind === 'batch' ? 'batch' : 'single';
+  const prefill = typeof route.query.prefill === 'string' ? route.query.prefill.trim() : '';
+  if (prefill && generateKind.value === 'single' && !singleForm.requirementText.trim()) {
+    singleForm.requirementText = prefill;
   }
-  if (noticeTimer.value !== null) {
-    window.clearTimeout(noticeTimer.value);
-    noticeTimer.value = null;
-  }
-  notice.value = { type, title, message };
-  const timeout = type === 'danger' ? 8000 : 5000;
-  noticeTimer.value = window.setTimeout(() => {
-    clearNotice();
-  }, timeout);
-}
-
-function clearNotice() {
-  if (noticeTimer.value !== null) {
-    window.clearTimeout(noticeTimer.value);
-    noticeTimer.value = null;
-  }
-  notice.value = null;
 }
 
 function resetSingleForm() {
@@ -818,7 +855,7 @@ async function loadConfig() {
     applyConfigDefaults();
   } catch (error) {
     config.value = null;
-    showNotice('warning', t('common.feedback.warning'), error instanceof Error ? error.message : t('cases.message.configFailed'));
+    showNotice('warning', t('common.feedback.warning'), getUserFacingErrorMessage(error, t('cases.message.configFailed')));
   }
 }
 
@@ -828,38 +865,46 @@ async function loadStats() {
     statsError.value = '';
     stats.value = await getCaseStats();
   } catch (error) {
-    statsError.value = error instanceof Error ? error.message : t('cases.message.statsFailed');
+    statsError.value = getUserFacingErrorMessage(error, t('cases.message.statsFailed'));
     stats.value = null;
   } finally {
     statsLoading.value = false;
   }
 }
 
-async function loadCasesData() {
-  try {
-    listLoading.value = true;
-    listError.value = '';
-    const response = await listCases({
-      page: filters.page,
-      per_page: filters.per_page,
-      search: filters.search,
-      priority: filters.priority,
-      status: filters.status,
-      category: filters.category
-    });
-    cases.value = response.cases;
-    pagination.value = response.pagination;
+async function loadCasesData(mode: ListFetchMode = 'page') {
+  const result = await loadCasesPage(
+    filters.page,
+    mode,
+    () =>
+      listCases({
+        page: filters.page,
+        per_page: filters.per_page,
+        search: filters.search,
+        priority: filters.priority,
+        status: filters.status,
+        category: filters.category
+      }).then((response) => ({ rows: response.cases, pagination: response.pagination })),
+    {
+      resolveMessage: (error) => getUserFacingErrorMessage(error, t('cases.message.loadFailed')),
+      onClear: () => {
+        cases.value = [];
+      }
+    }
+  );
+  if (result) {
     selectedCaseIds.value = selectedCaseIds.value.filter((id) => cases.value.some((item) => item.case_id === id));
-  } catch (error) {
-    listError.value = error instanceof Error ? error.message : t('cases.message.loadFailed');
-    cases.value = [];
-  } finally {
-    listLoading.value = false;
   }
 }
 
-async function refreshAll() {
-  await Promise.all([loadStats(), loadCasesData()]);
+const { changePage } = useListPageChange(
+  pagination,
+  (_page, mode) => loadCasesData(mode),
+  { onAcceptPage: (page) => { filters.page = page; } }
+);
+
+async function refreshAll(listMode: ListFetchMode = 'page') {
+  await Promise.all([loadStats(), loadCasesData(listMode)]);
 }
 
 async function consumeGenerationRouteState() {
@@ -867,9 +912,8 @@ async function consumeGenerationRouteState() {
   const from = typeof route.query.from === 'string' ? route.query.from : '';
   if (from !== 'generate' && from !== 'batchGenerate') return;
 
-  // 生成后统一回到管理第一页，确保用户能看到最新新增结果
+  // 生成后统一回到管理第一页；列表由 bootstrap/refresh 已加载，此处仅在需要检索定位时再请求
   filters.page = 1;
-  await loadCasesData();
   const highlightQuery = typeof route.query.hids === 'string' ? route.query.hids : '';
   const idsFromQuery = highlightQuery
     .split(',')
@@ -883,7 +927,7 @@ async function consumeGenerationRouteState() {
     // 目标不在当前页/筛选结果时，自动按首个ID检索定位，避免“已跳转但无高亮”的错觉。
     filters.search = idsFromQuery[0];
     filters.page = 1;
-    await loadCasesData();
+    await loadCasesData('filter');
   }
   highlightRows(idsFromQuery);
   manageSyncedHighlight.value = true;
@@ -901,7 +945,7 @@ async function consumeGenerationRouteState() {
     from === 'batchGenerate' ? t('cases.message.batchGenerateSynced') : t('cases.message.generateSynced')
   );
 
-  const nextQuery = { ...route.query } as Record<string, unknown>;
+  const nextQuery: LocationQueryRaw = { ...route.query };
   delete nextQuery.from;
   delete nextQuery.at;
   delete nextQuery.hids;
@@ -910,41 +954,25 @@ async function consumeGenerationRouteState() {
 
 function highlightRows(caseIds: string[]) {
   if (!isManageMode.value || !caseIds.length) return;
-  highlightCaseIds.value = new Set(
-    caseIds
-      .map((id) => String(id || '').trim())
-      .filter(Boolean)
-      .slice(0, 12)
-  );
-  if (highlightRowsTimer.value !== null) {
-    window.clearTimeout(highlightRowsTimer.value);
-  }
-  highlightRowsTimer.value = window.setTimeout(() => {
-    highlightCaseIds.value = new Set();
-    highlightRowsTimer.value = null;
-  }, 4600);
+  caseRowHighlight.highlight(caseIds);
 }
 
-function resolveCaseRowClass(row: Record<string, unknown>) {
-  const caseId = String((row as CaseRecord).case_id || '').trim();
-  const displayId = String((row as CaseRecord).display_id || '').trim();
+function resolveCaseRowClass(row: CaseRecord) {
+  const caseId = String(row.case_id || '').trim();
+  const displayId = String(row.display_id || '').trim();
   if (!caseId && !displayId) return '';
-  return highlightCaseIds.value.has(caseId) || highlightCaseIds.value.has(displayId) ? 'tp-cases-row-highlight' : '';
+  return caseRowHighlight.has(caseId) || caseRowHighlight.has(displayId) ? casesRowHighlightClass : '';
 }
 
 async function handleRefresh() {
-  await refreshAll();
+  await refreshAll('refresh');
   showNotice('success', t('common.feedback.success'), t('cases.message.refreshSuccess'));
 }
 
 function handleSearch() {
+  filters.search = filters.search.trim();
   filters.page = 1;
-  loadCasesData();
-}
-
-function changePage(page: number) {
-  filters.page = page;
-  loadCasesData();
+  void loadCasesData('filter');
 }
 
 function handleSelectionUpdate(nextKeys: Array<string | number>) {
@@ -953,8 +981,9 @@ function handleSelectionUpdate(nextKeys: Array<string | number>) {
 
 function openGenerateConfirm() {
   const requirementText = singleForm.requirementText.trim();
+  singleRequirementError.value = '';
   if (!requirementText) {
-    showNotice('warning', t('common.feedback.warning'), t('cases.message.requirementRequired'));
+    singleRequirementError.value = t('cases.message.requirementRequired');
     return;
   }
 
@@ -966,17 +995,20 @@ function openGenerateConfirm() {
     }
   };
 
-  confirm.title = t('cases.confirm.generateTitle');
-  confirm.message = t('cases.confirm.generateMessage', { count: singleForm.caseCount });
-  confirm.confirmText = t('cases.actions.generate');
-  confirm.variant = 'primary';
-  confirm.visible = true;
+  confirmDialog.open({
+    title: t('cases.confirm.generateTitle'),
+    message: t('cases.confirm.generateMessage', { count: singleForm.caseCount }),
+    confirmText: t('cases.actions.generate'),
+    variant: 'primary',
+    onConfirm: runConfirmedAction
+  });
 }
 
 function openBatchConfirm() {
-  const requirements = parseRequirements(batchForm.requirementsText);
+  batchRequirementsError.value = '';
+  const requirements = parseBatchRequirementText(batchForm.requirementsText);
   if (!requirements.length) {
-    showNotice('warning', t('common.feedback.warning'), t('cases.message.requirementsRequired'));
+    batchRequirementsError.value = t('cases.message.requirementsRequired');
     return;
   }
 
@@ -989,14 +1021,37 @@ function openBatchConfirm() {
     }
   };
 
-  confirm.title = t('cases.confirm.batchGenerateTitle');
-  confirm.message = t('cases.confirm.batchGenerateMessage', {
-    count: requirements.length,
-    mode: translateEnum(`enums.cases.processMode.${batchForm.processMode}`, batchForm.processMode)
+  confirmDialog.open({
+    title: t('cases.confirm.batchGenerateTitle'),
+    message: t('cases.confirm.batchGenerateMessage', {
+      count: requirements.length,
+      mode: translateEnum(`enums.cases.processMode.${batchForm.processMode}`, batchForm.processMode)
+    }),
+    confirmText: t('cases.actions.batchGenerate'),
+    variant: 'warning',
+    onConfirm: runConfirmedAction
   });
-  confirm.confirmText = t('cases.actions.batchGenerate');
-  confirm.variant = 'warning';
-  confirm.visible = true;
+}
+
+function openCaseEditor(row: CaseRecord) {
+  editingCase.value = row;
+  caseEditVisible.value = true;
+}
+
+function closeCaseEditor() {
+  caseEditVisible.value = false;
+  editingCase.value = null;
+}
+
+async function handleCaseSaved(updated: CaseRecord) {
+  closeCaseEditor();
+  showNotice('success', t('common.feedback.success'), t('cases.message.updateSuccess'));
+  const index = cases.value.findIndex((item) => item.case_id === updated.case_id);
+  if (index >= 0) {
+    cases.value[index] = updated;
+  }
+  await loadStats();
+  highlightRows([updated.case_id]);
 }
 
 function openRowGenerateConfirm(row: CaseRecord) {
@@ -1011,11 +1066,13 @@ function openRowGenerateConfirm(row: CaseRecord) {
     row
   };
 
-  confirm.title = t('cases.confirm.regenerateTitle');
-  confirm.message = t('cases.confirm.regenerateMessage', { title: row.title });
-  confirm.confirmText = t('cases.table.actions.regenerate');
-  confirm.variant = 'primary';
-  confirm.visible = true;
+  confirmDialog.open({
+    title: t('cases.confirm.regenerateTitle'),
+    message: t('cases.confirm.regenerateMessage', { title: row.title }),
+    confirmText: t('cases.table.actions.regenerate'),
+    variant: 'primary',
+    onConfirm: runConfirmedAction
+  });
 }
 
 function openDeleteConfirm(row: CaseRecord) {
@@ -1025,11 +1082,13 @@ function openDeleteConfirm(row: CaseRecord) {
     row
   };
 
-  confirm.title = t('cases.confirm.deleteTitle');
-  confirm.message = t('cases.confirm.deleteMessage', { title: row.title || row.case_id });
-  confirm.confirmText = t('cases.table.actions.deleteOne');
-  confirm.variant = 'danger';
-  confirm.visible = true;
+  confirmDialog.open({
+    title: t('cases.confirm.deleteTitle'),
+    message: t('cases.confirm.deleteMessage', { title: row.title || row.case_id }),
+    confirmText: t('cases.table.actions.deleteOne'),
+    variant: 'danger',
+    onConfirm: runConfirmedAction
+  });
 }
 
 function openDeleteSelectedConfirm() {
@@ -1040,11 +1099,13 @@ function openDeleteSelectedConfirm() {
     row: null
   };
 
-  confirm.title = t('cases.confirm.deleteBatchTitle');
-  confirm.message = t('cases.confirm.deleteBatchMessage', { count: selectedCaseIds.value.length });
-  confirm.confirmText = t('cases.actions.deleteSelected');
-  confirm.variant = 'danger';
-  confirm.visible = true;
+  confirmDialog.open({
+    title: t('cases.confirm.deleteBatchTitle'),
+    message: t('cases.confirm.deleteBatchMessage', { count: selectedCaseIds.value.length }),
+    confirmText: t('cases.actions.deleteSelected'),
+    variant: 'danger',
+    onConfirm: runConfirmedAction
+  });
 }
 
 async function runConfirmedAction() {
@@ -1070,15 +1131,12 @@ async function executeDeleteCase(row: CaseRecord) {
   if (!row.case_id) return;
 
   try {
-    listLoading.value = true;
     await deleteCase(row.case_id);
     selectedCaseIds.value = selectedCaseIds.value.filter((id) => String(id) !== String(row.case_id));
     showNotice('success', t('common.feedback.success'), t('cases.message.deleteSuccess'));
-    await refreshAll();
+    await refreshAll('refresh');
   } catch (error) {
-    showNotice('danger', t('common.status.error'), error instanceof Error ? error.message : t('cases.message.deleteFailed'));
-  } finally {
-    listLoading.value = false;
+    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.deleteFailed')));
   }
 }
 
@@ -1087,13 +1145,12 @@ async function executeDeleteSelectedCases() {
   if (!ids.length) return;
 
   try {
-    listLoading.value = true;
     const results = await Promise.allSettled(ids.map((id) => deleteCase(id)));
     const successCount = results.filter((item) => item.status === 'fulfilled').length;
     const failedCount = ids.length - successCount;
 
     selectedCaseIds.value = [];
-    await refreshAll();
+    await refreshAll('refresh');
 
     if (failedCount === 0) {
       showNotice('success', t('common.feedback.success'), t('cases.message.deleteBatchSuccess', { count: successCount }));
@@ -1104,9 +1161,7 @@ async function executeDeleteSelectedCases() {
       }));
     }
   } catch (error) {
-    showNotice('danger', t('common.status.error'), error instanceof Error ? error.message : t('cases.message.deleteBatchFailed'));
-  } finally {
-    listLoading.value = false;
+    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.deleteBatchFailed')));
   }
 }
 
@@ -1117,21 +1172,22 @@ async function executeGenerate(payload: CaseGeneratePayload) {
     lastGenerationResult.value = result;
     showNotice('success', t('common.feedback.success'), result.message || t('cases.message.generateSuccess', { count: result.total }));
     resetSingleForm();
-    await refreshAll();
-    highlightRows(result.cases.map((item) => String(item.case_id)).filter(Boolean));
+    const highlightIds = result.cases.map((item) => String(item.case_id)).filter(Boolean);
     if (isGenerateMode.value) {
       await router.push({
         name: 'cases-manage',
         query: {
-          ...route.query,
           from: 'generate',
           at: String(Date.now()),
-          hids: result.cases.map((item) => String(item.case_id)).filter(Boolean).slice(0, 12).join(',')
+          hids: highlightIds.slice(0, 12).join(',')
         }
       });
+    } else {
+      await refreshAll('refresh');
+      highlightRows(highlightIds);
     }
   } catch (error) {
-    showNotice('danger', t('common.status.error'), error instanceof Error ? error.message : t('cases.message.generateFailed'));
+    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.generateFailed')));
   } finally {
     generateLoading.value = false;
   }
@@ -1144,21 +1200,22 @@ async function executeBatchGenerate(payload: CaseBatchGeneratePayload) {
     lastGenerationResult.value = result;
     showNotice('success', t('common.feedback.success'), result.message || t('cases.message.batchGenerateSuccess', { count: result.total_cases }));
     resetBatchForm();
-    await refreshAll();
-    highlightRows(result.cases.map((item) => String(item.case_id)).filter(Boolean));
+    const highlightIds = result.cases.map((item) => String(item.case_id)).filter(Boolean);
     if (isGenerateMode.value) {
       await router.push({
         name: 'cases-manage',
         query: {
-          ...route.query,
           from: 'batchGenerate',
           at: String(Date.now()),
-          hids: result.cases.map((item) => String(item.case_id)).filter(Boolean).slice(0, 12).join(',')
+          hids: highlightIds.slice(0, 12).join(',')
         }
       });
+    } else {
+      await refreshAll('refresh');
+      highlightRows(highlightIds);
     }
   } catch (error) {
-    showNotice('danger', t('common.status.error'), error instanceof Error ? error.message : t('cases.message.batchGenerateFailed'));
+    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.batchGenerateFailed')));
   } finally {
     batchLoading.value = false;
   }
@@ -1169,10 +1226,10 @@ async function handleExport() {
     exporting.value = true;
     const payload = buildExportPayload();
     const result = await exportCases(payload, exportFormat.value);
-    triggerDownload(result.blob, result.filename);
+    triggerBlobDownload(result.blob, result.filename);
     showNotice('success', t('common.feedback.success'), t('cases.message.exportSuccess'));
   } catch (error) {
-    showNotice('danger', t('common.status.error'), error instanceof Error ? error.message : t('cases.message.exportFailed'));
+    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.exportFailed')));
   } finally {
     exporting.value = false;
   }
@@ -1182,10 +1239,10 @@ async function handleDownloadTemplate() {
   try {
     templateDownloading.value = true;
     const result = await downloadCasesTemplate('excel');
-    triggerDownload(result.blob, result.filename);
+    triggerBlobDownload(result.blob, result.filename);
     showNotice('success', t('common.feedback.success'), t('cases.message.templateDownloadSuccess'));
   } catch (error) {
-    showNotice('danger', t('common.status.error'), error instanceof Error ? error.message : t('cases.message.templateDownloadFailed'));
+    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.templateDownloadFailed')));
   } finally {
     templateDownloading.value = false;
   }
@@ -1195,10 +1252,10 @@ async function exportSingle(row: CaseRecord) {
   try {
     exporting.value = true;
     const result = await exportCases({ case_ids: [row.case_id] }, 'excel');
-    triggerDownload(result.blob, result.filename);
+    triggerBlobDownload(result.blob, result.filename);
     showNotice('success', t('common.feedback.success'), t('cases.message.exportSuccess'));
   } catch (error) {
-    showNotice('danger', t('common.status.error'), error instanceof Error ? error.message : t('cases.message.exportFailed'));
+    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.exportFailed')));
   } finally {
     exporting.value = false;
   }
@@ -1209,6 +1266,7 @@ function buildExportPayload() {
     category?: string;
     priority?: string;
     status?: string;
+    search?: string;
     case_ids?: Array<string | number>;
   } = {};
 
@@ -1238,24 +1296,6 @@ function buildExportPayload() {
   return payload;
 }
 
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename || 'test_cases.xlsx';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function parseRequirements(text: string) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
 function buildRequirementFromCase(row: CaseRecord) {
   const parts = [
     row.title,
@@ -1276,175 +1316,43 @@ function applyConfigFallbacks() {
   }
 }
 
+async function bootstrapManageMode() {
+  await refreshAll('initial');
+  await consumeGenerationRouteState();
+}
+
 onMounted(async () => {
   await loadConfig();
   applyConfigFallbacks();
-  await refreshAll();
-  await consumeGenerationRouteState();
+  if (isManageMode.value) {
+    await bootstrapManageMode();
+  } else {
+    syncGenerateKindFromRoute();
+  }
 });
 
 watch(
-  () => [route.query.from, route.query.hids, route.query.at],
-  async () => {
-    await consumeGenerationRouteState();
+  () => props.mode,
+  async (mode) => {
+    if (mode === 'manage') {
+      await bootstrapManageMode();
+    } else {
+      syncGenerateKindFromRoute();
+    }
+  }
+);
+
+watch(
+  () => route.query.kind,
+  () => {
+    syncGenerateKindFromRoute();
   }
 );
 
 onBeforeUnmount(() => {
-  if (noticeTimer.value !== null) {
-    window.clearTimeout(noticeTimer.value);
-    noticeTimer.value = null;
-  }
   if (manageSyncedTimer.value !== null) {
     window.clearTimeout(manageSyncedTimer.value);
     manageSyncedTimer.value = null;
   }
-  if (highlightRowsTimer.value !== null) {
-    window.clearTimeout(highlightRowsTimer.value);
-    highlightRowsTimer.value = null;
-  }
 });
 </script>
-
-<style scoped>
-.tp-cases-toast {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 1100;
-  width: min(460px, calc(100vw - 24px));
-  box-shadow: var(--tp-shadow-md);
-  margin: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.tp-cases-toast .flex-grow-1 {
-  min-width: 0;
-}
-
-.tp-cases-toast :deep(.tp-btn) {
-  flex: 0 0 auto;
-}
-
-.tp-cases-toast .tp-risk-block__text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-@media (max-width: 576px) {
-  .tp-cases-toast {
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .tp-cases-toast :deep(.tp-btn) {
-    align-self: flex-start;
-  }
-}
-
-.tp-cases-panel-note {
-  max-width: 260px;
-}
-
-.tp-cases-inline-count {
-  max-width: 220px;
-}
-
-.tp-cases-sync-highlight {
-  outline: 2px solid color-mix(in srgb, var(--tp-color-primary-500) 78%, transparent);
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--tp-color-primary-500) 24%, transparent);
-  transition: box-shadow 0.25s ease, outline-color 0.25s ease;
-}
-
-:deep(.tp-cases-row-highlight) {
-  background: color-mix(in srgb, var(--tp-color-primary-500) 34%, transparent);
-  animation: tp-cases-highlight-fade 4.6s ease forwards;
-}
-
-@keyframes tp-cases-highlight-fade {
-  0% {
-    background: color-mix(in srgb, var(--tp-color-primary-500) 42%, transparent);
-  }
-  100% {
-    background: transparent;
-  }
-}
-
-.tp-form-label--placeholder {
-  visibility: hidden;
-  margin-bottom: 6px;
-}
-
-.tp-cases-distribution-row {
-  --bs-gutter-x: 12px;
-  --bs-gutter-y: 12px;
-  margin-left: 0;
-  margin-right: 0;
-}
-
-.tp-cases-distribution-item {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.tp-cases-cell-id {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  overflow: hidden;
-  line-height: 1.45;
-}
-
-.tp-cases-cell-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.45;
-}
-
-.tp-cases-cell-desc,
-.tp-cases-cell-steps,
-.tp-cases-cell-meta {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.45;
-  margin-top: 2px;
-}
-
-.tp-cases-actions {
-  flex-wrap: nowrap;
-}
-
-.tp-cases-actions :deep(.tp-btn) {
-  white-space: nowrap;
-}
-
-.tp-cases-export-format {
-  width: 120px;
-  flex: 0 0 120px;
-  min-height: 40px;
-}
-
-:deep(.tp-toolbar__actions) {
-  align-items: center;
-}
-
-@media (min-width: 1200px) {
-  .tp-cases-panel-note {
-    text-align: right;
-  }
-
-  :deep(.tp-toolbar__actions) {
-    flex-wrap: nowrap;
-  }
-}
-</style>

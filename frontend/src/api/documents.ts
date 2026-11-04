@@ -1,4 +1,4 @@
-import http, { del, get, post } from './http';
+import http, { del, get, post, put } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -6,7 +6,7 @@ import {
   paginationAdapter,
   pickCompatField
 } from './core';
-import { generateCasesFromAnalysis as generateCasesFromAnalysisApi } from './cases';
+import { generateCasesFromAnalysis as generateCasesFromAnalysisApi, type CaseRecord } from './cases';
 
 export type DocumentAnalysisType = 'requirements' | 'test_points' | 'business_rules' | 'comprehensive';
 
@@ -14,6 +14,8 @@ export interface DocumentRecord {
   id: string | number;
   document_key: string;
   filename: string;
+  original_filename?: string;
+  display_name?: string;
   file_name?: string;
   file_path?: string;
   relative_path?: string;
@@ -24,6 +26,7 @@ export interface DocumentRecord {
   updated_time?: string | null;
   status?: string;
   analysis_status?: string;
+  analysis_type?: DocumentAnalysisType | string | null;
   description?: string;
   requirements_count?: number;
   functional_count?: number;
@@ -111,6 +114,14 @@ export interface DocumentAnalysisPayload {
   analysis_type?: DocumentAnalysisType;
 }
 
+export interface RequirementUpdatePayload {
+  title?: string;
+  content?: string;
+  type?: string;
+  priority?: string;
+  status?: string;
+}
+
 export interface DocumentRequirementsQuery {
   page?: number;
   per_page?: number;
@@ -137,7 +148,7 @@ export interface DocumentPreviewResult {
 }
 
 export interface GenerateCasesResponse {
-  cases?: Record<string, unknown>[];
+  cases?: CaseRecord[];
   total?: number;
   message?: string;
   failed_count?: number;
@@ -163,7 +174,9 @@ function normalizeDocumentRecord(raw: Record<string, unknown>): DocumentRecord {
     id: pickCompatField(raw, ['id', 'document_id'], filename),
     document_key: filename || relativePath || filePath || String(pickCompatField(raw, ['id', 'document_id'], '')),
     filename,
-    file_name: pickCompatField(raw, ['file_name'], filename),
+    original_filename: pickCompatField(raw, ['original_filename'], undefined),
+    display_name: pickCompatField(raw, ['display_name', 'original_filename'], filename),
+    file_name: pickCompatField(raw, ['file_name', 'display_name', 'original_filename'], filename),
     file_path: filePath || undefined,
     relative_path: relativePath || undefined,
     analysis_path: filePath || (filename ? `documents/${filename}` : relativePath) || filename,
@@ -173,6 +186,7 @@ function normalizeDocumentRecord(raw: Record<string, unknown>): DocumentRecord {
     updated_time: pickCompatField(raw, ['updated_time', 'updated_at'], null),
     status: pickCompatField(raw, ['status', 'analysis_status'], undefined),
     analysis_status: pickCompatField(raw, ['analysis_status', 'status'], undefined),
+    analysis_type: pickCompatField(raw, ['analysis_type'], null) as DocumentAnalysisType | null,
     description: pickCompatField(raw, ['description'], undefined),
     requirements_count: raw.requirements_count != null ? Number(raw.requirements_count) : undefined,
     functional_count: raw.functional_count != null ? Number(raw.functional_count) : undefined,
@@ -296,13 +310,15 @@ function parseFilename(headers: unknown, fallback: string) {
   return fallback;
 }
 
-export async function listDocuments(params: DocumentRequirementsQuery & { page?: number; per_page?: number } = {}): Promise<DocumentListResponse> {
+export async function listDocuments(
+  params: DocumentRequirementsQuery & { page?: number; per_page?: number; analysis_type?: DocumentAnalysisType | string } = {}
+): Promise<DocumentListResponse> {
   try {
     const response = await get<unknown>('/documents/list', params);
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to load document list'
     });
-    const documents = coreAsArray<Record<string, unknown>>(pickCompatField(payload, ['documents', 'items', 'data'], [])).map(normalizeDocumentRecord);
+    const documents = coreAsArray<Record<string, unknown>>(pickCompatField(payload, ['documents', 'items', 'data'], [])).map((raw) => normalizeDocumentRecord(raw));
     const pagination = paginationAdapter(pickCompatField(payload, ['pagination'], {}), {
       page: Number(params.page ?? 1),
       per_page: Number(params.per_page ?? 10),
@@ -327,10 +343,14 @@ export async function uploadDocument(formData: FormData): Promise<DocumentUpload
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to upload document'
     });
-    const fileInfo = isRecord(pickCompatField(payload, ['file_info'], undefined))
-      ? (pickCompatField(payload, ['file_info'], undefined) as Record<string, unknown>)
-      : payload;
+    const nestedRaw = pickCompatField(payload, ['data'], undefined);
+    const nestedData = isRecord(nestedRaw) ? nestedRaw : undefined;
+    const fileInfoRaw = pickCompatField(payload, ['file_info'], undefined);
+    const fileInfo = isRecord(fileInfoRaw) ? fileInfoRaw : nestedData ?? payload;
     const filename = String(pickCompatField(fileInfo, ['filename', 'file_name', 'name'], ''));
+    const displayName = String(
+      pickCompatField(fileInfo, ['display_name', 'original_filename'], filename)
+    );
     const filePath = String(pickCompatField(fileInfo, ['file_path'], ''));
     return {
       file_info: {
@@ -339,7 +359,7 @@ export async function uploadDocument(formData: FormData): Promise<DocumentUpload
         size: fileInfo.size != null ? Number(fileInfo.size) : undefined,
         document_key: filename || filePath,
         analysis_path: filePath || (filename ? `documents/${filename}` : ''),
-        raw: fileInfo
+        raw: { ...fileInfo, display_name: displayName, original_filename: displayName }
       },
       message: extractMessage(response, 'Failed to upload document'),
       raw: isRecord(response) ? response : undefined
@@ -367,7 +387,7 @@ export async function getDocumentRequirements(params: DocumentRequirementsQuery 
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to load document requirements'
     });
-    const requirements = coreAsArray<Record<string, unknown>>(pickCompatField(payload, ['requirements', 'items', 'data'], [])).map(normalizeRequirementRecord);
+    const requirements = coreAsArray<Record<string, unknown>>(pickCompatField(payload, ['requirements', 'items', 'data'], [])).map((raw) => normalizeRequirementRecord(raw));
     const pagination = paginationAdapter(pickCompatField(payload, ['pagination'], {}), {
       page: Number(params.page ?? 1),
       per_page: Number(params.per_page ?? 20),
@@ -430,6 +450,35 @@ export async function deleteDocument(documentId: string): Promise<{ success: boo
     };
   } catch (error) {
     coreNormalizeError(error, 'Failed to delete document');
+  }
+}
+
+export async function getRequirement(reqId: string): Promise<DocumentRequirementRecord> {
+  try {
+    const response = await get<unknown>(`/documents/requirements/${encodeURIComponent(reqId)}`);
+    const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
+      fallbackMessage: 'Failed to load requirement'
+    });
+    const raw = pickCompatField(payload, ['requirement'], payload);
+    return normalizeRequirementRecord(isRecord(raw) ? raw : {}, 0, { req_id: reqId });
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to load requirement');
+  }
+}
+
+export async function updateRequirement(
+  reqId: string,
+  body: RequirementUpdatePayload
+): Promise<DocumentRequirementRecord> {
+  try {
+    const response = await put<unknown>(`/documents/requirements/${encodeURIComponent(reqId)}`, body);
+    const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
+      fallbackMessage: 'Failed to update requirement'
+    });
+    const raw = pickCompatField(payload, ['requirement'], payload);
+    return normalizeRequirementRecord(isRecord(raw) ? raw : {}, 0, { req_id: reqId });
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to update requirement');
   }
 }
 

@@ -11,9 +11,20 @@ body {
   font-family: var(--tp-font-sans);
 }
 
-/* 预留滚动条槽位，避免内容高度变化导致布局抖动 */
+/*
+ * 预留滚动条槽位，避免内容高度变化导致布局抖动。
+ * reka-ui 在 modal 菜单/对话框打开时还会给 body 加 padding-right 补偿滚动条，
+ * 与 stable 叠加会「抖一下」；工具栏 DropdownMenu 已设 modal=false，Dialog 仍走 modal。
+ */
 html {
   scrollbar-gutter: stable;
+}
+
+/* Sheet / 侧栏抽屉打开时禁止背后页面滚动（见 lib/scroll-lock.ts） */
+html.tp-modal-scroll-lock,
+html.tp-modal-scroll-lock body {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* 兼容不支持 scrollbar-gutter 的环境 */

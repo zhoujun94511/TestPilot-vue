@@ -3,7 +3,7 @@ import type { Locale } from '@/i18n';
 
 export interface FeatureFlags {
   enableVectorStore: boolean;
-  [key: string]: boolean;
+  experimentalActionsEnabled: boolean;
 }
 
 export type AppTheme = 'light' | 'dark';
@@ -22,9 +22,10 @@ export const useAppStore = defineStore('app', {
     theme: (localStorage.getItem('testpilot_theme') as AppTheme) || 'light',
     loading: false,
     featureFlags: {
-      enableVectorStore: true
+      enableVectorStore: true,
+      experimentalActionsEnabled: false
     } as FeatureFlags,
-    sidebarCollapsed: false,
+    sidebarCollapsed: localStorage.getItem('testpilot_sidebar_collapsed') === '1',
     toasts: [] as ToastMessage[]
   }),
   actions: {
@@ -47,6 +48,7 @@ export const useAppStore = defineStore('app', {
     },
     setSidebarCollapsed(collapsed: boolean) {
       this.sidebarCollapsed = collapsed;
+      localStorage.setItem('testpilot_sidebar_collapsed', collapsed ? '1' : '0');
     },
     pushToast(toast: Omit<ToastMessage, 'id'>) {
       const id = Date.now() + Math.floor(Math.random() * 1000);

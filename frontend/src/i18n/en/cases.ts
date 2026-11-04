@@ -7,11 +7,16 @@ export default {
     generate: 'Case Generation',
     manage: 'Case Management'
   },
+  generateMode: {
+    aria: 'Generation mode'
+  },
+  toolbar: {
+    manageLead: 'Review stats and the case list; export and templates live under More.',
+    exportMenu: 'Export & template'
+  },
   actions: {
     generate: 'Generate Cases',
-    hideGenerate: 'Hide Generator',
     batchGenerate: 'Batch Generate',
-    hideBatchGenerate: 'Hide Batch Form',
     export: 'Export',
     exporting: 'Exporting',
     exportExcel: 'Excel',
@@ -26,32 +31,35 @@ export default {
     clearInput: 'Clear'
   },
   single: {
-    title: 'Single Generation',
-    hint: 'Enter a requirement description to generate test cases',
-    autoPriorityHint: 'Priority will be determined automatically'
+    title: 'Single Generation'
   },
   batch: {
     title: 'Batch Generation',
-    hint: 'Enter multiple requirements, one per line, to generate case sets',
-    requirementsLabel: 'Requirement List',
-    requirementsPlaceholder: 'Enter multiple requirements, one per line',
-    processModeLabel: 'Process Mode',
-    processHint: 'The backend supports sequential or parallel processing'
+    requirementsPlaceholder: 'Login checks; refund flow',
+    requirementsHelper: 'For multiple items, split each requirement with ;',
+    processModeLabel: 'Process mode',
+    processModeHelper: 'Sequential: one by one; parallel: concurrent'
+  },
+  state: {
+    generatingTitle: 'Generating test cases',
+    generatingHint: 'The model is analyzing your requirement and saving cases. This often takes tens of seconds to a few minutes—please keep this page open.',
+    batchGeneratingTitle: 'Batch generation in progress',
+    batchGeneratingHint: 'Cases are being generated per requirement (sequential or parallel). Duration depends on count and whether RAG is enabled.'
   },
   form: {
-    requirementLabel: 'Requirement Description',
-    requirementPlaceholder: 'Enter a requirement, business rule, or testing target',
+    requirementLabel: 'Requirement',
+    requirementPlaceholder: 'e.g. Login must validate account state and show errors',
+    requirementHelper: 'Be specific on scope or acceptance; priority is inferred',
     caseCountLabel: 'Case Count',
     caseCountOption: '{count} items',
-    categoryLabel: 'Case Category',
-    categoryAll: 'All Categories',
-    useRag: 'Use knowledge-base enhancement',
-    useRagDisabled: 'Knowledge-base enhancement is unavailable right now; generation will use the model only'
+    ragFollowsConfigOn: 'Knowledge enhancement is on. Change it in Config Center.',
+    ragFollowsConfigOff: 'Knowledge enhancement is off. Change it in Config Center.',
+    ragUnavailable: 'Knowledge base is off. Generation uses the model only.'
   },
   filters: {
     title: 'Search & Filters',
     keywordLabel: 'Keyword',
-    keywordPlaceholder: 'Search by title, description, or case ID',
+    keywordPlaceholder: 'Search',
     priorityLabel: 'Priority',
     priorityAll: 'All priorities',
     statusLabel: 'Status',
@@ -62,6 +70,7 @@ export default {
     selectedCount: '{count} selected'
   },
   table: {
+    title: 'Case list',
     empty: 'No test cases yet',
     loading: 'Loading test cases...',
     noSteps: 'No steps yet',
@@ -80,12 +89,27 @@ export default {
       actions: 'Actions'
     },
     actions: {
+      edit: 'Edit',
       regenerate: 'Regenerate',
       exportOne: 'Export',
       deleteOne: 'Delete'
     }
   },
+  edit: {
+    title: 'Edit test case',
+    loading: 'Loading case details…',
+    noCase: 'No case selected',
+    descriptionLabel: 'Description',
+    preconditionLabel: 'Preconditions',
+    stepsLabel: 'Test steps',
+    expectedLabel: 'Expected results',
+    linesHelper: 'One item per line',
+    tagsHelper: 'Separate multiple tags with commas',
+    tagsPlaceholder: 'e.g. home, mobile',
+    stepsRequired: 'Add at least one step and one expected result'
+  },
   stats: {
+    title: 'Statistics',
     loading: 'Loading statistics...',
     empty: 'No statistics available',
     emptyHint: 'There are no statistics to display yet',
@@ -129,12 +153,11 @@ export default {
     deleteBatchSuccess: '{count} test cases deleted',
     deleteBatchPartial: 'Partial success: {success} deleted, {failed} failed',
     deleteBatchFailed: 'Failed to delete selected test cases',
+    updateSuccess: 'Test case saved',
+    updateFailed: 'Failed to save test case',
     statsFailed: 'Failed to load statistics',
     configFailed: 'Failed to load case config',
     requirementRequired: 'Please enter a requirement before generating',
     requirementsRequired: 'Please enter at least one requirement before batch generation'
-  },
-  pagination: {
-    pageInfo: 'Page {page} / {pages}, {total} total'
   }
 };

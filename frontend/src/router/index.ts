@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import DefaultLayout from '@/layouts/DefaultLayout.vue';
 import i18n from '@/i18n';
-import { pinia, useAppStore } from '@/stores';
+import { pinia, useAppStore, useAuthStore } from '@/stores';
 import type { RouteLocationNormalizedLoaded } from 'vue-router';
 
 const DashboardView = () => import('@/views/DashboardView.vue');
@@ -17,6 +17,8 @@ const KnowledgeShellView = () => import('@/views/KnowledgeShellView.vue');
 const KnowledgeUploadView = () => import('@/views/KnowledgeUploadView.vue');
 const KnowledgeView = () => import('@/views/KnowledgeView.vue');
 const KnowledgeSearchView = () => import('@/views/KnowledgeSearchView.vue');
+const LoginView = () => import('@/views/LoginView.vue');
+const UsersAdminView = () => import('@/views/UsersAdminView.vue');
 
 function resolveBasePath(): string {
   const metaBase = document
@@ -33,6 +35,15 @@ function resolveBasePath(): string {
 
 const routes = [
   {
+    path: '/login',
+    name: 'login',
+    component: LoginView,
+    meta: {
+      titleKey: 'auth.page.title',
+      public: true
+    }
+  },
+  {
     path: '/',
     component: DefaultLayout,
     children: [
@@ -41,7 +52,8 @@ const routes = [
         name: 'dashboard',
         component: DashboardView,
         meta: {
-          titleKey: 'dashboard.page.title'
+          titleKey: 'dashboard.page.title',
+          subtitleKey: 'dashboard.page.subtitle'
         }
       },
       {
@@ -53,7 +65,19 @@ const routes = [
         name: 'config',
         component: ConfigCenterView,
         meta: {
-          titleKey: 'config.page.title'
+          titleKey: 'config.page.title',
+          subtitleKey: 'config.page.subtitle',
+          roles: ['super_admin']
+        }
+      },
+      {
+        path: 'admin/users',
+        name: 'admin-users',
+        component: UsersAdminView,
+        meta: {
+          titleKey: 'admin.users.page.title',
+          subtitleKey: 'admin.users.page.subtitle',
+          roles: ['super_admin', 'admin']
         }
       },
       {
@@ -69,7 +93,8 @@ const routes = [
             name: 'knowledge-upload',
             component: KnowledgeUploadView,
             meta: {
-              titleKey: 'knowledge.page.title'
+              titleKey: 'knowledge.page.title',
+              subtitleKey: 'knowledge.page.subtitle'
             }
           },
           {
@@ -77,7 +102,8 @@ const routes = [
             name: 'knowledge',
             component: KnowledgeView,
             meta: {
-              titleKey: 'knowledge.page.title'
+              titleKey: 'knowledge.page.title',
+              subtitleKey: 'knowledge.page.subtitle'
             }
           },
           {
@@ -85,7 +111,8 @@ const routes = [
             name: 'knowledge-search',
             component: KnowledgeSearchView,
             meta: {
-              titleKey: 'knowledge.page.title'
+              titleKey: 'knowledge.page.title',
+              subtitleKey: 'knowledge.page.subtitle'
             }
           }
         ]
@@ -103,7 +130,8 @@ const routes = [
             name: 'documents-upload',
             component: DocumentsUploadView,
             meta: {
-              titleKey: 'documents.page.title'
+              titleKey: 'documents.page.title',
+              subtitleKey: 'documents.page.subtitle'
             }
           },
           {
@@ -111,7 +139,8 @@ const routes = [
             name: 'documents',
             component: DocumentsView,
             meta: {
-              titleKey: 'documents.page.title'
+              titleKey: 'documents.page.title',
+              subtitleKey: 'documents.page.subtitle'
             }
           },
           {
@@ -119,7 +148,8 @@ const routes = [
             name: 'documents-history',
             component: DocumentsHistoryView,
             meta: {
-              titleKey: 'documents.history.title'
+              titleKey: 'documents.history.title',
+              subtitleKey: 'documents.history.subtitle'
             }
           }
         ]
@@ -129,7 +159,17 @@ const routes = [
         name: 'chat',
         component: ChatView,
         meta: {
-          titleKey: 'chat.page.title'
+          titleKey: 'chat.page.title',
+          subtitleKey: 'chat.page.subtitle'
+        }
+      },
+      {
+        path: 'experimental-tools',
+        name: 'experimental-tools',
+        component: () => import('@/views/ExperimentalToolsView.vue'),
+        meta: {
+          titleKey: 'experimentalToolsPage.page.title',
+          subtitleKey: 'experimentalToolsPage.page.subtitle'
         }
       },
       {
@@ -146,7 +186,8 @@ const routes = [
             component: CasesView,
             props: { mode: 'generate' },
             meta: {
-              titleKey: 'cases.page.title'
+              titleKey: 'cases.page.title',
+              subtitleKey: 'cases.page.subtitle'
             }
           },
           {
@@ -155,7 +196,8 @@ const routes = [
             component: CasesView,
             props: { mode: 'manage' },
             meta: {
-              titleKey: 'cases.page.title'
+              titleKey: 'cases.page.title',
+              subtitleKey: 'cases.page.subtitle'
             }
           }
         ]
@@ -173,11 +215,42 @@ export function updateDocumentTitle(route: RouteLocationNormalizedLoaded) {
   const titleKey = route.meta.titleKey as string | undefined;
   const appName = String(i18n.global.t('common.app.brand') || 'TestPilot');
   if (titleKey) {
-    document.title = `${i18n.global.t(titleKey)} - ${appName}`;
+    document.title = `${appName} - ${i18n.global.t(titleKey)}`;
   } else {
     document.title = appName;
   }
 }
+
+router.beforeEach(async (to) => {
+  const authStore = useAuthStore(pinia);
+  if (!authStore.bootstrapped) {
+    await authStore.bootstrap();
+  }
+
+  if (to.name === 'login') {
+    if (authStore.authRequired && authStore.isAuthenticated) {
+      return { path: '/' };
+    }
+    return true;
+  }
+
+  if (authStore.authRequired && !authStore.isAuthenticated) {
+    return {
+      name: 'login',
+      query: { redirect: to.fullPath }
+    };
+  }
+
+  const roles = to.meta.roles as string[] | undefined;
+  if (authStore.authRequired && roles?.length) {
+    const currentRole = authStore.user?.role;
+    if (!currentRole || !roles.includes(currentRole)) {
+      return { path: '/' };
+    }
+  }
+
+  return true;
+});
 
 router.afterEach((to) => {
   const appStore = useAppStore(pinia);

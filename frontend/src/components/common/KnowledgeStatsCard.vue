@@ -1,24 +1,33 @@
 <template>
-  <TpCard>
-    <div class="tp-kpi-card">
-      <div class="tp-flex tp-align-start tp-justify-between tp-gap-2">
-        <div>
-          <div class="tp-kpi-label">{{ label }}</div>
-          <div class="tp-kpi-value">{{ value }}</div>
-        </div>
-        <div class="tp-kpi-icon" aria-hidden="true">{{ icon }}</div>
+  <div :class="statsSummaryMetricClass">
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0">
+        <div :class="kpiLabelClass">{{ label }}</div>
+        <div :class="kpiValueClass">{{ value }}</div>
       </div>
-      <div>
-        <div class="tp-card__subtitle tp-mt-2" :class="{ 'tp-kpi-hint--placeholder': !hint }">
-          {{ hint || '\u00A0' }}
-        </div>
+      <div :class="kpiIconClass" aria-hidden="true">
+        <BrandMark v-if="icon === brandMarkIconKey" size="xs" decorative />
+        <template v-else>{{ icon }}</template>
       </div>
     </div>
-  </TpCard>
+    <div>
+      <div :class="[kpiHintClass, { invisible: !hint }]">
+        {{ hint || '\u00A0' }}
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import TpCard from '@/components/ui/base/TpCard.vue';
+import {
+  kpiHintClass,
+  kpiIconClass,
+  kpiLabelClass,
+  kpiValueClass
+} from '@/lib/page-typography';
+import { statsSummaryMetricClass } from '@/lib/stats-ui';
+import BrandMark from '@/components/brand/BrandMark.vue';
+import { brandMarkIconKey } from '@/lib/brand';
 
 defineProps<{
   label: string;
@@ -27,16 +36,3 @@ defineProps<{
   hint?: string;
 }>();
 </script>
-
-<style scoped>
-.tp-kpi-card {
-  min-height: 98px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.tp-kpi-hint--placeholder {
-  visibility: hidden;
-}
-</style>

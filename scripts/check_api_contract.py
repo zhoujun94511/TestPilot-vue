@@ -4,20 +4,30 @@ Lightweight API contract checker for TestPilot.
 
 Checks:
 1) Backend routes (blueprints) vs frontend API paths usage.
-2) Frontend method usage vs backend allowed methods ( the best effort).
+2) Frontend method usage vs backend allowed methods (the best effort).
+3) Exported API functions vs references in views/components/composables/stores
+   (and cross-module use within frontend/src/api).
 """
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BLUEPRINTS_DIR = ROOT / "blueprints"
 FRONTEND_API_DIR = ROOT / "frontend" / "src" / "api"
+FRONTEND_CONSUMER_DIRS = (
+    ROOT / "frontend" / "src" / "views",
+    ROOT / "frontend" / "src" / "components",
+    ROOT / "frontend" / "src" / "composables",
+    ROOT / "frontend" / "src" / "stores",
+)
+API_HELPER_MODULES = {"http.ts", "core.ts"}
 
 # Routes in this set are intentionally not consumed by frontend API layer:
 # - internal fallback endpoints
@@ -25,6 +35,19 @@ FRONTEND_API_DIR = ROOT / "frontend" / "src" / "api"
 IGNORED_BACKEND_ONLY: Set[str] = {
     "/api/chat/save-ai-message",
     "/api/export/batch",
+}
+
+# Public API aliases or optional entry points — not required to appear in views yet.
+IGNORED_UNUSED_API_EXPORTS: Set[str] = {
+    "validateConfigItem",
+    "getConfigCategories",
+    "getConfigsByCategory",
+    "saveConfigsByCategory",
+    "exportConfigs",
+    "getConfigItem",
+    "getChatSuggestions",
+    "getChatTemplates",
+    "resolveAnalysisRequirements",
 }
 
 
@@ -40,6 +63,12 @@ class FrontCall:
     file: str
     method: str
     path: str
+
+
+@dataclass
+class ApiExport:
+    file: str
+    name: str
 
 
 def _route_prefixes() -> Dict[str, str]:
@@ -173,6 +202,70 @@ def parse_frontend_calls() -> List[FrontCall]:
     return out
 
 
+def parse_api_exports() -> List[ApiExport]:
+    out: List[ApiExport] = []
+    fn_patterns = (
+        re.compile(r"export\s+async\s+function\s+(\w+)", re.MULTILINE),
+        re.compile(r"export\s+function\s+(\w+)", re.MULTILINE),
+    )
+    for ts in sorted(FRONTEND_API_DIR.glob("*.ts")):
+        if ts.name in API_HELPER_MODULES:
+            continue
+        text = ts.read_text(encoding="utf-8", errors="ignore")
+        seen: Set[str] = set()
+        for pattern in fn_patterns:
+            for m in pattern.finditer(text):
+                name = m.group(1)
+                if name in seen:
+                    continue
+                seen.add(name)
+                out.append(ApiExport(file=ts.name, name=name))
+    return out
+
+
+def _iter_consumer_source_files() -> Iterable[Path]:
+    for base in FRONTEND_CONSUMER_DIRS:
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            if path.suffix not in {".vue", ".ts", ".tsx"}:
+                continue
+            yield path
+    for ts in FRONTEND_API_DIR.glob("*.ts"):
+        if ts.name not in API_HELPER_MODULES:
+            yield ts
+
+
+def build_usage_blob() -> str:
+    chunks: List[str] = []
+    for path in _iter_consumer_source_files():
+        chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
+    return "\n".join(chunks)
+
+
+def export_is_referenced(name: str, defining_file: str, blob: str) -> bool:
+    if name in IGNORED_UNUSED_API_EXPORTS:
+        return True
+    # Import lists and call sites in consumers + other api modules.
+    if re.search(rf"\b{re.escape(name)}\b", blob) is None:
+        return False
+    # Must appear outside its defining module (avoid counting the export line only).
+    module_text = (FRONTEND_API_DIR / defining_file).read_text(encoding="utf-8", errors="ignore")
+    without_def = re.sub(rf"export\s+async\s+function\s+{re.escape(name)}\b", "", module_text)
+    without_def = re.sub(rf"export\s+function\s+{re.escape(name)}\b", "", without_def)
+    external = blob.replace(module_text, without_def, 1)
+    return re.search(rf"\b{re.escape(name)}\b", external) is not None
+
+
+def find_unused_api_exports() -> List[ApiExport]:
+    blob = build_usage_blob()
+    unused: List[ApiExport] = []
+    for item in parse_api_exports():
+        if not export_is_referenced(item.name, item.file, blob):
+            unused.append(item)
+    return unused
+
+
 def normalize_method(method: str) -> str:
     return "DELETE" if method == "DEL" else method
 
@@ -188,8 +281,10 @@ def normalize_backend_path(path: str) -> str:
 
 
 def main() -> int:
+    strict_exports = os.environ.get("STRICT_API_EXPORTS", "").strip() in {"1", "true", "yes"}
     routes = parse_backend_routes()
     calls = parse_frontend_calls()
+    unused_exports = find_unused_api_exports()
 
     route_by_path: Dict[str, Set[str]] = {}
     for r in routes:
@@ -223,6 +318,7 @@ def main() -> int:
     print("== API Contract Check ==")
     print(f"Backend routes: {len(routes)}")
     print(f"Frontend calls: {len(calls)}")
+    print(f"API exported functions: {len(parse_api_exports())}")
     print()
 
     if not path_missing and not method_mismatch:
@@ -248,7 +344,15 @@ def main() -> int:
             print(f"- {r.file}: {methods} {r.path}")
         print()
 
-    return 1 if (path_missing or method_mismatch) else 0
+    if unused_exports:
+        print("[API exports with no detected usage in views/components/composables/stores]")
+        for item in sorted(unused_exports, key=lambda x: (x.file, x.name)):
+            print(f"- {item.file}: {item.name}")
+        print("  (Set STRICT_API_EXPORTS=1 to fail CI on this section.)")
+        print()
+
+    fail_exports = strict_exports and bool(unused_exports)
+    return 1 if (path_missing or method_mismatch or fail_exports) else 0
 
 
 if __name__ == "__main__":

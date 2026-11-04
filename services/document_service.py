@@ -125,6 +125,12 @@ class DocumentService:
             result['file_path'] = file_path
             result['content_length'] = len(full_content)
 
+            if result.get('success'):
+                from pathlib import Path
+                from services.document_meta import persist_document_analysis_type
+
+                persist_document_analysis_type(Path(file_path), analysis_type)
+
             return result
 
         except Exception as e:
@@ -147,14 +153,15 @@ class DocumentService:
     ) -> Dict[str, Any]:
         """查询需求列表（筛选 + 分页）。"""
         try:
-            query = Requirement.query
+            from services.data_scope import apply_data_scope
 
-            if req_type:
-                query = query.filter(Requirement.type == req_type)
-            if priority:
-                query = query.filter(Requirement.priority == priority)
-            if status:
-                query = query.filter(Requirement.status == status)
+            query = apply_data_scope(Requirement.query, Requirement, 'requirements')
+
+            from services.sql_query_helpers import filter_column_eq
+
+            query = filter_column_eq(query, Requirement.type, req_type)
+            query = filter_column_eq(query, Requirement.priority, priority)
+            query = filter_column_eq(query, Requirement.status, status)
             if source_file:
                 query = query.filter(Requirement.source_file.contains(source_file))
             if search:
@@ -165,7 +172,9 @@ class DocumentService:
                 )
 
             query = query.order_by(Requirement.created_time.desc())
-            pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+            pagination = query.paginate(  # type: ignore[attr-defined]
+                page=page, per_page=per_page, error_out=False
+            )
             requirements = [req.to_dict() for req in pagination.items]
 
             return {
@@ -264,7 +273,9 @@ class DocumentService:
         try:
             # Token计数和记录
             estimated_tokens = count_tokens(content)
-            record_llm_call(estimated_tokens, is_actual=True, input_text=content)
+            record_llm_call(
+                estimated_tokens, is_actual=True, input_text=content, source='document_analysis'
+            )
 
             if analysis_type == 'requirements':
                 # 需求分析
@@ -540,7 +551,9 @@ class DocumentService:
                 if existing:
                     logger.warning(f"需求ID {row['req_id']} 已存在，跳过保存")
                     continue
-                db.session.add(Requirement(
+                from services.auth_service import stamp_ownership
+
+                requirement = Requirement(
                     req_id=row['req_id'],
                     title=row.get('title') or row['req_id'],
                     content=row.get('content') or '',
@@ -548,7 +561,9 @@ class DocumentService:
                     priority=row.get('priority') or 'medium',
                     status='active',
                     source_file=source_filename
-                ))
+                )
+                stamp_ownership(requirement)
+                db.session.add(requirement)
                 saved.append(row)
 
             db.session.commit()

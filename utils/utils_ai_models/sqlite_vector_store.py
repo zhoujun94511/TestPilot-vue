@@ -7,9 +7,18 @@ SQLite + sqlite-vec 向量存储实现
 import os
 import sqlite3
 import json
+import sys
 import threading
 import numpy as np
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
+
+if sys.version_info >= (3, 12):
+    from collections.abc import Buffer
+else:
+    Buffer = Union[bytes, bytearray, memoryview]
+
+# 读库 BLOB / 入参：bytes、bytearray、memoryview
+ByteBuffer = Union[bytes, bytearray, memoryview]
 from pathlib import Path
 
 # 尝试导入 Document（兼容不同版本的 langchain）
@@ -464,6 +473,12 @@ class SQLiteVectorStore:
         return query
     
     @staticmethod
+    def _as_memoryview(buffer: ByteBuffer) -> memoryview:
+        if isinstance(buffer, memoryview):
+            return buffer
+        return memoryview(cast(Buffer, buffer))
+
+    @staticmethod
     def _embedding_to_buffer(embedding: List[float]) -> bytes:
         """
         将 embedding 转换为 float32 buffer
@@ -474,23 +489,22 @@ class SQLiteVectorStore:
         Returns:
             float32 buffer (bytes)
         """
-        # 转换为 numpy array，然后转为 float32 buffer
         arr = np.array(embedding, dtype=np.float32)
-        return arr.tobytes()
-    
+        return bytes(arr.tobytes())
+
     @staticmethod
-    def _buffer_to_embedding(buffer: bytes) -> List[float]:
+    def _buffer_to_embedding(buffer: ByteBuffer) -> List[float]:
         """
         将 float32 buffer 转换为 embedding
         
         Args:
-            buffer: float32 buffer (bytes)
+            buffer: float32 buffer (bytes / memoryview)
             
         Returns:
             List[float] 向量
         """
-        # 从 buffer 恢复 numpy array
-        arr = np.frombuffer(buffer, dtype=np.float32)
+        buf = cast(Buffer, SQLiteVectorStore._as_memoryview(buffer))
+        arr = np.frombuffer(buf, dtype=np.float32)
         return arr.tolist()
     
     def add_documents(self, documents: List[Document], **kwargs):  # noqa: ARG002, D102
@@ -523,7 +537,11 @@ class SQLiteVectorStore:
                     if not chunk_id:
                         # 如果没有 id，使用内容哈希生成
                         import hashlib
-                        chunk_id = f"chunk_{hashlib.md5(doc.page_content.encode()).hexdigest()[:16]}"
+
+                        page_bytes = (doc.page_content or '').encode('utf-8')
+                        chunk_id = (
+                            f"chunk_{hashlib.md5(cast(Buffer, page_bytes)).hexdigest()[:16]}"
+                        )
                     
                     # 收集 chunk_id 用于返回
                     chunk_ids.append(chunk_id)
@@ -563,10 +581,10 @@ class SQLiteVectorStore:
                         )
                     
                     embedding_buffer = self._embedding_to_buffer(embedding)
-                    
+
                     embeddings_to_insert.append((
                         chunk_id,
-                        embedding_buffer
+                        sqlite3.Binary(cast(Buffer, embedding_buffer)),
                     ))
                 
                 # 批量插入 chunks
@@ -931,9 +949,11 @@ class SQLiteVectorStore:
                     embedding_buffer = row['embedding']
                     content = row['content']
                     metadata_json = row['metadata']
-                    
-                    # 从 buffer 恢复向量
-                    embedding_arr = np.frombuffer(embedding_buffer, dtype=np.float32)
+
+                    embedding_arr = np.frombuffer(
+                        cast(Buffer, self._as_memoryview(embedding_buffer)),
+                        dtype=np.float32,
+                    )
                     
                     # 计算余弦相似度
                     dot_product: float = float(np.dot(query_arr, embedding_arr))
@@ -1178,6 +1198,47 @@ class SQLiteVectorStore:
             finally:
                 conn.close()
     
+    def update(
+        self,
+        ids: Optional[List[str]] = None,
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
+    ) -> None:
+        """Chroma 兼容：合并更新 chunks.metadata（JSON）。"""
+        _ = kwargs
+        if not ids or not metadatas:
+            return
+        if len(ids) != len(metadatas):
+            raise ValueError('ids 与 metadatas 长度不一致')
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                for chunk_id, patch in zip(ids, metadatas):
+                    row = conn.execute(
+                        'SELECT metadata FROM chunks WHERE id = ?',
+                        (str(chunk_id),),
+                    ).fetchone()
+                    if not row:
+                        continue
+                    try:
+                        merged = json.loads(row['metadata']) if row['metadata'] else {}
+                    except (json.JSONDecodeError, TypeError):
+                        merged = {}
+                    if patch:
+                        merged.update(patch)
+                    conn.execute(
+                        'UPDATE chunks SET metadata = ? WHERE id = ?',
+                        (json.dumps(merged, ensure_ascii=False), str(chunk_id)),
+                    )
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                logger.error('更新 chunk metadata 失败: %s', exc, exc_info=True)
+                raise
+            finally:
+                conn.close()
+
     def get(self, ids: Optional[List[str]] = None, **kwargs) -> Dict[str, Any]:  # noqa: ARG002, D102
         """
         获取文档

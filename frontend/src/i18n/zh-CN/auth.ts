@@ -1,0 +1,61 @@
+export default {
+  page: {
+    title: '登录',
+    subtitle: 'AI智能测试用例生成和管理平台'
+  },
+  form: {
+    username: '用户名',
+    password: '密码',
+    email: '邮箱（可选）',
+    usernamePlaceholder: '请输入用户名',
+    passwordPlaceholder: '请输入密码',
+    showPassword: '显示密码',
+    hidePassword: '隐藏密码',
+    emailPlaceholder: "name{'@'}example.com",
+    submitLogin: '登录',
+    submitRegister: '注册',
+    switchToRegister: '没有账号？注册',
+    switchToLogin: '已有账号？去登录',
+    tabLogin: '登录',
+    tabRegister: '注册',
+    working: '处理中…',
+    fillAllFields: '请填写用户名和密码',
+    confirmPassword: '确认密码',
+    confirmPasswordPlaceholder: '请再次输入密码',
+    usernameRule: "3～64 位，可用字母、数字、汉字及 . _ - {'@'}",
+    passwordRule: '8～128 位，需同时包含字母、数字与符号',
+    passwordRuleSimple: '8～128 位'
+  },
+  password: {
+    title: '修改密码',
+    subtitle: '修改成功后将退出登录，请使用新密码重新登录',
+    old: '当前密码',
+    new: '新密码（至少 8 位）',
+    submit: '确认修改'
+  },
+  message: {
+    credentialsRequired: '请输入用户名和密码',
+    invalidCredentials: '用户名或密码错误',
+    registerDisabled: '注册已关闭，请联系管理员',
+    weakCredentials: "用户名 3～64 位，仅限字母、数字、汉字及 . _ - {'@'}；密码 8～128 位且需含字母、数字与符号",
+    weakPassword: '密码不符合要求：8～128 位且需含字母、数字与符号',
+    passwordMismatch: '两次输入的密码不一致',
+    invalidEmail: '邮箱格式不正确',
+    accountLocked: '登录失败次数过多，账户已暂时锁定，请稍后再试',
+    accountInactive: '账号尚未启用或已停用，请联系管理员',
+    duplicateUser: '用户名或邮箱已存在',
+    loginSuccess: '登录成功',
+    registerOk: '注册成功，请使用新账号登录',
+    registerPending: '注册成功，管理员审核启用后即可登录',
+    loginRateLimited: '登录尝试过于频繁，请 {seconds} 秒后再试',
+    registerRateLimited: '注册尝试过于频繁，请 {seconds} 秒后再试',
+    sessionExpired: '登录已过期，请重新登录',
+    lastSuperAdmin: '至少保留一个启用中的超级管理员',
+    cannotDeleteLastSuperAdmin: '至少保留一个超级管理员，不能删除最后一个超级管理员',
+    cannotDeactivateSelf: '不能停用当前登录账号',
+    cannotDeleteSelf: '不能删除当前登录账号',
+    invalidRole: '无效角色',
+    invalidParams: '请求参数格式不正确',
+    adminRequiresAuth: '请先在后端开启 AUTH_REQUIRE_AUTH'
+  }
+};

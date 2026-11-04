@@ -1,152 +1,180 @@
 <template>
-  <section class="tp-container-fluid tp-py-3 tp-page tp-page-shell tp-config-page">
-    <div
-      v-if="banner && banner.message"
-      class="tp-risk-block tp-mb-3"
-      :class="bannerClass"
-    >
-      <div class="tp-flex-grow-1">
-        <div class="tp-risk-block__title">{{ banner.title }}</div>
-        <div class="tp-risk-block__text">{{ banner.message }}</div>
-      </div>
-      <TpButton variant="ghost" size="sm" :aria-label="t('common.actions.close')" @click="clearBanner">
-        {{ t('common.actions.close') }}
-      </TpButton>
-    </div>
+  <section :class="pageFluidShellMarkedClass(pageMarkerConfig)">
+    <PageNoticeBanner
+      :notice="pageBanner"
+      @close="clearPageBanner"
+    />
 
-    <ActionBar :title="t('config.page.title')" :subtitle="t('config.page.subtitle')">
-      <template #actions>
-        <TpButton variant="secondary" :loading="categoriesLoading" @click="handleReloadCategories">
-          {{ t('common.actions.refresh') }}
-        </TpButton>
-        <TpButton variant="ghost" :loading="exporting" @click="handleExport">
-          {{ exporting ? t('config.actions.exporting') : t('config.actions.export') }}
-        </TpButton>
-        <TpButton variant="ghost" :loading="importing" @click="handleImportClick">
-          {{ importing ? t('config.actions.importing') : t('config.actions.import') }}
-        </TpButton>
-        <TpButton :loading="saving" :disabled="saving || !selectedCategoryId || currentItems.length === 0" @click="handleSave">
-          {{ saving ? t('config.actions.saving') : t('config.actions.save') }}
-        </TpButton>
+    <ActionBar v-if="showConfigBackendHint">
+      <template #lead>
+        <p :class="pageToolbarSubtitleClass">{{ t('config.toolbar.backendHint') }}</p>
       </template>
     </ActionBar>
 
     <input
       ref="importInput"
-      class="tp-d-none"
+      class="hidden"
       type="file"
       accept=".json,.yaml,.yml"
       @change="handleImportFileChange"
     />
 
-    <div class="tp-row tp-g-3 tp-align-stretch">
-      <aside class="tp-col-12 tp-col-xl-3">
-        <div class="tp-surface tp-config-sidebar tp-p-3 tp-h-100">
-          <div class="tp-flex tp-justify-between tp-align-center tp-mb-3">
-            <div class="tp-card__title">{{ t('config.category.title') }}</div>
-            <TpTag v-if="selectedCategoryLabel" variant="neutral">
-              {{ t('config.category.current') }}
-            </TpTag>
-          </div>
-
-          <BaseState
-            v-if="categoriesLoading"
-            variant="loading"
-            :title="t('config.category.loading')"
-          />
-          <BaseState
-            v-else-if="categoriesError"
-            variant="error"
-            :title="t('common.status.error')"
-            :message="categoriesError"
-            :retry-text="t('common.actions.retry')"
-            @retry="handleReloadCategories"
-          />
-          <BaseState
-            v-else-if="!sortedCategories.length"
-            variant="empty"
-            :title="t('config.category.empty')"
-          />
-          <div v-else class="tp-config-list">
-            <button
-              v-for="category in sortedCategories"
-              :key="category.id"
-              type="button"
-              class="tp-nav-item tp-config-category-item"
-              :class="{ 'tp-config-category-item--active': category.id === selectedCategoryId }"
-              @click="handleSelectCategory(category.id)"
-            >
-              <div class="tp-text-start">
-                <div class="tp-data-title">{{ resolveCategoryLabel(category) }}</div>
-                <div class="tp-data-subtitle">{{ resolveCategoryDescription(category) }}</div>
-              </div>
-              <TpTag v-if="category.id === selectedCategoryId" variant="neutral">
-                {{ t('config.category.current') }}
-              </TpTag>
-            </button>
-          </div>
-        </div>
+    <div :class="grid12StretchClass">
+      <aside :class="colSpan12Xl3">
+        <PagePanel aside :class="cn(configSidebarStickyClass, 'h-full')" :padded="false">
+          <SidebarMenu :title="t('config.category.title')" :aria-label="t('config.category.title')">
+            <BaseState
+              v-if="categoriesLoading"
+              variant="loading"
+              :title="t('config.state.loadingCategories')"
+              :message="t('config.category.loading')"
+            />
+            <BaseState
+              v-else-if="categoriesError"
+              variant="error"
+              :title="t('common.status.error')"
+              :message="categoriesError"
+              :retry-text="t('common.actions.retry')"
+              @retry="handleReloadCategories"
+            />
+            <template v-else>
+              <button
+                v-for="entry in configSidebarNavEntries"
+                :key="resolveSidebarNavEntryId(entry)"
+                type="button"
+                :class="[
+                  navItemClass({
+                    active: resolveSidebarNavEntryId(entry) === selectedCategoryId,
+                    framed: true
+                  }),
+                  configCategoryItemClass
+                ]"
+                @click="handleSelectCategory(resolveSidebarNavEntryId(entry))"
+              >
+                <div class="min-w-0 flex-1 text-left">
+                  <div :class="dataTitleClass">{{ resolveSidebarNavEntryLabel(entry) }}</div>
+                  <div :class="dataSubtitleClass">{{ resolveSidebarNavEntryDescription(entry) }}</div>
+                </div>
+              </button>
+            </template>
+          </SidebarMenu>
+        </PagePanel>
       </aside>
 
-      <section class="tp-col-12 tp-col-xl-9">
-        <div class="tp-surface tp-p-3 tp-p-lg-4 tp-h-100">
-          <BaseState
-            v-if="itemsLoading"
-            variant="loading"
-            :title="t('config.panel.loading')"
-          />
-          <BaseState
-            v-else-if="itemsError"
-            variant="error"
-            :title="t('common.status.error')"
-            :message="itemsError"
-            :retry-text="t('common.actions.retry')"
-            @retry="handleReloadCurrentCategory"
-          />
+      <section :class="colSpan12Xl9">
+        <PagePanel class="h-full" :title="configPanelTitle">
+          <template #actions>
+            <div :class="pageToolbarStripClass">
+              <TpButton
+                variant="ghost"
+                size="sm"
+                :loading="configPanelRefreshLoading"
+                @click="handleConfigPanelToolbarRefresh"
+              >
+                {{ t('common.actions.refresh') }}
+              </TpButton>
+              <template v-if="!isAuditCategorySelected">
+                <TpButton variant="ghost" size="sm" :loading="exporting" @click="handleExport">
+                  {{ exporting ? t('config.actions.exporting') : t('config.actions.export') }}
+                </TpButton>
+                <TpButton variant="ghost" size="sm" :loading="importing" @click="handleImportClick">
+                  {{ importing ? t('config.actions.importing') : t('config.actions.import') }}
+                </TpButton>
+              </template>
+            </div>
+          </template>
+          <template v-if="isAuditCategorySelected">
+            <p :class="[configMetaClass, 'mb-4']">{{ t('config.audit.subtitle') }}</p>
+            <BaseState v-if="auditLogsLoading" variant="loading" :title="t('config.audit.loading')" />
+            <BaseState
+              v-else-if="auditLogsError"
+              variant="error"
+              :title="t('common.status.error')"
+              :message="auditLogsError"
+              :retry-text="t('common.actions.retry')"
+              @retry="loadAuditLogs"
+            />
+            <BaseState v-else-if="!auditLogs.length" variant="empty" :title="t('config.audit.empty')" />
+            <ul
+              v-else
+              :class="configAuditLogListClass(auditLogs.length > CONFIG_AUDIT_LOG_SCROLL_THRESHOLD)"
+            >
+              <li
+                v-for="(log, index) in auditLogs"
+                :key="`${log.id ?? log.key ?? 'log'}-${index}`"
+                class="rounded-md border border-border bg-[var(--tp-bg-subtle)] px-3 py-2"
+              >
+                <div class="font-medium text-foreground">{{ log.key || '-' }} · {{ log.action || '-' }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">
+                  {{ formatAuditLogTime(log.created_at) }}
+                  <span v-if="log.operator"> · {{ log.operator }}</span>
+                </div>
+                <div v-if="log.old_value != null || log.new_value != null" class="mt-1 text-xs text-muted-foreground">
+                  {{
+                    t('config.audit.change', {
+                      oldValue: String(log.old_value ?? '-'),
+                      newValue: String(log.new_value ?? '-')
+                    })
+                  }}
+                </div>
+              </li>
+            </ul>
+          </template>
 
           <template v-else>
             <BaseState
-              v-if="!selectedCategoryId"
-              variant="empty"
-              :title="t('config.state.noCategorySelected')"
-              :message="t('config.category.selectHint')"
+              v-if="itemsLoading"
+              variant="loading"
+              :title="t('config.state.loadingItems')"
+              :message="t('config.panel.loading')"
+            />
+            <BaseState
+              v-else-if="itemsError"
+              variant="error"
+              :title="t('common.status.error')"
+              :message="itemsError"
+              :retry-text="t('common.actions.retry')"
+              @retry="handleReloadCurrentCategory"
             />
 
             <template v-else>
               <BaseState
-                v-if="!currentItems.length"
+                v-if="!selectedCategoryId"
                 variant="empty"
-                :title="t('config.panel.empty')"
+                :title="t('config.state.noCategorySelected')"
+                :message="t('config.category.selectHint')"
               />
 
               <template v-else>
-                <div v-if="selectedCategoryId === 'ai_model'" class="tp-config-overview">
-                  <div class="tp-config-toolbar tp-mb-3">
-                    <div class="tp-flex tp-flex-column tp-flex-lg-row tp-justify-between tp-align-start tp-gap-2">
-                      <div>
-                        <div class="tp-card__title">{{ t('configCenter.providerUi.title') }}</div>
-                        <div class="tp-config-meta">{{ t('configCenter.providerUi.subtitle') }}</div>
-                      </div>
+                <BaseState
+                  v-if="!currentItems.length"
+                  variant="empty"
+                  :title="t('config.panel.empty')"
+                />
 
-                      <div class="tp-config-toolbar__meta tp-text-lg-end">
-                        <div class="tp-small tp-config-toolbar__hint">{{ t('config.panel.hint') }}</div>
-                        <div class="tp-small tp-mt-1 tp-config-toolbar__status">
-                          <span v-if="dirtyCount > 0">{{ t('config.state.pendingChanges', { count: dirtyCount }) }}</span>
-                          <span v-else>{{ t('config.state.noChanges') }}</span>
-                        </div>
+                <template v-else>
+                <div v-if="selectedCategoryId === 'ai_model'" :class="configOverviewClass">
+                  <TableToolbar
+                    class="mb-4"
+                    :title="t('configCenter.providerUi.title')"
+                    :subtitle="providerUiSubtitle || undefined"
+                  >
+                    <template v-if="dirtyCount > 0" #actions>
+                      <div :class="[captionTextClass, configToolbarStatusClass, 'text-left lg:text-right']">
+                        {{ configDirtySummary }}
                       </div>
-                    </div>
-                  </div>
+                    </template>
+                  </TableToolbar>
 
-                  <div class="tp-config-section tp-config-section--provider tp-config-section--active">
-                    <div class="tp-config-section__header">
-                      <div>
-                        <div class="tp-config-section__title">{{ t('configCenter.defaultSetting') }}</div>
-                        <div class="tp-config-section__subtitle">{{ t('configCenter.providerUi.saveHint') }}</div>
-                      </div>
-                      <div class="tp-flex tp-align-center tp-gap-2">
+                  <PagePanel
+                    :class="cn(configSectionPanelClass({ scope: 'provider', active: true }), 'mb-3')"
+                    :title="t('configCenter.defaultSetting')"
+                    :subtitle="providerUiSaveHint || undefined"
+                  >
+                    <template #actions>
+                      <div :class="pageToolbarStripClass">
                         <TpButton
-                          variant="secondary"
+                          variant="ghost"
                           size="sm"
                           :disabled="itemsLoading || saving"
                           @click="resetQuickSection"
@@ -163,57 +191,114 @@
                         </TpButton>
                         <TpTag variant="primary">{{ t('config.section.active') }}</TpTag>
                       </div>
-                    </div>
+                    </template>
 
-                    <div class="tp-row tp-g-3">
-                      <div class="tp-col-12 tp-col-lg-4">
-                        <label class="tp-form-label">{{ t('configCenter.itemLabel.DEFAULT_COMPANY') }}</label>
-                        <select v-model="quickSelectedProvider" class="tp-select">
-                          <option v-for="option in getProviderOptions()" :key="option.value" :value="option.value">
-                            {{ option.label }}
-                          </option>
-                        </select>
+                    <div :class="grid12Class">
+                      <div :class="colSpan12Lg4">
+                        <TpInput
+                          v-model="quickSelectedProvider"
+                          as="select"
+                          :label="t('configCenter.itemLabel.DEFAULT_COMPANY')"
+                          :options="getProviderOptions()"
+                        />
                       </div>
 
-                      <div class="tp-col-12 tp-col-lg-8">
-                        <label class="tp-form-label">{{ quickFieldLabel }}</label>
-                        <input
+                      <div :class="colSpan12Lg8">
+                        <TpInput
                           v-model="quickFieldValue"
-                          class="tp-input"
+                          :label="quickFieldLabel"
                           :type="quickFieldInputType"
                           :disabled="quickFieldDisabled"
                           :placeholder="quickFieldPlaceholder"
+                          :helper="quickFieldHelper"
                         />
-                        <small class="tp-help-text tp-d-block tp-mt-2">
-                          {{ quickFieldHelper }}
-                        </small>
                       </div>
                     </div>
-                  </div>
+                  </PagePanel>
+
+                  <PagePanel
+                    v-if="
+                      aiModelTokenBudget.chatItem ||
+                      aiModelTokenBudget.hasGenerationMaxTokens ||
+                      tokenSessionGuardItems.length
+                    "
+                    :class="cn(configSectionPanelClass({ scope: 'shared' }), 'mb-3')"
+                    :title="t('config.section.tokenBudget')"
+                    :subtitle="t('config.section.tokenBudgetHint')"
+                  >
+                    <div
+                      v-if="aiModelTokenBudget.chatItem || aiModelTokenBudget.hasGenerationMaxTokens"
+                      :class="configFormStackClass"
+                    >
+                      <ConfigFormItem
+                        v-if="aiModelTokenBudget.chatItem"
+                        :key="aiModelTokenBudget.chatItem.key"
+                        v-model:modelValue="aiModelTokenBudget.chatItem.value"
+                        :kind="aiModelTokenBudget.chatItem.inputKind"
+                        :label="resolveItemLabel(aiModelTokenBudget.chatItem)"
+                        :placeholder="resolveItemPlaceholder(aiModelTokenBudget.chatItem)"
+                        :helper="resolveItemHelper(aiModelTokenBudget.chatItem)"
+                        :error="aiModelTokenBudget.chatItem.error"
+                        :dirty="isItemDirty(aiModelTokenBudget.chatItem)"
+                        :required="isItemRequired(aiModelTokenBudget.chatItem)"
+                        :options="resolveItemOptions(aiModelTokenBudget.chatItem)"
+                        :switch-key="`switch-${aiModelTokenBudget.chatItem.key}`"
+                        @blur="handleValidateItem(aiModelTokenBudget.chatItem)"
+                      />
+                      <ConfigFormItem
+                        v-if="aiModelTokenBudget.hasGenerationMaxTokens"
+                        v-model:modelValue="generationMaxTokensValue"
+                        kind="number"
+                        :label="t('configCenter.itemLabel.TR_MAX_TOKENS')"
+                        :placeholder="t('config.form.numberPlaceholder')"
+                        :helper="t('configCenter.itemDescription.TR_MAX_TOKENS')"
+                        :error="generationMaxTokensError"
+                        :dirty="generationMaxTokensDirty"
+                        switch-key="switch-generation-max-tokens"
+                        @blur="handleGenerationMaxTokensBlur"
+                      />
+                    </div>
+                    <div
+                      v-if="tokenSessionGuardItems.length"
+                      :class="cn(pageSectionDivideClass, configFormStackClass)"
+                    >
+                      <p :class="[configOverviewEyebrowClass, 'mb-3']">{{ t('config.section.tokenSessionGuard') }}</p>
+                      <ConfigFormItem
+                        v-for="item in tokenSessionGuardItems"
+                        :key="item.key"
+                        v-model:modelValue="item.value"
+                        :kind="item.inputKind"
+                        :label="resolveItemLabel(item)"
+                        :placeholder="resolveItemPlaceholder(item)"
+                        :helper="resolveItemHelper(item)"
+                        :error="item.error"
+                        :dirty="isItemDirty(item)"
+                        :required="isItemRequired(item)"
+                        :options="resolveItemOptions(item)"
+                        :switch-key="`switch-${item.key}`"
+                        @blur="handleValidateItem(item)"
+                      />
+                    </div>
+                  </PagePanel>
                 </div>
 
-                <div v-else class="tp-config-overview">
-                  <div class="tp-config-toolbar tp-mb-3">
-                    <div class="tp-flex tp-flex-column tp-flex-lg-row tp-justify-between tp-align-start tp-gap-2">
-                      <div>
-                        <div class="tp-card__title">{{ selectedCategoryLabel }}</div>
-                        <div class="tp-config-meta">{{ selectedCategoryDescription }}</div>
+                <div v-else :class="configOverviewClass">
+                  <TableToolbar
+                    class="mb-4"
+                    :title="selectedCategoryLabel"
+                    :subtitle="selectedCategoryDescription"
+                  >
+                    <template v-if="dirtyCount > 0" #actions>
+                      <div :class="[captionTextClass, configToolbarStatusClass, 'text-left lg:text-right']">
+                        {{ configDirtySummary }}
                       </div>
+                    </template>
+                  </TableToolbar>
 
-                      <div class="tp-config-toolbar__meta tp-text-lg-end">
-                        <div class="tp-small tp-config-toolbar__hint">{{ t('config.panel.hint') }}</div>
-                        <div class="tp-small tp-mt-1 tp-config-toolbar__status">
-                          <span v-if="dirtyCount > 0">{{ t('config.state.pendingChanges', { count: dirtyCount }) }}</span>
-                          <span v-else>{{ t('config.state.noChanges') }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="tp-config-overview__head">
+                  <div :class="configOverviewHeadClass">
                     <div>
-                      <div class="tp-config-overview__eyebrow">{{ t('config.section.providers') }}</div>
-                      <div class="tp-config-meta">
+                      <div :class="configOverviewEyebrowClass">{{ t('config.section.providers') }}</div>
+                      <div :class="configMetaClass">
                         {{
                           currentDefaultProviderLabel
                             ? t('config.section.providerHint', { provider: currentDefaultProviderLabel })
@@ -221,29 +306,25 @@
                         }}
                       </div>
                     </div>
-                    <div class="tp-config-overview__metrics">
+                    <div :class="configOverviewMetricsClass">
                       <TpTag variant="neutral">
                         {{ t('config.section.shared') }}
-                        <span class="tp-config-overview__count">{{ groupedConfigSections.shared.items.length }}</span>
+                        <span :class="configOverviewCountClass">{{ groupedConfigSections.shared.items.length }}</span>
                       </TpTag>
                       <TpTag variant="ai">
                         {{ t('config.section.providers') }}
-                        <span class="tp-config-overview__count">{{ groupedConfigSections.providers.length }}</span>
+                        <span :class="configOverviewCountClass">{{ groupedConfigSections.providers.length }}</span>
                       </TpTag>
                     </div>
                   </div>
 
-                  <div
+                  <PagePanel
                     v-if="groupedConfigSections.shared.items.length"
-                    class="tp-config-section tp-config-section--shared"
+                    :class="cn(configSectionPanelClass({ scope: 'shared' }), 'mb-3')"
+                    :title="t('config.section.shared')"
+                    :subtitle="t('config.section.sharedHint')"
                   >
-                    <div class="tp-config-section__header">
-                      <div>
-                        <div class="tp-config-section__title">{{ t('config.section.shared') }}</div>
-                        <div class="tp-config-section__subtitle">{{ t('config.section.sharedHint') }}</div>
-                      </div>
-                    </div>
-                    <div class="tp-config-form-stack">
+                    <div :class="configFormStackClass">
                       <ConfigFormItem
                         v-for="item in groupedConfigSections.shared.items"
                         :key="item.key"
@@ -260,27 +341,32 @@
                         @blur="handleValidateItem(item)"
                       />
                     </div>
-                  </div>
+                  </PagePanel>
 
-                  <div v-if="groupedConfigSections.providers.length" class="tp-config-provider-grid">
-                    <section
+                  <div v-if="groupedConfigSections.providers.length" :class="configProviderGridClass">
+                    <PagePanel
                       v-for="section in groupedConfigSections.providers"
                       :key="section.key"
-                      class="tp-config-section tp-config-section--provider"
-                      :class="[`tp-config-section--${section.key.toLowerCase()}`, { 'tp-config-section--active': section.active }]"
+                      :class="
+                        cn(
+                          configSectionPanelClass({
+                            scope: 'provider',
+                            active: section.active,
+                            providerAccent: resolveConfigProviderAccent(section.key)
+                          })
+                        )
+                      "
+                      :title="section.title"
+                      :subtitle="section.subtitle"
                     >
-                      <div class="tp-config-section__header">
-                        <div>
-                          <div class="tp-config-section__title">{{ section.title }}</div>
-                          <div class="tp-config-section__subtitle">{{ section.subtitle }}</div>
-                        </div>
-                        <div class="tp-config-section__meta">
+                      <template #actions>
+                        <div :class="cn(pageToolbarStripClass, 'gap-2')">
                           <TpTag v-if="section.active" variant="primary">{{ t('config.section.active') }}</TpTag>
                           <TpTag variant="neutral">{{ section.items.length }}</TpTag>
                         </div>
-                      </div>
+                      </template>
 
-                      <div class="tp-config-form-stack">
+                      <div :class="configFormStackClass">
                         <ConfigFormItem
                           v-for="item in section.items"
                           :key="item.key"
@@ -297,52 +383,43 @@
                           @blur="handleValidateItem(item)"
                         />
                       </div>
-                    </section>
+                    </PagePanel>
+                  </div>
+                </div>
+                </template>
+
+                <div
+                  v-if="currentItems.length"
+                  :class="[configFooterClass, 'flex flex-wrap items-center justify-between gap-2']"
+                >
+                  <div :class="configMetaClass">
+                    <span v-if="saving || exporting || validationPendingCount > 0">
+                      {{ activityMessage }}
+                    </span>
+                    <span v-else>{{ configDirtySummary }}</span>
+                  </div>
+
+                  <div :class="pageToolbarStripClass">
+                    <TpButton variant="ghost" size="sm" :disabled="saving" @click="handleReloadCurrentCategory">
+                      {{ t('config.actions.reload') }}
+                    </TpButton>
+                    <TpButton
+                      variant="primary"
+                      size="sm"
+                      :loading="saving"
+                      :disabled="saving || !currentItems.length"
+                      @click="handleSave"
+                    >
+                      {{ saving ? t('config.actions.saving') : t('config.actions.save') }}
+                    </TpButton>
                   </div>
                 </div>
               </template>
-
-              <div class="tp-flex tp-flex-wrap tp-justify-between tp-align-center tp-gap-2 tp-mt-4 tp-pt-3">
-                <div class="tp-config-meta">
-                  <span v-if="saving || exporting || validationPendingCount > 0">
-                    {{ activityMessage }}
-                  </span>
-                  <span v-else>{{ dirtyCount > 0 ? t('config.state.pendingChanges', { count: dirtyCount }) : t('config.state.noChanges') }}</span>
-                </div>
-
-                <div class="tp-flex tp-flex-wrap tp-gap-2">
-                  <TpButton variant="secondary" :disabled="saving" @click="handleReloadCurrentCategory">
-                    {{ t('config.actions.reload') }}
-                  </TpButton>
-                  <TpButton :loading="saving" :disabled="saving || !currentItems.length" @click="handleSave">
-                    {{ saving ? t('config.actions.saving') : t('config.actions.save') }}
-                  </TpButton>
-                </div>
-              </div>
             </template>
           </template>
-        </div>
+        </PagePanel>
       </section>
     </div>
-
-    <section class="tp-surface tp-p-3 tp-mt-3">
-      <div class="tp-flex tp-justify-between tp-align-center tp-gap-2 tp-mb-2">
-        <div class="tp-card__title">{{ t('config.audit.title') }}</div>
-        <TpButton variant="ghost" size="sm" :loading="auditLoading" @click="loadAuditLogs">
-          {{ t('common.actions.refresh') }}
-        </TpButton>
-      </div>
-      <div v-if="auditLoading" class="tp-small">{{ t('config.audit.loading') }}</div>
-      <div v-else-if="!auditLogs.length" class="tp-small">{{ t('config.audit.empty') }}</div>
-      <div v-else class="tp-grid tp-gap-2">
-        <div v-for="log in auditLogs" :key="String(log.id || log.key) + String(log.created_at || '')" class="tp-small">
-          <strong>{{ log.key || '-' }}</strong>
-          · {{ log.action || '-' }}
-          · {{ log.operator || '-' }}
-          · {{ formatDateTime(String(log.created_at || '')) }}
-        </div>
-      </div>
-    </section>
 
     <ConfirmDialog
       v-model="unsavedDiscardVisible"
@@ -358,47 +435,98 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import ActionBar from '@/components/common/ActionBar.vue';
+import PagePanel from '@/components/common/PagePanel.vue';
+import TableToolbar from '@/components/common/TableToolbar.vue';
+import SidebarMenu from '@/components/layout/SidebarMenu.vue';
 import BaseState from '@/components/common/BaseState.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import ConfigFormItem from '@/components/common/ConfigFormItem.vue';
+import PageNoticeBanner from '@/components/common/PageNoticeBanner.vue';
 import TpButton from '@/components/ui/base/TpButton.vue';
+import TpInput from '@/components/ui/base/TpInput.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
+import {
+  CONFIG_AUDIT_CATEGORY_ID,
+  CONFIG_AUDIT_LOG_SCROLL_THRESHOLD,
+  configAuditLogListClass,
+  configCategoryItemClass,
+  isConfigAuditCategoryId,
+  configFooterClass,
+  configFormStackClass,
+  configMetaClass,
+  configOverviewClass,
+  configOverviewCountClass,
+  configOverviewEyebrowClass,
+  configOverviewHeadClass,
+  configOverviewMetricsClass,
+  configProviderGridClass,
+  configSectionPanelClass,
+  configSidebarStickyClass,
+  configToolbarStatusClass,
+  resolveConfigProviderAccent
+} from '@/lib/config-ui';
+import {
+  buildAiModelTokenBudgetSections,
+  CONFIG_GENERATION_MAX_TOKENS_KEY,
+  CONFIG_SESSION_TOKEN_GUARD_KEYS,
+  filterItemsForCategoryGrouping,
+  isConfigSessionTokenGuardKey,
+  listLegacyProviderGenerationTokenItems,
+  syncGenerationMaxTokensToLegacyKeys
+} from '@/lib/config-token-ui';
+import {
+  colSpan12Lg4,
+  colSpan12Lg8,
+  colSpan12Xl3,
+  colSpan12Xl9,
+  grid12Class,
+  grid12StretchClass,
+  pageFluidShellMarkedClass,
+  pageMarkerConfig,
+  pageSectionDivideClass
+} from '@/lib/page-layout-ui';
+import { captionTextClass, dataSubtitleClass, dataTitleClass } from '@/lib/page-typography';
+import { navItemClass } from '@/lib/shell-ui';
+import { pageToolbarStripClass, pageToolbarSubtitleClass } from '@/lib/page-chrome-ui';
+import { cn } from '@/lib/utils';
+import { refreshAppFeatureFlags } from '@/composables/useFeatureFlags';
+import { usePageNotifier } from '@/composables/usePageNotifier';
 import { useAppStore } from '@/stores';
 import {
   deleteConfigItem,
   exportConfig,
   getCategories,
   getCategoryConfig,
-  getConfigAuditLogs,
   importConfig,
   saveConfig,
   validateConfig,
+  getConfigAuditLogs,
   type ConfigAuditLogRecord,
   type ConfigCategory,
   type ConfigItem,
   type ConfigOption
 } from '@/api/config';
 import { ApiError } from '@/api/http';
+import { formatDateTime } from '@/lib/format';
+import { triggerTextDownload } from '@/lib/download';
+import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
 
 type NoticeType = 'success' | 'danger' | 'warning' | 'info';
-
-interface NoticeState {
-  type: NoticeType;
-  title: string;
-  message: string;
-}
 
 const { t, locale } = useI18n();
 const route = useRoute();
 const appStore = useAppStore();
+const {
+  banner: pageBanner,
+  clearBanner: clearPageBanner,
+  showNotice: notifyPageNotice
+} = usePageNotifier();
 
 const categories = ref<ConfigCategory[]>([]);
-const auditLogs = ref<ConfigAuditLogRecord[]>([]);
-const auditLoading = ref(false);
 const currentItems = ref<ConfigItem[]>([]);
 const selectedCategoryId = ref('');
 const baselineSnapshot = ref<Record<string, string>>({});
@@ -410,8 +538,6 @@ const importing = ref(false);
 const categoriesError = ref('');
 const itemsError = ref('');
 const validationPending = reactive<Record<string, boolean>>({});
-const banner = ref<NoticeState | null>(null);
-const bannerTimer = ref<number | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
 
 type UnsavedDiscardPending =
@@ -468,12 +594,72 @@ const sortedCategories = computed(() =>
   })
 );
 
+type ConfigSidebarNavEntry = { kind: 'category'; category: ConfigCategory } | { kind: 'audit' };
+
+const configSidebarNavEntries = computed((): ConfigSidebarNavEntry[] => {
+  const sorted = sortedCategories.value;
+  const entries: ConfigSidebarNavEntry[] = sorted.map((category) => ({ kind: 'category', category }));
+  const auditEntry: ConfigSidebarNavEntry = { kind: 'audit' };
+  const fileProcessingIndex = sorted.findIndex((category) => category.id === 'file_processing');
+  if (fileProcessingIndex >= 0) {
+    entries.splice(fileProcessingIndex + 1, 0, auditEntry);
+  } else {
+    entries.push(auditEntry);
+  }
+  return entries;
+});
+
+const isAuditCategorySelected = computed(() => isConfigAuditCategoryId(selectedCategoryId.value));
+
+const configPanelTitle = computed(() =>
+  isAuditCategorySelected.value ? t('config.audit.title') : t('config.panel.title')
+);
+
+const configPanelRefreshLoading = computed(() =>
+  isAuditCategorySelected.value ? auditLogsLoading.value : categoriesLoading.value
+);
+
+function handleConfigPanelToolbarRefresh() {
+  if (isAuditCategorySelected.value) {
+    void loadAuditLogs();
+    return;
+  }
+  void handleReloadCategories();
+}
+
+function resolveSidebarNavEntryId(entry: ConfigSidebarNavEntry) {
+  return entry.kind === 'audit' ? CONFIG_AUDIT_CATEGORY_ID : entry.category.id;
+}
+
+function resolveSidebarNavEntryLabel(entry: ConfigSidebarNavEntry) {
+  return entry.kind === 'audit' ? t('config.audit.title') : resolveCategoryLabel(entry.category);
+}
+
+function resolveSidebarNavEntryDescription(entry: ConfigSidebarNavEntry) {
+  return entry.kind === 'audit' ? t('config.audit.navDescription') : resolveCategoryDescription(entry.category);
+}
+
+const showConfigBackendHint = computed(
+  () => Boolean(categoriesError.value) && !categoriesLoading.value && !sortedCategories.value.length
+);
+
 const selectedCategory = computed(() => categories.value.find((item) => item.id === selectedCategoryId.value) || null);
 const selectedCategoryLabel = computed(() => (selectedCategory.value ? resolveCategoryLabel(selectedCategory.value) : ''));
 const selectedCategoryDescription = computed(() => (selectedCategory.value ? resolveCategoryDescription(selectedCategory.value) : ''));
 const dirtyCount = computed(() => currentItems.value.filter((item) => isItemDirty(item)).length);
+const configDirtySummary = computed(() =>
+  dirtyCount.value > 0 ? t('config.state.pendingChanges', { count: dirtyCount.value }) : ''
+);
+
+function trimI18n(key: string) {
+  return String(t(key) || '').trim();
+}
+
+const providerUiSubtitle = computed(() => trimI18n('configCenter.providerUi.subtitle'));
+const providerUiSaveHint = computed(() => trimI18n('configCenter.providerUi.saveHint'));
+
 const validationPendingCount = computed(() => Object.values(validationPending).filter(Boolean).length);
-const providerKeys = ['OPENAI', 'DEEPSEEK', 'OLLAMA', 'GEMINI', 'QWEN'] as const;
+const providerKeys = ['OPENAI', 'DEEPSEEK', 'OLLAMA', 'GEMINI', 'QWEN', 'ANTHROPIC'] as const;
 type ProviderKey = (typeof providerKeys)[number];
 
 interface ConfigSection {
@@ -532,6 +718,13 @@ const providerQuickFieldMap: Partial<Record<ProviderKey, {
     placeholderKey: 'configCenter.providerUi.apiKeyPlaceholder',
     helperKey: 'configCenter.defaultSetting'
   },
+  ANTHROPIC: {
+    key: 'ANTHROPIC_API_KEY',
+    inputType: 'password',
+    labelKey: 'configCenter.providerUi.apiKey',
+    placeholderKey: 'configCenter.providerUi.apiKeyPlaceholder',
+    helperKey: 'configCenter.defaultSetting'
+  },
   OLLAMA: {
     key: 'OLLAMA_BASE_URL',
     inputType: 'text',
@@ -545,7 +738,8 @@ const providerEnableKeyMap: Record<ProviderKey, string> = {
   DEEPSEEK: 'ENABLE_DEEPSEEK',
   OLLAMA: 'ENABLE_OLLAMA',
   GEMINI: 'ENABLE_GEMINI',
-  QWEN: 'ENABLE_QWEN'
+  QWEN: 'ENABLE_QWEN',
+  ANTHROPIC: 'ENABLE_ANTHROPIC'
 };
 
 const quickSelectedProvider = computed<string>({
@@ -639,11 +833,60 @@ async function resetQuickSection() {
   await loadCategoryItems(selectedCategoryId.value);
 }
 
+const tokenSessionGuardItems = computed(() =>
+  currentItems.value
+    .filter((item) => isConfigSessionTokenGuardKey(item.key))
+    .sort(
+      (left, right) =>
+        CONFIG_SESSION_TOKEN_GUARD_KEYS.indexOf(left.key as (typeof CONFIG_SESSION_TOKEN_GUARD_KEYS)[number]) -
+        CONFIG_SESSION_TOKEN_GUARD_KEYS.indexOf(right.key as (typeof CONFIG_SESSION_TOKEN_GUARD_KEYS)[number])
+    )
+);
+
+const aiModelTokenBudget = computed(() => buildAiModelTokenBudgetSections(currentItems.value));
+
+function generationMaxTokensRelatedItems() {
+  const items = listLegacyProviderGenerationTokenItems(currentItems.value);
+  const unified = currentItems.value.find((item) => item.key === CONFIG_GENERATION_MAX_TOKENS_KEY);
+  return unified ? [unified, ...items.filter((item) => item.key !== unified.key)] : items;
+}
+
+const generationMaxTokensValue = computed({
+  get() {
+    const related = generationMaxTokensRelatedItems();
+    if (!related.length) return null;
+    const unified = related.find((item) => item.key === CONFIG_GENERATION_MAX_TOKENS_KEY);
+    if (unified) return unified.value;
+    return related[0].value;
+  },
+  set(value) {
+    syncGenerationMaxTokensToLegacyKeys(currentItems.value, value);
+  }
+});
+
+const generationMaxTokensError = computed(
+  () => generationMaxTokensRelatedItems().map((item) => item.error).find(Boolean) ?? ''
+);
+
+const generationMaxTokensDirty = computed(() =>
+  generationMaxTokensRelatedItems().some((item) => isItemDirty(item))
+);
+
+async function handleGenerationMaxTokensBlur() {
+  syncGenerationMaxTokensToLegacyKeys(currentItems.value, generationMaxTokensValue.value);
+  await Promise.all(generationMaxTokensRelatedItems().map((item) => handleValidateItem(item)));
+}
+
 const groupedConfigSections = computed(() => {
   const sharedItems: ConfigItem[] = [];
   const groupedItems = new Map<ProviderKey, ConfigItem[]>(providerKeys.map((key) => [key, [] as ConfigItem[]]));
 
-  currentItems.value.forEach((item) => {
+  const itemsForGrouping = filterItemsForCategoryGrouping(
+    selectedCategoryId.value,
+    currentItems.value
+  );
+
+  itemsForGrouping.forEach((item) => {
     const providerKey = resolveProviderKey(item);
     if (providerKey === 'shared') {
       sharedItems.push(item);
@@ -675,16 +918,6 @@ const groupedConfigSections = computed(() => {
   };
 });
 
-const bannerClass = computed(() => {
-  const type = banner.value?.type || 'info';
-  return {
-    'tp-risk-block--info': type === 'info',
-    'tp-risk-block--danger': type === 'danger',
-    'tp-risk-block--warning': type === 'warning',
-    'tp-risk-block--success': type === 'success'
-  };
-});
-
 const activityMessage = computed(() => {
   if (saving.value) return t('config.actions.saving');
   if (exporting.value) return t('config.actions.exporting');
@@ -702,28 +935,13 @@ watch(
   { immediate: true }
 );
 
-function clearBanner() {
-  banner.value = null;
-  if (bannerTimer.value) {
-    window.clearTimeout(bannerTimer.value);
-    bannerTimer.value = null;
-  }
-}
-
 function showNotice(type: NoticeType, title: string, message: string) {
-  banner.value = { type, title, message };
-  if (bannerTimer.value) {
-    window.clearTimeout(bannerTimer.value);
-  }
-  bannerTimer.value = window.setTimeout(() => {
-    banner.value = null;
-    bannerTimer.value = null;
-  }, 3000);
+  notifyPageNotice(type, message, { title });
 }
 
-function showApiError(error: unknown, fallback: string) {
-  const message = error instanceof ApiError ? error.message : error instanceof Error ? error.message : fallback;
-  showNotice('danger', t('common.status.error'), message || fallback);
+function showApiError(error: unknown, fallback: string, altFallback?: string) {
+  const message = getUserFacingErrorMessage(error, altFallback ?? fallback);
+  showNotice('danger', t('common.status.error'), message || altFallback || fallback);
 }
 
 function resetImportInput() {
@@ -772,6 +990,9 @@ function resolveItemLabel(item: ConfigItem) {
 }
 
 function resolveItemValueTypeLabel(item: ConfigItem) {
+  if (item.key === 'CONTENT_DEDUP_WEIGHTS' || item.inputKind === 'dedup_weights') {
+    return t('config.form.dedupWeights.valueType');
+  }
   if (item.value_type) {
     return translateKey(`enums.config.valueType.${item.value_type}`, item.value_type);
   }
@@ -784,7 +1005,7 @@ function resolveItemHelper(item: ConfigItem) {
     translateKey(item.description_key || `configCenter.itemDescription.${item.key}`, item.description || '')
   );
   if (description) {
-    pieces.push(description);
+    pieces.push(`${t('config.form.description')}: ${description}`);
   }
   pieces.push(`${t('config.form.valueType')}: ${resolveItemValueTypeLabel(item)}`);
   if (item.updated_at) {
@@ -816,12 +1037,13 @@ function resolveProviderKey(item: ConfigItem): ProviderKey | 'shared' {
   if (text.includes('OLLAMA')) return 'OLLAMA';
   if (text.includes('GEMINI')) return 'GEMINI';
   if (text.includes('QWEN')) return 'QWEN';
+  if (text.includes('ANTHROPIC') || text.includes('CLAUDE')) return 'ANTHROPIC';
 
   return 'shared';
 }
 
 function getProviderOptions(): ConfigOption[] {
-  const values = ['OPENAI', 'DEEPSEEK', 'OLLAMA', 'GEMINI', 'QWEN'];
+  const values = ['OPENAI', 'DEEPSEEK', 'OLLAMA', 'GEMINI', 'QWEN', 'ANTHROPIC'];
   return values.map((value) => ({
     value,
     label: translateKey(`configCenter.provider.${value}`, value)
@@ -956,14 +1178,22 @@ async function loadCategories({ preserveSelection = false } = {}) {
       return;
     }
 
-    if (!selectedCategoryId.value || !categories.value.some((item) => item.id === selectedCategoryId.value) || !preserveSelection) {
-      selectedCategoryId.value = categories.value[0].id;
+    const selectionValid =
+      isConfigAuditCategoryId(selectedCategoryId.value) ||
+      categories.value.some((item) => item.id === selectedCategoryId.value);
+
+    if (!selectedCategoryId.value || !selectionValid || !preserveSelection) {
+      selectedCategoryId.value = categories.value[0]?.id ?? CONFIG_AUDIT_CATEGORY_ID;
     }
 
     await loadCategoryItems(selectedCategoryId.value);
   } catch (error) {
-    categoriesError.value = error instanceof Error ? error.message : t('config.message.loadFailed');
-    showApiError(error, t('config.message.loadFailed'));
+    categories.value = [];
+    selectedCategoryId.value = '';
+    currentItems.value = [];
+    baselineSnapshot.value = {};
+    categoriesError.value = getUserFacingErrorMessage(error, t('config.message.loadFailed'));
+    showApiError(error, t('config.message.loadFailed'), t('validation.loadFailed'));
   } finally {
     categoriesLoading.value = false;
     appStore.setLoading(false);
@@ -974,6 +1204,14 @@ async function loadCategoryItems(categoryId: string) {
   if (!categoryId) {
     currentItems.value = [];
     baselineSnapshot.value = {};
+    return;
+  }
+
+  if (isConfigAuditCategoryId(categoryId)) {
+    currentItems.value = [];
+    baselineSnapshot.value = {};
+    itemsError.value = '';
+    await loadAuditLogs();
     return;
   }
 
@@ -988,11 +1226,14 @@ async function loadCategoryItems(categoryId: string) {
     currentItems.value.forEach((item) => {
       item.error = '';
     });
+    if (categoryId === 'ai_model') {
+      syncGenerationMaxTokensToLegacyKeys(currentItems.value, generationMaxTokensValue.value);
+    }
   } catch (error) {
     currentItems.value = [];
     baselineSnapshot.value = {};
-    itemsError.value = error instanceof Error ? error.message : t('config.message.loadFailed');
-    showApiError(error, t('config.message.loadFailed'));
+    itemsError.value = getUserFacingErrorMessage(error, t('config.message.loadFailed'));
+    showApiError(error, t('config.message.loadFailed'), t('validation.loadFailed'));
   } finally {
     itemsLoading.value = false;
     appStore.setLoading(false);
@@ -1021,6 +1262,10 @@ async function handleReloadCategories() {
 
 async function handleReloadCurrentCategory() {
   if (!selectedCategoryId.value) return;
+  if (isConfigAuditCategoryId(selectedCategoryId.value)) {
+    await loadAuditLogs();
+    return;
+  }
   if (dirtyCount.value > 0) {
     openUnsavedDiscardDialog({ kind: 'reloadCurrentCategory' });
     return;
@@ -1057,14 +1302,14 @@ async function handleValidateItem(item: ConfigItem) {
       item.error = result.message || t('validation.invalidValue');
     }
   } catch (error) {
-    item.error = error instanceof Error ? error.message : t('validation.validationFailed');
+    item.error = getUserFacingErrorMessage(error, t('validation.validationFailed'));
   } finally {
     validationPending[item.key] = false;
   }
 }
 
 async function handleSave() {
-  if (!selectedCategoryId.value) return;
+  if (!selectedCategoryId.value || isConfigAuditCategoryId(selectedCategoryId.value)) return;
 
   if (!currentItems.value.length) {
     showNotice('info', t('common.feedback.info'), t('config.message.noChangesToSave'));
@@ -1076,6 +1321,9 @@ async function handleSave() {
 
   try {
     syncAiModelProviderFlags();
+    if (selectedCategoryId.value === 'ai_model') {
+      syncGenerationMaxTokensToLegacyKeys(currentItems.value, generationMaxTokensValue.value);
+    }
     const dirtyItems = currentItems.value.filter((item) => isItemDirty(item));
     const submitItems = buildAiModelSubmitItems(dirtyItems);
     if (!submitItems.length) {
@@ -1100,15 +1348,23 @@ async function handleSave() {
           matched.error = failed.error;
         }
       });
-      showNotice('warning', t('common.feedback.warning'), t('config.message.savedWithWarnings'));
+      showNotice(
+        'warning',
+        t('common.feedback.warning'),
+        `${t('config.message.savedWithWarnings')} · ${t('config.message.validationFailed')}`
+      );
     } else {
-      showNotice('success', t('common.feedback.success'), t('config.message.saved'));
+      showNotice(
+        'success',
+        t('common.feedback.success'),
+        `${t('config.message.saved')} · ${t('config.message.validationPassed')}`
+      );
     }
 
     await loadCategoryItems(selectedCategoryId.value);
-    await loadAuditLogs();
+    await refreshAppFeatureFlags();
   } catch (error) {
-    showApiError(error, t('config.message.saveFailed'));
+    showApiError(error, t('config.message.saveFailed'), t('validation.saveFailed'));
   } finally {
     saving.value = false;
     appStore.setLoading(false);
@@ -1120,20 +1376,11 @@ async function handleExport() {
 
   try {
     const result = await exportConfig('json');
-    const blob = new Blob([result.content], {
-      type: 'application/json;charset=utf-8'
-    });
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = result.filename || 'config_export.json';
-    link.click();
-    URL.revokeObjectURL(url);
+    triggerTextDownload(result.content, result.filename || 'config_export.json');
 
     showNotice('success', t('common.feedback.success'), t('config.message.exportReady'));
   } catch (error) {
-    showApiError(error, t('config.message.exportFailed'));
+    showApiError(error, t('config.message.exportFailed'), t('validation.exportFailed'));
   } finally {
     exporting.value = false;
   }
@@ -1169,30 +1416,24 @@ async function handleImportFileChange(event: Event) {
   }
 }
 
-async function loadAuditLogs() {
-  auditLoading.value = true;
-  try {
-    auditLogs.value = await getConfigAuditLogs({ limit: 8 });
-  } catch {
-    auditLogs.value = [];
-  } finally {
-    auditLoading.value = false;
-  }
+const auditLogs = ref<ConfigAuditLogRecord[]>([]);
+const auditLogsLoading = ref(false);
+const auditLogsError = ref('');
+
+function formatAuditLogTime(value: unknown) {
+  return formatDateTime(value ? String(value) : null, locale.value);
 }
 
-function formatDateTime(value: string) {
+async function loadAuditLogs() {
+  auditLogsLoading.value = true;
+  auditLogsError.value = '';
   try {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat(locale.value, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
-  } catch {
-    return value;
+    auditLogs.value = await getConfigAuditLogs({ limit: 50, offset: 0 });
+  } catch (error) {
+    auditLogs.value = [];
+    auditLogsError.value = getUserFacingErrorMessage(error, t('config.audit.loading'));
+  } finally {
+    auditLogsLoading.value = false;
   }
 }
 
@@ -1202,13 +1443,6 @@ onMounted(async () => {
     selectedCategoryId.value = routeCategory;
   }
   await loadCategories({ preserveSelection: Boolean(routeCategory) });
-  await loadAuditLogs();
 });
 
-onBeforeUnmount(() => {
-  if (bannerTimer.value) {
-    window.clearTimeout(bannerTimer.value);
-    bannerTimer.value = null;
-  }
-});
 </script>

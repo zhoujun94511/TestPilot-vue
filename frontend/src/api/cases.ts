@@ -1,4 +1,4 @@
-import http, { ApiError, del, get, post } from './http';
+import http, { ApiError, del, get, post, put } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -60,6 +60,7 @@ export interface CaseGenerationConfig {
   max_case_num?: number;
   default_case_count?: number;
   priority_auto_determined?: boolean;
+  enable_case_generation_rag?: boolean;
   raw?: Record<string, unknown>;
 }
 
@@ -117,8 +118,22 @@ export interface CaseExportPayload {
   case_ids?: Array<string | number>;
 }
 
+export interface CaseUpdatePayload {
+  title?: string;
+  description?: string;
+  precondition?: string;
+  steps?: string[];
+  expected_result?: string[];
+  priority?: string;
+  category?: string;
+  tags?: string[];
+  status?: string;
+  module?: string;
+  test_method?: string;
+}
+
 export interface CaseGenerateFromAnalysisPayload {
-  requirements: Array<Record<string, unknown>>;
+  requirements: object[];
   use_rag?: boolean;
 }
 
@@ -245,6 +260,7 @@ function normalizeGenerationConfig(payload: unknown): CaseGenerationConfig {
     max_case_num: normalized.max_case_num != null ? Number(normalized.max_case_num) : undefined,
     default_case_count: normalized.default_case_count != null ? Number(normalized.default_case_count) : undefined,
     priority_auto_determined: Boolean(normalized.priority_auto_determined),
+    enable_case_generation_rag: Boolean(normalized.enable_case_generation_rag),
     raw: normalized
   };
 }
@@ -399,6 +415,19 @@ export async function getCaseConfig(): Promise<CaseGenerationConfig> {
     return normalizeGenerationConfig(payload);
   } catch (error) {
     coreNormalizeError(error, 'Failed to load test case config');
+  }
+}
+
+export async function updateCase(caseId: string, payload: CaseUpdatePayload): Promise<CaseRecord> {
+  try {
+    const response = await put<unknown>(`/cases/${encodeURIComponent(caseId)}`, payload);
+    const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
+      dataKeys: ['case', 'data'],
+      fallbackMessage: 'Failed to update test case'
+    });
+    return normalizeCaseRecord(normalized);
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to update test case');
   }
 }
 

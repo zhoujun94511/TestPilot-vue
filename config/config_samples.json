@@ -208,6 +208,22 @@
       "category": "file_processing",
       "description": "最大内存使用量(MB)",
       "is_sensitive": false
+    },
+    {
+      "key": "TOKEN_MAX_PER_SESSION",
+      "value": "50000",
+      "value_type": "int",
+      "category": "ai_model",
+      "description": "单会话累计 Token 上限",
+      "is_sensitive": false
+    },
+    {
+      "key": "TOKEN_MAX_CALLS_PER_SESSION",
+      "value": "100",
+      "value_type": "int",
+      "category": "ai_model",
+      "description": "单会话 LLM 最大调用次数",
+      "is_sensitive": false
     }
   ]
 }

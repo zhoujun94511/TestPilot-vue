@@ -17,6 +17,30 @@ logger = get_logger(__name__)
 config_center_bp = Blueprint('config_center', __name__, url_prefix='/api/config')
 
 
+@config_center_bp.before_request
+def _config_center_auth():
+    from services.auth_service import auth_required, current_user
+
+    if not auth_required():
+        return None
+    user = current_user()
+    if user is None:
+        return api_error(
+            'UNAUTHORIZED',
+            message_key='common.errors.http401',
+            message='未登录或会话已过期',
+            status=401,
+        )
+    if user.get('role') != 'super_admin':
+        return api_error(
+            'FORBIDDEN',
+            message_key='common.errors.http403',
+            message='仅超级管理员可访问配置中心',
+            status=403,
+        )
+    return None
+
+
 def _is_english_locale() -> bool:
     return normalize_language(request.headers.get('Accept-Language', 'zh-CN')) == 'en'
 
@@ -157,6 +181,20 @@ def validate_ai_model_configs(configs):
                 'Qwen API key format is invalid. It should start with "sk-".'
             )
 
+    elif provider == 'ANTHROPIC':
+        anthropic_key = _effective_api_key(config_dict, present_keys, 'ANTHROPIC_API_KEY')
+        if not anthropic_key:
+            return _t(
+                'Anthropic API key is required. Please provide a valid API key or switch to another AI provider.',
+                'Anthropic API key is required. Please provide a valid API key or switch to another AI provider.'
+            )
+        import re
+        if not re.match(r'^sk-ant-[A-Za-z0-9_\-]{20,}$', anthropic_key):
+            return _t(
+                'Anthropic API key format is invalid. It should start with "sk-ant-".',
+                'Anthropic API key format is invalid. It should start with "sk-ant-".'
+            )
+
     return None
 
 
@@ -166,7 +204,10 @@ def _reload_ai_runtime():
         from config.settings import settings
         from utils.utils_ai_models.get_llm import clear_llm_cache, get_llm
 
+        from utils.utils_performance_monitoring.token_monitor import refresh_token_monitor_session_limits
+
         settings.load_from_config_center()
+        refresh_token_monitor_session_limits()
         logger.info('Config center updated, reloading AI runtime with provider %s', settings.DEFAULT_COMPANY)
 
         clear_llm_cache()
@@ -205,7 +246,10 @@ def _reload_runtime_flags():
     """Reload lightweight runtime flags from config center."""
     try:
         from config.settings import settings
+        from utils.utils_performance_monitoring.token_monitor import refresh_token_monitor_session_limits
+
         settings.load_from_config_center()
+        refresh_token_monitor_session_limits()
     except Exception as reload_error:
         logger.warning('Failed to reload runtime flags: %s', reload_error)
 
@@ -216,8 +260,10 @@ _AI_RUNTIME_KEYS = {
     'OLLAMA_BASE_URL', 'OLLAMA_MODEL',
     'GEMINI_API_KEY', 'GEMINI_BASE_URL', 'GEMINI_MODEL', 'TR_GEMINI_MAX_TOKENS',
     'QWEN_API_KEY', 'QWEN_BASE_URL', 'QWEN_MODEL', 'QWEN_TEMPERATURE', 'TR_QWEN_MAX_TOKENS', 'QWEN_TIMEOUT',
-    'MAX_TOKENS', 'DEFAULT_COMPANY', 'GPT5_VERBOSITY', 'GPT5_REASONING_EFFORT',
-    'ENABLE_OPENAI', 'ENABLE_DEEPSEEK', 'ENABLE_OLLAMA', 'ENABLE_GEMINI', 'ENABLE_QWEN',
+    'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'TR_ANTHROPIC_MAX_TOKENS',
+    'MAX_TOKENS', 'TR_MAX_TOKENS', 'TOKEN_MAX_PER_SESSION', 'TOKEN_MAX_CALLS_PER_SESSION',
+    'DEFAULT_COMPANY', 'GPT5_VERBOSITY', 'GPT5_REASONING_EFFORT',
+    'ENABLE_OPENAI', 'ENABLE_DEEPSEEK', 'ENABLE_OLLAMA', 'ENABLE_GEMINI', 'ENABLE_QWEN', 'ENABLE_ANTHROPIC',
 }
 
 

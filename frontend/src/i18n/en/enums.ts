@@ -34,6 +34,21 @@ export default {
       failed: 'Failed',
       unknown: 'Unknown'
     },
+    requirementStatus: {
+      draft: 'Draft',
+      active: 'Active',
+      deprecated: 'Deprecated'
+    },
+    requirementType: {
+      functional: 'Functional requirement',
+      non_functional: 'Non-functional requirement',
+      business: 'Business requirement',
+      technical: 'Technical requirement',
+      test_point: 'Test point',
+      business_rule: 'Business rule',
+      requirements: 'Requirement',
+      unknown: 'Unknown'
+    },
     fileType: {
       txt: 'Text',
       md: 'Markdown',
@@ -72,6 +87,15 @@ export default {
     processMode: {
       sequential: 'Sequential',
       parallel: 'Parallel'
+    }
+  },
+  stats: {
+    llmUsageSource: {
+      chat: 'AI Chat',
+      case_generation: 'Case generation',
+      document_analysis: 'Document analysis',
+      agent: 'Agent',
+      llm: 'Other'
     }
   }
 };

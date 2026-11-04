@@ -86,7 +86,10 @@ export interface SystemStatus {
 
 export interface RecentActivityRecord {
   type: string;
+  /** @deprecated 使用 subject + 前端 i18n；保留兼容旧 API */
   message: string;
+  /** 活动主体（用例标题、文件名、聊天摘要等），不含前缀说明 */
+  subject?: string;
   time?: string | null;
   icon?: string;
   color?: string;
@@ -126,12 +129,17 @@ export interface UsageStatsResponse {
 
 export interface TokenStatsResponse {
   period_days?: number;
+  source?: string;
+  included_scopes?: string[];
   summary?: {
     total_tokens?: number;
+    avg_tokens_per_call?: number;
+    total_calls?: number;
     avg_tokens_per_message?: number;
     total_messages?: number;
   };
-  by_model?: Array<{ model?: string; total_tokens?: number; message_count?: number }>;
+  by_source?: Array<{ source?: string; total_tokens?: number; call_count?: number }>;
+  by_model?: Array<{ model?: string; total_tokens?: number; message_count?: number; call_count?: number }>;
   daily_usage?: Array<{ date: string; total_tokens: number }>;
   raw?: Record<string, unknown>;
 }
@@ -158,12 +166,12 @@ export interface ExportStatsParams {
 
 export interface BatchExportConfig {
   export_cases?: boolean;
-  cases?: Array<Record<string, unknown>>;
+  cases?: object[];
   case_formats?: Array<'excel' | 'csv' | 'json'>;
   export_requirements?: boolean;
-  requirements?: Array<Record<string, unknown>>;
+  requirements?: object[];
   export_chat?: boolean;
-  chat_history?: Array<Record<string, unknown>>;
+  chat_history?: object[];
   chat_formats?: Array<'excel' | 'txt' | 'json'>;
 }
 
@@ -230,16 +238,26 @@ function normalizeSystemStatus(payload: unknown): SystemStatus {
 }
 
 function normalizeRecentActivities(payload: unknown): RecentActivitiesResponse {
-  const normalized = isRecord(payload) ? payload : {};
+  const normalized = Array.isArray(payload)
+    ? { activities: payload }
+    : isRecord(payload)
+      ? payload
+      : {};
   const activities = coreAsArray<Record<string, unknown>>(pickCompatField(normalized, ['activities', 'items', 'data'], []))
-    .map((raw) => ({
-      type: String(pickCompatField(raw, ['type'], 'unknown')),
-      message: String(pickCompatField(raw, ['message'], '')),
-      time: pickCompatField(raw, ['time', 'timestamp', 'created_time'], null),
-      icon: pickCompatField(raw, ['icon'], undefined),
-      color: pickCompatField(raw, ['color'], undefined),
-      raw
-    }));
+    .map((raw) => {
+      const subjectRaw = pickCompatField(raw, ['subject', 'title', 'detail'], undefined);
+      const subject =
+        subjectRaw === undefined || subjectRaw === null ? undefined : String(subjectRaw);
+      return {
+        type: String(pickCompatField(raw, ['type'], 'unknown')),
+        message: String(pickCompatField(raw, ['message'], '')),
+        subject,
+        time: pickCompatField(raw, ['time', 'timestamp', 'created_time'], null),
+        icon: pickCompatField(raw, ['icon'], undefined),
+        color: pickCompatField(raw, ['color'], undefined),
+        raw
+      };
+    });
 
   return { activities, raw: normalized };
 }
@@ -281,9 +299,9 @@ export async function getOverviewStats(params: Record<string, unknown> = {}): Pr
   }
 }
 
-export async function getHealthStatus(): Promise<HealthStatus> {
+export async function getHealthStatus(params: Record<string, unknown> = {}): Promise<HealthStatus> {
   try {
-    const response = await get<unknown>('/stats/health');
+    const response = await get<unknown>('/stats/health', params);
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
       dataKeys: ['health', 'data'],
       fallbackMessage: 'Failed to load system health'
@@ -298,18 +316,19 @@ export async function getRecentActivities(params: Record<string, unknown> = {}):
   try {
     const response = await get<unknown>('/stats/recent-activities', params);
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
-      dataKeys: ['activities', 'data'],
+      dataKeys: ['data'],
       fallbackMessage: 'Failed to load recent activities'
     });
-    return normalizeRecentActivities(extractActivitiesPayload(payload));
+    const envelope = isRecord(payload) ? payload : isRecord(response) ? response : {};
+    return normalizeRecentActivities(extractActivitiesPayload(envelope));
   } catch (error) {
     coreNormalizeError(error, 'Failed to load recent activities');
   }
 }
 
-export async function getSystemStatus(): Promise<SystemStatus> {
+export async function getSystemStatus(params: Record<string, unknown> = {}): Promise<SystemStatus> {
   try {
-    const response = await get<unknown>('/stats/system-status');
+    const response = await get<unknown>('/stats/system-status', params);
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
       dataKeys: ['system', 'data'],
       fallbackMessage: 'Failed to load system status'
@@ -358,6 +377,55 @@ export async function getUsageStats(params: Record<string, unknown> = {}): Promi
   }
 }
 
+export interface TokenSessionUsageSlice {
+  used: number;
+  max: number;
+  percent: number;
+}
+
+export interface TokenSessionStatus {
+  level: 'ok' | 'warning';
+  warn_threshold_percent: number;
+  tokens: TokenSessionUsageSlice;
+  calls: TokenSessionUsageSlice;
+  message_key?: string | null;
+  message_params?: Record<string, unknown>;
+  notice_signature?: string | null;
+}
+
+export async function getTokenSessionStatus(): Promise<TokenSessionStatus> {
+  try {
+    const response = await get<unknown>('/stats/token-session');
+    const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
+      dataKeys: ['data'],
+      fallbackMessage: 'Failed to load token session status'
+    });
+    const tokens = isRecord(payload.tokens) ? payload.tokens : {};
+    const calls = isRecord(payload.calls) ? payload.calls : {};
+    return {
+      level: payload.level === 'warning' ? 'warning' : 'ok',
+      warn_threshold_percent: Number(payload.warn_threshold_percent ?? 80),
+      tokens: {
+        used: Number(tokens.used ?? 0),
+        max: Number(tokens.max ?? 0),
+        percent: Number(tokens.percent ?? 0)
+      },
+      calls: {
+        used: Number(calls.used ?? 0),
+        max: Number(calls.max ?? 0),
+        percent: Number(calls.percent ?? 0)
+      },
+      message_key: pickCompatField(payload, ['message_key'], null),
+      message_params: isRecord(payload.message_params)
+        ? (payload.message_params as Record<string, unknown>)
+        : undefined,
+      notice_signature: pickCompatField(payload, ['notice_signature'], null)
+    };
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to load token session status');
+  }
+}
+
 export async function getTokenStats(params: Record<string, unknown> = {}): Promise<TokenStatsResponse> {
   try {
     const response = await get<unknown>('/stats/tokens', params);
@@ -367,6 +435,13 @@ export async function getTokenStats(params: Record<string, unknown> = {}): Promi
     });
     return {
       period_days: payload.period_days != null ? Number(payload.period_days) : undefined,
+      source: payload.source != null ? String(payload.source) : undefined,
+      included_scopes: coreAsArray<string>(pickCompatField(payload, ['included_scopes'], [])).map(String),
+      by_source: coreAsArray<Record<string, unknown>>(pickCompatField(payload, ['by_source'], [])).map((item) => ({
+        source: item.source != null ? String(item.source) : undefined,
+        total_tokens: item.total_tokens != null ? Number(item.total_tokens) : 0,
+        call_count: item.call_count != null ? Number(item.call_count) : 0
+      })),
       summary: isRecord(payload.summary) ? (payload.summary as TokenStatsResponse['summary']) : undefined,
       by_model: coreAsArray<Record<string, unknown>>(pickCompatField(payload, ['by_model'], []))
         .map((item) => ({
@@ -409,9 +484,9 @@ export async function exportBatchZip(config: BatchExportConfig): Promise<Blob> {
   return response.data as Blob;
 }
 
-export async function getNetworkInfo(): Promise<NetworkInfoResponse> {
+export async function getNetworkInfo(params: Record<string, unknown> = {}): Promise<NetworkInfoResponse> {
   try {
-    const response = await get<unknown>('/stats/network/info');
+    const response = await get<unknown>('/stats/network/info', params);
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
       dataKeys: ['network_info', 'data'],
       fallbackMessage: 'Failed to load network info'
@@ -459,6 +534,27 @@ export async function getLogStats(params: { hours?: number } = {}): Promise<LogS
     };
   } catch (error) {
     coreNormalizeError(error, 'Failed to load log stats');
+  }
+}
+
+export interface AppFeatureFlagsResponse {
+  enableVectorStore: boolean;
+  experimentalActionsEnabled: boolean;
+}
+
+export async function getFeatureFlags(): Promise<AppFeatureFlagsResponse> {
+  try {
+    const response = await get<unknown>('/stats/feature-flags');
+    const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
+      dataKeys: ['feature_flags', 'data'],
+      fallbackMessage: 'Failed to load feature flags'
+    });
+    return {
+      enableVectorStore: Boolean(pickCompatField(payload, ['enable_vector_store'], true)),
+      experimentalActionsEnabled: Boolean(pickCompatField(payload, ['experimental_actions_enabled'], false))
+    };
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to load feature flags');
   }
 }
 

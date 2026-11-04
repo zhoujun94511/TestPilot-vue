@@ -8,9 +8,13 @@ export default {
     manage: 'Document & Requirement Management',
     history: 'Requirement History'
   },
+  toolbar: {
+    manageLead: 'Upload and analyze documents; select rows for bulk actions or case generation.',
+    historyLead: 'Browse saved requirements; select rows to generate cases or delete in bulk.',
+    generateSettings: 'Generation settings'
+  },
   actions: {
     upload: 'Upload Document',
-    hideUpload: 'Hide Upload',
     backToDocuments: 'Back to Documents',
     analyzeCurrent: 'Analyze Current',
     reanalyze: 'Reanalyze',
@@ -30,13 +34,9 @@ export default {
   filters: {
     title: 'Search & Filters',
     keywordLabel: 'Keyword',
-    keywordPlaceholder: 'Search by document name, content, or keyword',
+    keywordPlaceholder: 'Search',
     analysisTypeLabel: 'Analysis Type',
     apply: 'Search'
-  },
-  form: {
-    useRag: 'Use Knowledge Base Enhancement',
-    useRagDisabled: 'Knowledge base enhancement is unavailable, pure model generation will be used'
   },
   upload: {
     title: 'Document Upload',
@@ -87,7 +87,7 @@ export default {
     source: 'Source Document',
     sourceAll: 'All Source Documents',
     selectedRequirementsCount: '{count} requirements selected (cross-page)',
-    searchPlaceholder: 'Search by req id/title/content',
+    searchPlaceholder: 'Search',
     typeAll: 'All Types',
     priorityAll: 'All Priorities'
   },
@@ -103,9 +103,16 @@ export default {
   requirement: {
     id: 'ID',
     title: 'Title',
+    content: 'Requirement content',
     type: 'Type',
     priority: 'Priority',
-    category: 'Category'
+    category: 'Category',
+    statusLabel: 'Status',
+    editTitle: 'Edit requirement',
+    editLoading: 'Loading requirement…',
+    editEmpty: 'No requirement selected',
+    updateFailed: 'Failed to save requirement',
+    updateSuccess: 'Requirement saved'
   },
   message: {
     loadFailed: 'Failed to load document list',
@@ -141,8 +148,5 @@ export default {
     batchGenerateByDocumentsMessage: 'Batch generate: {count} docs, {reqCount} requirements (about {caseCount} cases), skipped {skippedCount} unanalyzed. Continue?',
     deleteDocuments: 'Delete selected documents? This action cannot be undone.',
     deleteRequirements: 'Delete selected requirements? This action cannot be undone.'
-  },
-  pagination: {
-    pageInfo: 'Page {page} / {pages}'
   }
 };

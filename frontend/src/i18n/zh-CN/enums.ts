@@ -34,6 +34,21 @@ export default {
       failed: '失败',
       unknown: '未知'
     },
+    requirementStatus: {
+      draft: '草稿',
+      active: '有效',
+      deprecated: '已废弃'
+    },
+    requirementType: {
+      functional: '功能需求',
+      non_functional: '非功能需求',
+      business: '业务需求',
+      technical: '技术需求',
+      test_point: '测试点',
+      business_rule: '业务规则',
+      requirements: '需求',
+      unknown: '未知'
+    },
     fileType: {
       txt: '文本',
       md: 'Markdown',
@@ -72,6 +87,15 @@ export default {
     processMode: {
       sequential: '顺序处理',
       parallel: '并行处理'
+    }
+  },
+  stats: {
+    llmUsageSource: {
+      chat: 'AI 聊天',
+      case_generation: '用例生成',
+      document_analysis: '文档分析',
+      agent: '智能体',
+      llm: '其他'
     }
   }
 };

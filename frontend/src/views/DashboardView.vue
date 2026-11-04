@@ -1,149 +1,181 @@
 ﻿<template>
-  <section class="tp-page tp-dashboard-page">
-    <ActionBar :title="t('dashboard.page.title')" :subtitle="t('dashboard.page.subtitle')">
-      <template #actions>
-        <TpButton variant="ghost" :loading="bundleExporting" :disabled="bundleExporting" @click="handleExportBundle">
-          {{ bundleExporting ? t('dashboard.actions.bundleExporting') : t('dashboard.actions.bundleExport') }}
-        </TpButton>
-        <TpButton variant="ghost" :loading="exporting" :disabled="exporting" @click="handleExportStats">
-          {{ exporting ? t('dashboard.actions.exporting') : t('dashboard.actions.export') }}
-        </TpButton>
-        <TpButton variant="secondary" :loading="refreshing" @click="handleRefresh">
-          {{ refreshing ? t('dashboard.actions.refreshing') : t('dashboard.actions.refresh') }}
-        </TpButton>
-      </template>
-    </ActionBar>
-
-    <div v-if="exportNotice" class="tp-risk-block tp-mb-3" :class="exportNoticeType === 'success' ? 'tp-risk-block--success' : 'tp-risk-block--danger'">
-      <div class="tp-flex tp-align-start tp-justify-between tp-gap-3">
-        <div class="tp-flex-grow-1">{{ exportNotice }}</div>
-        <TpButton variant="ghost" size="sm" :aria-label="t('common.actions.close')" @click="exportNotice = ''">
-          {{ t('common.actions.close') }}
-        </TpButton>
-      </div>
-    </div>
-
+  <section :class="pageRootMarkedClass(pageMarkerDashboard)">
     <BaseState
       v-if="hasPartialError"
       variant="error"
       :title="t('dashboard.message.partialFailure')"
       :message="partialErrorText"
       :retry-text="t('common.actions.retry')"
-      @retry="dismissErrorNotice"
+      @retry="handlePartialErrorRetry"
     />
 
-    <TpCard class="tp-dashboard-hero tp-mb-3">
+    <PageNoticeBanner
+      v-if="attentionNotice && !attentionDismissed"
+      :notice="attentionNotice"
+      @action="handleAttentionAction"
+      @close="attentionDismissed = true"
+    />
+
+    <ActionBar>
+      <template #lead>
+        <div :class="dashboardMetaStripClass">
+          <TpTag variant="ai">{{ aiModelLabel }}</TpTag>
+          <TpTag :variant="reliabilityVariant">{{ reliabilityLabel }}</TpTag>
+          <TpTag :variant="overallStatusVariant">{{ displayStatusLabel(overallStatusRaw) }}</TpTag>
+          <span v-if="health?.timestamp" class="text-xs text-[var(--tp-color-text-500)]">
+            {{ t('dashboard.system.updatedAt') }}: {{ formatDateTime(health?.timestamp, dashboardDateLocale, '') }}
+          </span>
+        </div>
+      </template>
+      <template #actions>
+        <TpButton variant="ghost" size="sm" :loading="bundleExporting" :disabled="bundleExporting" @click="handleExportBundle">
+          {{ bundleExporting ? t('dashboard.actions.bundleExporting') : t('dashboard.actions.bundleExport') }}
+        </TpButton>
+        <TpButton variant="ghost" size="sm" :loading="exporting" :disabled="exporting" @click="handleExportStats">
+          {{ exporting ? t('dashboard.actions.exporting') : t('dashboard.actions.export') }}
+        </TpButton>
+        <TpButton variant="secondary" size="sm" :loading="refreshing" @click="handleRefresh">
+          {{ refreshing ? t('dashboard.actions.refreshing') : t('dashboard.actions.refresh') }}
+        </TpButton>
+      </template>
+    </ActionBar>
+
+    <TpCard>
       <template #header>
-        <div class="tp-flex tp-flex-wrap tp-justify-between tp-align-start tp-gap-3">
+        <div :class="flexBetweenStartGap2Class">
           <div>
-            <div class="tp-section-title">{{ t('dashboard.welcome.kicker') }}</div>
-            <div class="tp-page-title__heading">{{ t('dashboard.welcome.title') }}</div>
-            <div class="tp-page-title__subtitle tp-mb-0">{{ t('dashboard.welcome.description') }}</div>
-          </div>
-          <div class="tp-flex tp-flex-wrap tp-gap-2 tp-justify-end">
-            <TpTag variant="ai">{{ aiModelLabel }}</TpTag>
-            <TpTag :variant="reliabilityVariant">{{ reliabilityLabel }}</TpTag>
-            <TpTag v-if="health?.timestamp" variant="neutral">
-              {{ t('dashboard.system.updatedAt') }}: {{ formatDateTime(health?.timestamp) }}
-            </TpTag>
+            <div :class="sectionTitleClass">{{ t('dashboard.shortcuts.title') }}</div>
+            <div :class="sectionSubtitleClass">{{ t('dashboard.shortcuts.subtitle') }}</div>
           </div>
         </div>
       </template>
-
-      <div class="tp-row tp-g-3">
-        <div v-for="card in aiCapabilityCards" :key="card.key" class="tp-col-12 tp-col-md-4">
-          <TpCard class="h-100">
-            <div class="tp-ai-capability-card">
-              <div>
-                <div class="tp-kpi-label">{{ card.label }}</div>
-                <div class="tp-kpi-value">{{ card.value }}</div>
-                <div class="tp-kpi-hint">{{ card.hint }}</div>
-              </div>
-              <div v-if="card.score !== undefined" class="tp-mt-3">
-                <TpProgress :value="card.score" :label="card.progressLabel" />
-              </div>
-              <div v-else class="tp-ai-capability-card__progress-placeholder"></div>
-            </div>
-          </TpCard>
-        </div>
+      <div :class="dashboardShortcutGridClass">
+        <DashboardShortcutTile
+          v-for="item in shortcutTiles"
+          :key="item.key"
+          :to="item.to"
+          :title="item.title"
+          :description="item.description"
+          :icon="item.icon"
+        />
       </div>
     </TpCard>
 
-    <div class="tp-mb-3">
+    <TpCard>
+      <template #header>
+        <div>
+          <div :class="sectionTitleClass">{{ t('dashboard.kpi.title') }}</div>
+          <div :class="sectionSubtitleClass">{{ t('dashboard.kpi.subtitle') }}</div>
+        </div>
+      </template>
       <BaseState
         v-if="overviewLoading && !overview"
         variant="loading"
         :title="t('dashboard.state.loadingOverview')"
         :message="t('dashboard.state.loadingHint')"
       />
-      <div v-else class="tp-row tp-g-3">
-        <div v-for="card in kpiCards" :key="card.key" class="tp-col-12 tp-col-md-6 tp-col-xxl-3">
-          <KnowledgeStatsCard :label="card.label" :value="card.value" :hint="card.hint" :icon="card.icon" />
+      <div v-else :class="grid12Class">
+        <div v-for="card in kpiCards" :key="card.key" :class="colSpan12Md6Min1400_3">
+          <DashboardStatTile
+            :label="card.label"
+            :value="card.value"
+            :hint="card.hint"
+            :to="card.to"
+            :icon="card.icon"
+          />
         </div>
       </div>
-    </div>
+    </TpCard>
 
-    <div class="tp-row tp-g-3">
-      <div class="tp-col-12 tp-col-xxl-5">
-        <TpCard>
+    <TpCard>
+      <template #header>
+        <div>
+          <div :class="sectionTitleClass">{{ t('dashboard.system.title') }}</div>
+          <div :class="sectionSubtitleClass">{{ t('dashboard.system.subtitle') }}</div>
+        </div>
+      </template>
+
+      <BaseState
+        v-if="systemLoading && !system && !health"
+        variant="loading"
+        :title="t('dashboard.state.loadingSystem')"
+        :message="t('dashboard.state.loadingHint')"
+      />
+      <BaseState
+        v-else-if="systemError && !system && !health && !hasPartialError"
+        variant="error"
+        :title="t('common.status.error')"
+        :message="systemError"
+        :retry-text="t('common.actions.retry')"
+        @retry="handleRefresh"
+      />
+      <div v-else :class="grid12Class">
+        <div v-for="card in systemStatCards" :key="card.key" :class="colSpan12Md6Min1400_3">
+          <DashboardStatTile
+            :label="card.label"
+            :value="card.value"
+            :hint="card.hint"
+            :to="card.to"
+            :icon="card.icon"
+          />
+        </div>
+      </div>
+    </TpCard>
+
+    <div :class="grid12StretchClass">
+      <div :class="colSpan12Min1400_5">
+        <TpCard class="h-full">
           <template #header>
-            <div class="tp-flex tp-align-start tp-justify-between tp-gap-2">
-              <div>
-                <div class="tp-section-title">{{ t('dashboard.system.title') }}</div>
-                <div class="tp-section-subtitle">{{ t('dashboard.system.subtitle') }}</div>
-              </div>
-              <TpTag :variant="overallStatusVariant">{{ displayStatusLabel(overallStatusRaw) }}</TpTag>
+            <div>
+              <div :class="sectionTitleClass">{{ t('dashboard.advanced.title') }}</div>
+              <div :class="sectionSubtitleClass">{{ t('dashboard.advanced.subtitle') }}</div>
             </div>
           </template>
 
           <BaseState
-            v-if="systemLoading && !system && !health"
+            v-if="advancedLoading && !advancedMetricsLoaded"
             variant="loading"
-            :title="t('dashboard.state.loadingSystem')"
+            :title="t('dashboard.state.loadingAdvanced')"
             :message="t('dashboard.state.loadingHint')"
           />
           <BaseState
-            v-else-if="systemError && !system && !health"
+            v-else-if="advancedError && !advancedMetricsLoaded"
             variant="error"
             :title="t('common.status.error')"
-            :message="systemError"
+            :message="advancedError"
             :retry-text="t('common.actions.retry')"
-            @retry="handleRefresh"
+            @retry="() => loadAdvancedMetrics({ bustCache: true })"
           />
-          <div v-else class="tp-system-layout">
-            <div class="tp-system-summary">
-              <div class="tp-system-summary__main">
-                <div class="tp-kpi-label">{{ t('dashboard.system.overall') }}</div>
-                <div class="tp-system-summary__status">{{ displayStatusLabel(overallStatusRaw) }}</div>
-                <div class="tp-system-summary__description">
-                  {{ systemSummaryDescription }}
-                </div>
-              </div>
-
-              <div class="tp-system-summary__grid">
-                <div v-for="item in systemSummaryItems" :key="item.key" class="tp-system-summary-card">
-                  <div class="tp-system-summary-card__header">
-                    <div class="tp-data-title">{{ item.label }}</div>
-                    <TpTag :variant="item.variant">{{ item.status }}</TpTag>
-                  </div>
-                  <div class="tp-system-summary-card__hint">{{ item.hint }}</div>
-                </div>
-              </div>
-            </div>
-
+          <BaseState
+            v-else-if="advancedMetricsLoaded && advancedIsEmpty"
+            variant="empty"
+            :title="t('dashboard.advanced.title')"
+            :message="t('dashboard.advanced.emptyCollapsed')"
+          />
+          <div v-else :class="dashboardAdvancedListSideClass">
+            <DashboardStatTile
+              v-for="card in advancedStatCards"
+              :key="card.key"
+              :label="card.label"
+              :value="card.value"
+              :hint="card.hint"
+              :to="card.to"
+              :icon="card.icon"
+              value-placement="end"
+            />
           </div>
         </TpCard>
       </div>
 
-      <div class="tp-col-12 tp-col-xxl-7">
-        <TpCard>
+      <div :class="colSpan12Min1400_7">
+        <TpCard class="flex h-full flex-col">
           <template #header>
-            <div class="tp-flex tp-align-start tp-justify-between tp-gap-2">
+            <div :class="flexBetweenStartGap2Class">
               <div>
-                <div class="tp-section-title">{{ t('dashboard.activities.title') }}</div>
-                <div class="tp-section-subtitle">{{ t('dashboard.activities.subtitle') }}</div>
+                <div :class="sectionTitleClass">{{ t('dashboard.activities.title') }}</div>
+                <div :class="sectionSubtitleClass">{{ t('dashboard.activities.subtitle') }}</div>
               </div>
-              <TpTag variant="neutral">{{ activities.length }}</TpTag>
+              <TpTag variant="primary">{{ activities.length }}</TpTag>
             </div>
           </template>
 
@@ -154,7 +186,7 @@
             :message="t('dashboard.state.loadingHint')"
           />
           <BaseState
-            v-else-if="activitiesError && !activities.length"
+            v-else-if="activitiesError && !activities.length && !hasPartialError"
             variant="error"
             :title="t('common.status.error')"
             :message="activitiesError"
@@ -167,48 +199,7 @@
             :title="t('dashboard.activities.emptyTitle')"
             :message="t('dashboard.activities.emptyMessage')"
           />
-          <div v-else class="tp-activity-list">
-            <div v-for="item in activities" :key="`${item.type}-${item.time || item.message}`" class="tp-activity-item">
-              <div class="tp-flex tp-align-start tp-gap-3">
-                <div class="dashboard-activity-icon" :class="item.color || 'tp-activity-icon--muted'">
-                  {{ item.icon || 'AI' }}
-                </div>
-                <div class="tp-flex-grow-1">
-                  <div class="tp-data-title">{{ item.message }}</div>
-                  <div class="tp-data-subtitle tp-text-start tp-flex tp-flex-wrap tp-gap-2">
-                    <span>{{ activityTypeLabel(item.type) }}</span>
-                    <span v-if="item.time">{{ formatDateTime(item.time) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </TpCard>
-      </div>
-    </div>
-
-    <div class="tp-row tp-g-3 tp-mt-0">
-      <div class="tp-col-12">
-        <TpCard>
-          <template #header>
-            <div class="tp-flex tp-align-start tp-justify-between tp-gap-2">
-              <div>
-                <div class="tp-section-title">{{ t('dashboard.advanced.title') }}</div>
-                <div class="tp-section-subtitle">{{ t('dashboard.advanced.subtitle') }}</div>
-              </div>
-            </div>
-          </template>
-          <BaseState
-            v-if="advancedLoading && !advancedCards.length"
-            variant="loading"
-            :title="t('dashboard.state.loadingOverview')"
-            :message="t('dashboard.state.loadingHint')"
-          />
-          <div v-else class="tp-row tp-g-3">
-            <div v-for="card in advancedCards" :key="card.key" class="tp-col-12 tp-col-md-6 tp-col-xxl-3">
-              <KnowledgeStatsCard :label="card.label" :value="card.value" :hint="card.hint" :icon="card.icon" />
-            </div>
-          </div>
+          <DashboardActivityGroups v-else :activities="activities" />
         </TpCard>
       </div>
     </div>
@@ -216,33 +207,61 @@
 </template>
 
 <script setup lang="ts">
+import { Activity, ScrollText, Sparkles } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
+import type { AppNavIcon } from '@/config/navigation';
+import { navIconForModulePath } from '@/lib/nav-icon';
+import {
+  colSpan12Md6Min1400_3,
+  colSpan12Min1400_5,
+  colSpan12Min1400_7,
+  grid12Class,
+  grid12StretchClass,
+  pageMarkerDashboard,
+  pageRootMarkedClass
+} from '@/lib/page-layout-ui';
+import {
+  flexBetweenStartGap2Class
+} from '@/lib/page-chrome-ui';
+import {
+  dashboardAdvancedListSideClass,
+  dashboardMetaStripClass,
+  dashboardShortcutGridClass
+} from '@/lib/dashboard-ui';
+import { localizeBackendStatusLabel } from '@/lib/localize-backend-status';
+import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
+import { formatDateTime } from '@/lib/format';
+import { resolveModelVendorLabel } from '@/lib/ai-model-vendor-ui';
+import { resolveLlmUsageSourceLabel } from '@/lib/llm-usage-source-ui';
+import { triggerBlobDownload } from '@/lib/download';
+import { useToast } from '@/composables/useToast';
+import type { PageBannerNotice } from '@/composables/usePageNotice';
 import ActionBar from '@/components/common/ActionBar.vue';
 import BaseState from '@/components/common/BaseState.vue';
-import KnowledgeStatsCard from '@/components/common/KnowledgeStatsCard.vue';
+import DashboardActivityGroups from '@/components/dashboard/DashboardActivityGroups.vue';
+import DashboardShortcutTile from '@/components/dashboard/DashboardShortcutTile.vue';
+import DashboardStatTile from '@/components/dashboard/DashboardStatTile.vue';
+import PageNoticeBanner from '@/components/common/PageNoticeBanner.vue';
 import TpButton from '@/components/ui/base/TpButton.vue';
 import TpCard from '@/components/ui/base/TpCard.vue';
-import TpProgress from '@/components/ui/base/TpProgress.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
+import { refreshAppFeatureFlags } from '@/composables/useFeatureFlags';
 import { useAiResult } from '@/composables/useAiResult';
 import {
   exportBatchZip,
   exportStats,
   getHealthStatus,
   getLogStats,
-  getNetworkInfo,
   getOverviewStats,
-  getPerformanceStats,
   getRecentActivities,
   getSystemStatus,
   getTokenStats,
   getUsageStats,
   type HealthStatus,
   type LogStatsResponse,
-  type NetworkInfoResponse,
   type OverviewStats,
-  type PerformanceStatsResponse,
   type RecentActivityRecord,
   type SystemStatus,
   type TokenStatsResponse,
@@ -250,7 +269,13 @@ import {
 } from '@/api/stats';
 import { listCases } from '@/api/cases';
 import { getDocumentRequirements } from '@/api/documents';
-import { resolveCaseCategoryDisplayName } from '@/utils/caseCategoryI18n';
+import {
+  kpiHintClass,
+  kpiLabelClass,
+  kpiValueClass,
+  sectionSubtitleClass,
+  sectionTitleClass
+} from '@/lib/page-typography';
 
 type StatusVariant = 'primary' | 'ai' | 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 
@@ -259,55 +284,64 @@ interface KpiCard {
   label: string;
   value: string | number;
   hint?: string;
-  icon: string;
+  to?: string;
+  icon: AppNavIcon;
 }
 
-interface AiCapabilityCard {
+interface ShortcutTile {
   key: string;
-  label: string;
-  value: string;
-  hint: string;
-  score?: number;
-  progressLabel?: string;
-}
-
-interface SystemSummaryItem {
-  key: string;
-  label: string;
-  status: string;
-  variant: StatusVariant;
-  hint: string;
+  to: string;
+  title: string;
+  description: string;
+  icon: AppNavIcon;
 }
 
 const { t, locale } = useI18n();
+const dashboardDateLocale = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'));
+const router = useRouter();
+const toast = useToast();
 
 const overview = ref<OverviewStats | null>(null);
 const health = ref<HealthStatus | null>(null);
 const system = ref<SystemStatus | null>(null);
 const activities = ref<RecentActivityRecord[]>([]);
-const performanceStats = ref<PerformanceStatsResponse | null>(null);
 const usageStats = ref<UsageStatsResponse | null>(null);
 const tokenStats = ref<TokenStatsResponse | null>(null);
-const networkInfo = ref<NetworkInfoResponse | null>(null);
 const logStats = ref<LogStatsResponse | null>(null);
+
+const LOG_STATS_HOURS = 24;
 
 const overviewLoading = ref(false);
 const systemLoading = ref(false);
 const activitiesLoading = ref(false);
 const refreshing = ref(false);
 const advancedLoading = ref(false);
+const advancedMetricsLoaded = ref(false);
 const exporting = ref(false);
 const bundleExporting = ref(false);
 
 const overviewError = ref('');
 const systemError = ref('');
 const activitiesError = ref('');
-const networkError = ref('');
+const advancedError = ref('');
 const logsError = ref('');
 const errorVisible = ref(true);
-const exportNotice = ref('');
+const attentionDismissed = ref(false);
+
+const showOfflineMetrics = computed(
+  () =>
+    !overviewLoading.value
+    && !refreshing.value
+    && !health.value
+    && !system.value
+    && !overview.value
+    && Boolean(overviewError.value || systemError.value)
+);
 
 const overallStatusRaw = computed(() => {
+  if (showOfflineMetrics.value) {
+    return t('common.status.disconnected');
+  }
   return String(
     health.value?.status
       || health.value?.health?.status
@@ -319,12 +353,20 @@ const overallStatusRaw = computed(() => {
 
 const healthModelLabel = computed(() => {
   const raw = String(health.value?.health?.components?.ai_service?.model || system.value?.system?.ai_service?.model || '');
-  return localizeAiModelStatus(raw);
+  return displayAiModelLabel(raw);
 });
 
-const aiModelLabel = computed(() => healthModelLabel.value || t('dashboard.system.unknown'));
+const aiModelLabel = computed(() => {
+  if (showOfflineMetrics.value) {
+    return t('common.status.disconnected');
+  }
+  return healthModelLabel.value || t('dashboard.system.unknown');
+});
 
 const reliabilityScore = computed(() => {
+  if (showOfflineMetrics.value) {
+    return 0;
+  }
   const parts = [
     health.value?.status,
     system.value?.system?.ai_service?.status,
@@ -348,87 +390,191 @@ const reliabilityScore = computed(() => {
   return Math.max(0, Math.min(100, score));
 });
 
+const overallStatusVariant = computed<StatusVariant>(() => statusToneVariant(overallStatusRaw.value));
+
 const reliabilityAi = useAiResult(computed(() => ({ confidence: reliabilityScore.value })));
-const reliabilityLabel = computed(() => `${t('ai.reliabilityScore')} ${reliabilityScore.value}%`);
+const reliabilityLabel = computed(() =>
+  showOfflineMetrics.value
+    ? `${t('ai.reliabilityScore')} ${t('common.status.noData')}`
+    : `${t('ai.reliabilityScore')} ${reliabilityScore.value}%`
+);
 const reliabilityVariant = computed<StatusVariant>(() => {
+  if (showOfflineMetrics.value) return 'neutral';
   if (reliabilityAi.value.riskLevel === 'danger') return 'danger';
   if (reliabilityAi.value.riskLevel === 'warning') return 'warning';
   return 'success';
 });
-const overallStatusVariant = computed<StatusVariant>(() => statusToneVariant(overallStatusRaw.value));
 
-const systemSummaryDescription = computed(() => {
-  return health.value?.message
-    || t('dashboard.system.healthHint');
+const attentionNotice = computed<PageBannerNotice | null>(() => {
+  if (showOfflineMetrics.value) {
+    return {
+      type: 'warning',
+      title: t('dashboard.attention.offlineTitle'),
+      message: t('dashboard.attention.offlineMessage')
+    };
+  }
+
+  const aiVariant = statusToneVariant(system.value?.system?.ai_service?.status || '');
+  if (aiVariant === 'danger') {
+    return {
+      type: 'danger',
+      title: t('dashboard.attention.aiTitle'),
+      message: t('dashboard.attention.aiMessage'),
+      actionLabel: t('dashboard.attention.aiAction')
+    };
+  }
+
+  if (!showOfflineMetrics.value && reliabilityScore.value > 0 && reliabilityScore.value < 60) {
+    return {
+      type: 'warning',
+      title: t('dashboard.attention.reliabilityTitle'),
+      message: t('dashboard.attention.reliabilityMessage'),
+      actionLabel: t('dashboard.attention.aiAction')
+    };
+  }
+
+  return null;
 });
 
-const systemSummaryItems = computed<SystemSummaryItem[]>(() => [
+const shortcutTiles = computed<ShortcutTile[]>(() => [
   {
-    key: 'health',
-    label: t('dashboard.system.healthTitle'),
-    status: displayStatusLabel(health.value?.status),
-    variant: statusToneVariant(health.value?.status || t('dashboard.system.unknown')),
-    hint: systemSummaryDescription.value
+    key: 'generate',
+    to: '/cases/generate',
+    title: t('common.actions.generate'),
+    description: t('dashboard.shortcuts.generateDesc'),
+    icon: navIconForModulePath('/cases/generate')
   },
+  {
+    key: 'upload',
+    to: '/documents/upload',
+    title: t('common.actions.upload'),
+    description: t('dashboard.shortcuts.uploadDesc'),
+    icon: navIconForModulePath('/documents/upload')
+  },
+  {
+    key: 'chat',
+    to: '/chat',
+    title: t('common.nav.chat'),
+    description: t('dashboard.shortcuts.chatDesc'),
+    icon: navIconForModulePath('/chat')
+  },
+  {
+    key: 'config',
+    to: '/config',
+    title: t('common.nav.configCenter'),
+    description: t('dashboard.shortcuts.configDesc'),
+    icon: navIconForModulePath('/config')
+  }
+]);
+
+function handleAttentionAction() {
+  router.push('/config');
+}
+
+function aiServiceRowHint(): string {
+  const serviceVariant = statusToneVariant(system.value?.system?.ai_service?.status || '');
+  if (serviceVariant === 'danger' || serviceVariant === 'warning') {
+    return t('dashboard.system.aiServiceRowHint');
+  }
+  const raw = String(system.value?.system?.ai_service?.model || '').trim();
+  const label = displayAiModelLabel(raw);
+  if (!label) return t('dashboard.system.unknown');
+  return `${t('dashboard.system.model')} · ${label}`;
+}
+
+function countLogErrors(stats: LogStatsResponse | null): number {
+  if (!stats) return 0;
+  const dist = stats.level_distribution;
+  if (dist && Object.keys(dist).length > 0) {
+    return Object.entries(dist).reduce((sum, [level, count]) => {
+      if (!/error|critical|fatal/i.test(level)) return sum;
+      return sum + (Number(count) || 0);
+    }, 0);
+  }
+  return stats.recent_errors?.length ?? 0;
+}
+
+function countLogTotal(stats: LogStatsResponse | null): number {
+  const dist = stats?.level_distribution;
+  if (!dist) return 0;
+  return Object.values(dist).reduce((sum, count) => sum + (Number(count) || 0), 0);
+}
+
+function runtimeLogsValue(): string {
+  if (!logStats.value && logsError.value) return t('common.status.noData');
+  return formatNumber(countLogErrors(logStats.value));
+}
+
+function runtimeLogsHint(): string {
+  const hours = logStats.value?.period_hours ?? LOG_STATS_HOURS;
+  if (!logStats.value && logsError.value) return t('dashboard.system.runtimeLogsEmpty');
+  const total = countLogTotal(logStats.value);
+  const errors = countLogErrors(logStats.value);
+  if (total === 0) return t('dashboard.system.runtimeLogsNoEntries', { hours });
+  return t('dashboard.system.runtimeLogsHint', {
+    hours,
+    total: formatNumber(total),
+    errors: formatNumber(errors)
+  });
+}
+
+const systemStatCards = computed<KpiCard[]>(() => [
   {
     key: 'ai',
     label: t('dashboard.system.aiService'),
-    status: displayStatusLabel(system.value?.system?.ai_service?.status),
-    variant: statusToneVariant(system.value?.system?.ai_service?.status || t('dashboard.system.unknown')),
-    hint: `${t('dashboard.system.model')} · ${String(system.value?.system?.ai_service?.model || healthModelLabel.value || t('dashboard.system.unknown'))}`
+    value: displayStatusLabel(system.value?.system?.ai_service?.status),
+    hint: aiServiceRowHint(),
+    to: '/config',
+    icon: navIconForModulePath('/config')
   },
   {
     key: 'knowledge',
     label: t('dashboard.system.knowledge'),
-    status: displayStatusLabel(system.value?.system?.knowledge?.status),
-    variant: statusToneVariant(system.value?.system?.knowledge?.status || t('dashboard.system.unknown')),
-    hint: `${t('dashboard.system.documents')} ${formatMetricValue(system.value?.system?.knowledge?.docs, '')} · ${t('dashboard.system.vectors')} ${formatMetricValue(system.value?.system?.knowledge?.vectors, '')}`
+    value: displayStatusLabel(system.value?.system?.knowledge?.status),
+    hint: `${t('dashboard.system.documents')} ${formatMetricValue(system.value?.system?.knowledge?.docs, '')} · ${t('dashboard.system.vectors')} ${formatMetricValue(system.value?.system?.knowledge?.vectors, '')}`,
+    to: '/knowledge',
+    icon: navIconForModulePath('/knowledge')
   },
   {
     key: 'performance',
     label: t('dashboard.system.performance'),
-    status: displayStatusLabel(system.value?.system?.performance?.status),
-    variant: statusToneVariant(system.value?.system?.performance?.status || t('dashboard.system.unknown')),
-    hint: `${t('dashboard.system.cpu')} ${formatMetricValue(system.value?.system?.performance?.cpu, '%')} · ${t('dashboard.system.memory')} ${formatMetricValue(system.value?.system?.performance?.memory, 'GB')}`
+    value: displayStatusLabel(system.value?.system?.performance?.status),
+    hint: system.value?.system?.performance?.limited_visibility
+      ? t('dashboard.system.limitedHint')
+      : `${t('dashboard.system.cpu')} ${formatMetricValue(system.value?.system?.performance?.cpu, '%')} · ${t('dashboard.system.memory')} ${formatMetricValue(system.value?.system?.performance?.memory, 'GB')} · ${t('dashboard.system.disk')} ${formatMetricValue(system.value?.system?.performance?.disk, '%')}`,
+    icon: Activity
+  },
+  {
+    key: 'runtime-logs',
+    label: t('dashboard.system.runtimeLogs', { hours: logStats.value?.period_hours ?? LOG_STATS_HOURS }),
+    value: runtimeLogsValue(),
+    hint: runtimeLogsHint(),
+    icon: ScrollText
   }
 ]);
 
-const aiCapabilityCards = computed<AiCapabilityCard[]>(() => {
-  const docs = Number(system.value?.system?.knowledge?.docs || 0);
-  const vectors = Number(system.value?.system?.knowledge?.vectors || 0);
-
-  return [
-    {
-      key: 'model',
-      label: t('dashboard.system.model'),
-      value: aiModelLabel.value,
-      hint: t('dashboard.system.aiService')
-    },
-    {
-      key: 'coverage',
-      label: t('ai.knowledgeCoverage'),
-      value: `${docs} / ${vectors}`,
-      hint: t('dashboard.system.knowledge'),
-      score: docs > 0 ? Math.min(100, Math.round((vectors / Math.max(docs, 1)) * 100)) : 0,
-      progressLabel: t('ai.knowledgeCoverage')
-    },
-    {
-      key: 'reliability',
-      label: t('ai.reliabilityScore'),
-      value: `${reliabilityScore.value}%`,
-      hint: t('ai.systemTrustIndicator'),
-      score: reliabilityScore.value,
-      progressLabel: t('ai.reliabilityScore')
-    }
-  ];
-});
-
 const partialErrorText = computed(() => {
-  return [overviewError.value, systemError.value, activitiesError.value, networkError.value, logsError.value].filter(Boolean).join(' | ');
+  const parts = [
+    overviewError.value,
+    systemError.value,
+    activitiesError.value,
+    logsError.value,
+    advancedError.value
+  ].filter(Boolean) as string[];
+  return [...new Set(parts)].join(' · ');
 });
 
 const hasPartialError = computed(() => errorVisible.value && Boolean(partialErrorText.value));
-const exportNoticeType = ref<'success' | 'danger'>('success');
+
+function formatOverviewKpiValue(raw: number | undefined): string {
+  if (overview.value) {
+    return formatNumber(raw ?? 0);
+  }
+  if (overviewError.value) {
+    return t('common.status.noData');
+  }
+  return '—';
+}
 
 const kpiCards = computed<KpiCard[]>(() => {
   const totals = overview.value?.totals;
@@ -438,71 +584,130 @@ const kpiCards = computed<KpiCard[]>(() => {
     {
       key: 'cases',
       label: t('dashboard.kpi.totalCases'),
-      value: overview.value ? formatNumber(totals?.test_cases ?? 0) : '-',
-      hint: t('dashboard.kpi.casesHint'),
-      icon: 'TC'
+      value: formatOverviewKpiValue(totals?.test_cases),
+      hint: t('dashboard.kpi.casesHint', { name: t('common.nav.cases') }),
+      to: '/cases',
+      icon: navIconForModulePath('/cases')
     },
     {
       key: 'documents',
       label: t('dashboard.kpi.totalDocuments'),
-      value: overview.value ? formatNumber(totals?.requirements ?? 0) : '-',
-      hint: recent ? `${t('dashboard.kpi.recentDocuments')}: ${formatNumber(recent.requirements ?? 0)}` : t('dashboard.kpi.documentsHint'),
-      icon: 'DO'
+      value: formatOverviewKpiValue(totals?.requirements),
+      hint: recent
+        ? `${t('dashboard.kpi.recentDocuments')}: ${formatNumber(recent.requirements ?? 0)}`
+        : t('dashboard.kpi.documentsHint', { name: t('common.nav.documents') }),
+      to: '/documents',
+      icon: navIconForModulePath('/documents')
     },
     {
       key: 'knowledge',
       label: t('dashboard.kpi.totalKnowledge'),
-      value: overview.value ? formatNumber(totals?.knowledge_files ?? 0) : '-',
-      hint: t('dashboard.kpi.knowledgeHint'),
-      icon: 'KB'
+      value: formatOverviewKpiValue(totals?.knowledge_files),
+      hint: t('dashboard.kpi.knowledgeHint', { name: t('common.nav.knowledgeBase') }),
+      to: '/knowledge',
+      icon: navIconForModulePath('/knowledge')
     },
     {
       key: 'chat',
       label: t('dashboard.kpi.totalChatSessions'),
-      value: overview.value ? formatNumber(totals?.chat_sessions ?? 0) : '-',
-      hint: recent ? `${t('dashboard.kpi.recentChats')}: ${formatNumber(recent.chat_messages ?? 0)}` : t('dashboard.kpi.chatHint'),
-      icon: 'AI'
+      value: formatOverviewKpiValue(totals?.chat_sessions),
+      hint: recent
+        ? `${t('dashboard.kpi.recentChats')}: ${formatNumber(recent.chat_messages ?? 0)}`
+        : t('dashboard.kpi.chatHint', { name: t('common.nav.chat') }),
+      to: '/chat',
+      icon: navIconForModulePath('/chat')
     }
   ];
 });
 
-const advancedCards = computed<KpiCard[]>(() => {
-  const perfSummary = performanceStats.value?.summary || {};
-  const perfCategories = Object.keys(perfSummary);
-  const perfCount = perfCategories.length;
-  const usageDist = usageStats.value?.category_distribution || {};
-  const topCategory = Object.entries(usageDist).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+function sumDailyTrend(items?: Array<{ count?: number }>) {
+  return (items || []).reduce((sum, item) => sum + Number(item.count || 0), 0);
+}
+
+const advancedIsEmpty = computed(() => {
+  if (!advancedMetricsLoaded.value) return false;
+  const recentCases = sumDailyTrend(usageStats.value?.daily_trends?.test_cases);
+  const recentRequirements = sumDailyTrend(usageStats.value?.daily_trends?.requirements);
+  const recentChats = sumDailyTrend(usageStats.value?.daily_trends?.chat_messages);
+  const totalTokens = Number(tokenStats.value?.summary?.total_tokens || 0);
+  return recentCases === 0 && recentRequirements === 0 && recentChats === 0 && totalTokens === 0;
+});
+
+const advancedStatCards = computed<KpiCard[]>(() => {
+  const usageDays = usageStats.value?.period_days ?? 30;
+  const tokenDays = tokenStats.value?.period_days ?? 7;
+  const recentCases = sumDailyTrend(usageStats.value?.daily_trends?.test_cases);
+  const recentRequirements = sumDailyTrend(usageStats.value?.daily_trends?.requirements);
+  const recentChats = sumDailyTrend(usageStats.value?.daily_trends?.chat_messages);
   const tokenSummary = tokenStats.value?.summary;
-  const topModel = (tokenStats.value?.by_model || []).slice().sort((a, b) => Number(b.total_tokens || 0) - Number(a.total_tokens || 0))[0];
+  const totalTokens = Number(tokenSummary?.total_tokens || 0);
+  const totalCalls = Number(tokenSummary?.total_calls ?? tokenSummary?.total_messages ?? 0);
+  const avgPerCall = Number(
+    tokenSummary?.avg_tokens_per_call ?? tokenSummary?.avg_tokens_per_message ?? 0
+  );
+  const topModel = (tokenStats.value?.by_model || [])
+    .slice()
+    .sort((a, b) => Number(b.total_tokens || 0) - Number(a.total_tokens || 0))[0];
+
+  const noData = t('dashboard.advanced.badgeNoData');
+
+  let tokenHint = t('dashboard.advanced.tokensEmptyHint');
+  if (tokenSummary && totalTokens > 0) {
+    const parts = [
+      t('dashboard.advanced.tokensHintCalls', { n: formatNumber(totalCalls) }),
+      t('dashboard.advanced.tokensHintAvg', { n: formatNumber(avgPerCall) })
+    ];
+    if (topModel?.model) parts.push(resolveModelVendorLabel(String(topModel.model), t));
+
+    const sourceItems = (tokenStats.value?.by_source || [])
+      .filter((item) => Number(item.total_tokens || 0) > 0)
+      .sort((a, b) => Number(b.total_tokens || 0) - Number(a.total_tokens || 0));
+    if (sourceItems.length > 1) {
+      const bySource = sourceItems
+        .map((item) => {
+          const label = resolveLlmUsageSourceLabel(String(item.source || 'llm'), t);
+          return `${label} ${formatNumber(Number(item.total_tokens || 0))}`;
+        })
+        .join(' · ');
+      parts.push(bySource);
+    } else if (sourceItems.length === 1) {
+      parts.push(resolveLlmUsageSourceLabel(String(sourceItems[0].source || 'llm'), t));
+    }
+
+    tokenHint = parts.join(' · ');
+  }
 
   return [
     {
-      key: 'perf-categories',
-      label: t('dashboard.advanced.perfCategoryCount'),
-      value: formatNumber(perfCount),
-      hint: t('dashboard.advanced.perfCategoryHint'),
-      icon: 'PF'
+      key: 'recent-cases',
+      label: t('dashboard.advanced.recentCases', { days: usageDays }),
+      value: recentCases > 0 ? formatNumber(recentCases) : noData,
+      hint: t('dashboard.advanced.recentCasesHint'),
+      to: '/cases',
+      icon: navIconForModulePath('/cases')
     },
     {
-      key: 'usage-top-category',
-      label: t('dashboard.advanced.topUsageCategory'),
-      value: topCategory ? resolveCaseCategoryDisplayName(String(topCategory[0]), t) : t('dashboard.system.unknown'),
-      hint: topCategory ? `${t('dashboard.advanced.count')}: ${formatNumber(Number(topCategory[1]))}` : t('dashboard.system.unknown'),
-      icon: 'US'
+      key: 'recent-requirements',
+      label: t('dashboard.advanced.recentRequirements', { days: usageDays }),
+      value: recentRequirements > 0 ? formatNumber(recentRequirements) : noData,
+      hint: t('dashboard.advanced.recentRequirementsHint'),
+      to: '/documents',
+      icon: navIconForModulePath('/documents')
+    },
+    {
+      key: 'recent-chats',
+      label: t('dashboard.advanced.recentChats', { days: usageDays }),
+      value: recentChats > 0 ? formatNumber(recentChats) : noData,
+      hint: t('dashboard.advanced.recentChatsHint'),
+      to: '/chat',
+      icon: navIconForModulePath('/chat')
     },
     {
       key: 'tokens-total',
-      label: t('dashboard.advanced.totalTokens'),
-      value: tokenSummary ? formatNumber(Number(tokenSummary.total_tokens || 0)) : '-',
-      hint: tokenSummary ? `${t('dashboard.advanced.avgTokens')}: ${formatNumber(Number(tokenSummary.avg_tokens_per_message || 0))}` : t('dashboard.system.unknown'),
-      icon: 'TK'
-    },
-    {
-      key: 'tokens-top-model',
-      label: t('dashboard.advanced.topTokenModel'),
-      value: topModel?.model || t('dashboard.system.unknown'),
-      hint: topModel ? `${t('dashboard.advanced.tokens')}: ${formatNumber(Number(topModel.total_tokens || 0))}` : t('dashboard.system.unknown'),
-      icon: 'MD'
+      label: t('dashboard.advanced.totalTokensPeriod', { days: tokenDays }),
+      value: totalTokens > 0 ? formatNumber(totalTokens) : noData,
+      hint: tokenHint,
+      icon: Sparkles
     }
   ];
 });
@@ -522,46 +727,7 @@ function statusToneVariant(status: string): StatusVariant {
 }
 
 function displayStatusLabel(status: string | null | undefined) {
-  const normalized = String(status || '').toLowerCase();
-  const statusLabelMap: Record<string, string> = {
-    online: t('common.status.healthy'),
-    healthy: t('common.status.healthy'),
-    active: t('common.status.healthy'),
-    success: t('common.status.healthy'),
-    ready: t('common.status.healthy'),
-    done: t('common.status.healthy'),
-    good: t('common.status.healthy'),
-    normal: t('common.status.healthy'),
-    '在线': t('common.status.healthy'),
-    '健康': t('common.status.healthy'),
-    '良好': t('common.status.healthy'),
-    '正常': t('common.status.healthy'),
-    warning: t('common.status.warning'),
-    warn: t('common.status.warning'),
-    pending: t('common.status.warning'),
-    processing: t('common.status.warning'),
-    unknown: t('dashboard.system.unknown'),
-    empty: t('common.status.empty'),
-    '警告': t('common.status.warning'),
-    '处理中': t('common.status.warning'),
-    '未知': t('dashboard.system.unknown'),
-    '空': t('common.status.empty'),
-    offline: t('common.status.unhealthy'),
-    error: t('common.status.unhealthy'),
-    fail: t('common.status.unhealthy'),
-    failed: t('common.status.unhealthy'),
-    unhealthy: t('common.status.unhealthy'),
-    danger: t('common.status.unhealthy'),
-    abnormal: t('common.status.unhealthy'),
-    '离线': t('common.status.unhealthy'),
-    '失败': t('common.status.unhealthy'),
-    '危险': t('common.status.unhealthy'),
-    '异常': t('common.status.unhealthy')
-  };
-  if (!normalized || normalized === 'unknown') {
-    return t('dashboard.system.unknown');
-  }
-  return statusLabelMap[normalized] || status || t('dashboard.system.unknown');
+  return localizeBackendStatusLabel(t, status);
 }
 
 function localizeAiModelStatus(model: string | null | undefined) {
@@ -582,6 +748,15 @@ function localizeAiModelStatus(model: string | null | undefined) {
   return modelStatusMap[raw] || modelStatusMap[normalized] || raw;
 }
 
+/** 健康/异常文案保留；否则映射为厂商名（DeepSeek、OpenAI 等） */
+function displayAiModelLabel(model: string | null | undefined) {
+  const raw = String(model || '').trim();
+  if (!raw) return '';
+  const statusLabel = localizeAiModelStatus(raw);
+  if (statusLabel !== raw) return statusLabel;
+  return resolveModelVendorLabel(raw, t);
+}
+
 function formatNumber(value: number | string) {
   const numeric = typeof value === 'string' ? Number(value) : value;
   return Number.isFinite(numeric) ? new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'zh-CN').format(numeric) : String(value);
@@ -597,31 +772,6 @@ function formatMetricValue(value: unknown, unit: string) {
   return String(value);
 }
 
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-US' : 'zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date);
-}
-
-function maskIp(value: string) {
-  const parts = value.split('.');
-  if (parts.length !== 4) return t('dashboard.system.networkHidden');
-  return `${parts[0]}.${parts[1]}.*.*`;
-}
-
-function activityTypeLabel(type: string) {
-  if (type === 'case') return t('dashboard.activities.types.case');
-  if (type === 'requirement') return t('dashboard.activities.types.requirement');
-  if (type === 'knowledge') return t('dashboard.activities.types.knowledge');
-  if (type === 'chat') return t('dashboard.activities.types.chat');
-  return t('dashboard.activities.types.other');
-}
 
 function buildFallbackActivities() {
   const recent = overview.value?.recent_activity;
@@ -634,7 +784,7 @@ function buildFallbackActivities() {
       message: t('dashboard.activities.fallback.case', { count: formatNumber(recent.test_cases) }),
       time: overview.value?.generated_at || undefined,
       icon: 'TC',
-      color: 'tp-text-primary'
+      color: 'primary'
     });
   }
   if (recent.requirements > 0) {
@@ -643,7 +793,7 @@ function buildFallbackActivities() {
       message: t('dashboard.activities.fallback.requirement', { count: formatNumber(recent.requirements) }),
       time: overview.value?.generated_at || undefined,
       icon: 'DO',
-      color: 'tp-text-success'
+      color: 'success'
     });
   }
   if (recent.knowledge_files > 0) {
@@ -652,7 +802,7 @@ function buildFallbackActivities() {
       message: t('dashboard.activities.fallback.knowledge', { count: formatNumber(recent.knowledge_files) }),
       time: overview.value?.generated_at || undefined,
       icon: 'KB',
-      color: 'tp-text-info'
+      color: 'info'
     });
   }
   if (recent.chat_messages > 0) {
@@ -660,8 +810,8 @@ function buildFallbackActivities() {
       type: 'chat',
       message: t('dashboard.activities.fallback.chat', { count: formatNumber(recent.chat_messages) }),
       time: overview.value?.generated_at || undefined,
-      icon: 'AI',
-      color: 'tp-text-warning'
+      icon: 'CH',
+      color: 'warning'
     });
   }
 
@@ -672,30 +822,21 @@ function dismissErrorNotice() {
   errorVisible.value = false;
 }
 
-function triggerBlobDownload(blob: Blob, fileName: string) {
-  const blobUrl = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = blobUrl;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(blobUrl);
+function handlePartialErrorRetry() {
+  errorVisible.value = true;
+  void handleRefresh();
 }
 
 async function handleExportStats() {
   if (exporting.value) return;
   exporting.value = true;
-  exportNotice.value = '';
   try {
     const blob = await exportStats({ type: 'overview', format: 'csv', days: 7 });
     const stamp = new Date().toISOString().slice(0, 10);
     triggerBlobDownload(blob, `stats-overview-${stamp}.csv`);
-    exportNoticeType.value = 'success';
-    exportNotice.value = t('dashboard.message.exportSuccess');
+    toast.success(t('dashboard.message.exportSuccess'));
   } catch (error) {
-    exportNoticeType.value = 'danger';
-    exportNotice.value = error instanceof Error ? error.message : t('dashboard.message.exportFailed');
+    toast.error(getUserFacingErrorMessage(error, t('dashboard.message.exportFailed')));
   } finally {
     exporting.value = false;
   }
@@ -704,7 +845,6 @@ async function handleExportStats() {
 async function handleExportBundle() {
   if (bundleExporting.value) return;
   bundleExporting.value = true;
-  exportNotice.value = '';
   try {
     const [casesResp, reqResp] = await Promise.all([
       listCases({ page: 1, per_page: 1000 }),
@@ -712,63 +852,100 @@ async function handleExportBundle() {
     ]);
     const blob = await exportBatchZip({
       export_cases: true,
-      cases: (casesResp.cases || []) as Array<Record<string, unknown>>,
+      cases: casesResp.cases || [],
       case_formats: ['excel', 'csv', 'json'],
       export_requirements: true,
-      requirements: (reqResp.requirements || []) as Array<Record<string, unknown>>,
+      requirements: reqResp.requirements || [],
       export_chat: false
     });
     const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
     triggerBlobDownload(blob, `batch_export_${stamp}.zip`);
-    exportNoticeType.value = 'success';
-    exportNotice.value = t('dashboard.message.bundleExportSuccess');
+    toast.success(t('dashboard.message.bundleExportSuccess'));
   } catch (error) {
-    exportNoticeType.value = 'danger';
-    exportNotice.value = error instanceof Error ? error.message : t('dashboard.message.bundleExportFailed');
+    toast.error(getUserFacingErrorMessage(error, t('dashboard.message.bundleExportFailed')));
   } finally {
     bundleExporting.value = false;
   }
 }
 
-async function loadDashboard() {
+let loadDashboardSeq = 0;
+
+async function loadAdvancedMetrics(options: { bustCache?: boolean; requestSeq?: number } = {}) {
+  const cacheQuery = options.bustCache ? { _: Date.now() } : {};
+  advancedLoading.value = true;
+  advancedError.value = '';
+
+  try {
+    const [usageResult, tokensResult] = await Promise.allSettled([
+      getUsageStats({ days: 30, ...cacheQuery }),
+      getTokenStats({ days: 7, ...cacheQuery })
+    ]);
+
+    if (options.requestSeq !== undefined && options.requestSeq !== loadDashboardSeq) return;
+
+    usageStats.value = usageResult.status === 'fulfilled' ? usageResult.value : null;
+    tokenStats.value = tokensResult.status === 'fulfilled' ? tokensResult.value : null;
+
+    const failures = [usageResult, tokensResult].filter((item) => item.status === 'rejected');
+    if (failures.length === 2) {
+      advancedError.value = getUserFacingErrorMessage(
+        (failures[0] as PromiseRejectedResult).reason,
+        t('dashboard.message.advancedFailed')
+      );
+      advancedMetricsLoaded.value = false;
+      return;
+    }
+
+    advancedMetricsLoaded.value = true;
+  } finally {
+    if (options.requestSeq === undefined || options.requestSeq === loadDashboardSeq) {
+      advancedLoading.value = false;
+    }
+  }
+}
+
+async function loadDashboard(options: { bustCache?: boolean } = {}) {
+  const requestSeq = ++loadDashboardSeq;
+  const cacheQuery = options.bustCache ? { _: Date.now() } : {};
+
   overviewLoading.value = true;
   systemLoading.value = true;
   activitiesLoading.value = true;
   refreshing.value = true;
-  advancedLoading.value = true;
   errorVisible.value = true;
+  attentionDismissed.value = false;
 
   overviewError.value = '';
   systemError.value = '';
   activitiesError.value = '';
-  networkError.value = '';
+  advancedError.value = '';
   logsError.value = '';
 
+  const advancedPromise = loadAdvancedMetrics({ bustCache: options.bustCache, requestSeq });
+
   try {
-    const [overviewResult, healthResult, systemResult, activitiesResult, performanceResult, usageResult, tokensResult, networkResult, logsResult] = await Promise.allSettled([
-      getOverviewStats(),
-      getHealthStatus(),
-      getSystemStatus(),
-      getRecentActivities(),
-      getPerformanceStats({ hours: 24 }),
-      getUsageStats({ days: 30 }),
-      getTokenStats({ days: 7 }),
-      getNetworkInfo(),
-      getLogStats({ hours: 24 })
+    const [overviewResult, healthResult, systemResult, activitiesResult, logsResult] = await Promise.allSettled([
+      getOverviewStats(cacheQuery),
+      getHealthStatus(cacheQuery),
+      getSystemStatus(cacheQuery),
+      getRecentActivities(cacheQuery),
+      getLogStats({ hours: LOG_STATS_HOURS, ...cacheQuery })
     ]);
+
+    if (requestSeq !== loadDashboardSeq) return;
 
     if (overviewResult.status === 'fulfilled') {
       overview.value = overviewResult.value;
     } else {
       overview.value = null;
-      overviewError.value = overviewResult.reason instanceof Error ? overviewResult.reason.message : t('dashboard.message.overviewFailed');
+      overviewError.value = getUserFacingErrorMessage(overviewResult.reason, t('dashboard.message.overviewFailed'));
     }
 
     if (healthResult.status === 'fulfilled') {
       health.value = healthResult.value;
     } else {
       health.value = null;
-      systemError.value = healthResult.reason instanceof Error ? healthResult.reason.message : t('dashboard.message.healthFailed');
+      systemError.value = getUserFacingErrorMessage(healthResult.reason, t('dashboard.message.healthFailed'));
     }
 
     if (systemResult.status === 'fulfilled') {
@@ -776,7 +953,7 @@ async function loadDashboard() {
     } else {
       system.value = null;
       if (!systemError.value) {
-        systemError.value = systemResult.reason instanceof Error ? systemResult.reason.message : t('dashboard.message.systemFailed');
+        systemError.value = getUserFacingErrorMessage(systemResult.reason, t('dashboard.message.systemFailed'));
       }
     }
 
@@ -784,135 +961,38 @@ async function loadDashboard() {
       activities.value = activitiesResult.value.activities;
     } else {
       activities.value = buildFallbackActivities();
-      activitiesError.value = activitiesResult.reason instanceof Error ? activitiesResult.reason.message : t('dashboard.message.activitiesFailed');
+      activitiesError.value = getUserFacingErrorMessage(activitiesResult.reason, t('dashboard.message.activitiesFailed'));
     }
 
     if (!activities.value.length) {
       activities.value = buildFallbackActivities();
     }
 
-    performanceStats.value = performanceResult.status === 'fulfilled' ? performanceResult.value : null;
-    usageStats.value = usageResult.status === 'fulfilled' ? usageResult.value : null;
-    tokenStats.value = tokensResult.status === 'fulfilled' ? tokensResult.value : null;
-    if (networkResult.status === 'fulfilled') {
-      networkInfo.value = networkResult.value;
-    } else {
-      networkInfo.value = null;
-      networkError.value = networkResult.reason instanceof Error ? networkResult.reason.message : t('dashboard.message.networkFailed');
-    }
     if (logsResult.status === 'fulfilled') {
       logStats.value = logsResult.value;
     } else {
       logStats.value = null;
-      logsError.value = logsResult.reason instanceof Error ? logsResult.reason.message : t('dashboard.message.logsFailed');
+      logsError.value = getUserFacingErrorMessage(logsResult.reason, t('dashboard.message.logsFailed'));
     }
+
+    await advancedPromise;
   } finally {
+    if (requestSeq !== loadDashboardSeq) return;
     overviewLoading.value = false;
     systemLoading.value = false;
     activitiesLoading.value = false;
-    advancedLoading.value = false;
     refreshing.value = false;
   }
 }
 
 async function handleRefresh() {
-  await loadDashboard();
+  if (refreshing.value) return;
+  await refreshAppFeatureFlags();
+  await loadDashboard({ bustCache: true });
 }
 
 onMounted(async () => {
   await loadDashboard();
 });
 </script>
-
-<style scoped>
-.tp-ai-capability-card {
-  min-height: 156px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.tp-ai-capability-card__progress-placeholder {
-  height: 28px;
-}
-
-.tp-system-layout {
-  display: grid;
-  gap: 16px;
-}
-
-.tp-system-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr);
-  gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--tp-border-default);
-  border-radius: var(--tp-radius-lg);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--tp-color-primary-600) 6%, var(--tp-bg-surface)), var(--tp-bg-surface) 52%),
-    var(--tp-bg-surface);
-}
-
-.tp-system-summary__main {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-}
-
-.tp-system-summary__status {
-  font-size: 1.85rem;
-  font-weight: 800;
-  line-height: 1.05;
-  color: var(--tp-color-text-900);
-}
-
-.tp-system-summary__description {
-  color: var(--tp-color-text-500);
-  line-height: 1.6;
-  max-width: 32ch;
-}
-
-.tp-system-summary__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.tp-system-summary-card {
-  border: 1px solid var(--tp-border-default);
-  border-radius: var(--tp-radius-md);
-  background: color-mix(in srgb, var(--tp-bg-surface) 78%, white);
-}
-
-.tp-system-summary-card {
-  padding: 14px;
-}
-
-.tp-system-summary-card__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.tp-system-summary-card__hint {
-  margin-top: 10px;
-  color: var(--tp-color-text-500);
-  font-size: 0.875rem;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 1199px) {
-  .tp-system-summary {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 767px) {
-  .tp-system-summary__grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
 

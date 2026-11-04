@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: var(--tp-radius-md);
+  }
+
+  /*
+   * preflight 关闭后，div / section 上的 border 工具类只设了宽度，样式仍是 none，边框会被算成 0。
+   * 灰底就剩下一团，看起来像阴影。这里只补 solid，特异性为 0，不盖过组件上的宽度和颜色。
+   */
+  :where(*, ::before, ::after) {
+    border-style: solid;
+    border-width: 0;
+  }
+
+  /*
+   * 用 :where 把特异性压到 0，避免盖掉 field-control / TpButton 上的 utility 边框与背景。
+   */
+  :where(
+    button,
+    [type='button'],
+    [type='submit'],
+    [type='reset']
+  ) {
+    border-width: 0;
+    border-style: solid;
+    background-color: transparent;
+  }
+
+  :where(
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+    select,
+    textarea
+  ) {
+    border-width: 0;
+    border-style: solid;
+    background-color: transparent;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  /* 原生 select 下拉项：与浅/深主题 token 对齐（Windows 等平台） */
+  select option {
+    background-color: var(--tp-bg-surface);
+    color: var(--tp-foreground);
+  }
+}
+
+@layer components {
+  .chat-message-panel {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: var(--tp-chat-message-min-height);
+    max-height: max(220px, calc(var(--tp-chat-message-max-height) - 140px));
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
+    padding-bottom: var(--tp-space-3);
+  }
+
+  .tp-subtle-scrollbar::-webkit-scrollbar,
+  .chat-message-panel::-webkit-scrollbar,
+  .knowledge-files-panel .base-table-wrap::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .tp-subtle-scrollbar::-webkit-scrollbar-thumb,
+  .chat-message-panel::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--tp-color-text-500) 35%, transparent);
+    border-radius: 999px;
+  }
+
+  .knowledge-files-panel .base-table-wrap::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--tp-border-default) 85%, transparent);
+    border-radius: 999px;
+  }
+
+  .tp-subtle-scrollbar::-webkit-scrollbar-track,
+  .chat-message-panel::-webkit-scrollbar-track,
+  .knowledge-files-panel .base-table-wrap::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

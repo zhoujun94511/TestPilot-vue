@@ -41,8 +41,7 @@ const CASE_CATEGORY_ALIASES: Record<string, string> = {
 export function resolveCaseCategoryDisplayName(raw: string, t: ComposerTranslation): string {
   const value = String(raw).trim();
   if (!value) return '';
-  const normalized = CASE_CATEGORY_ALIASES[value] || CASE_CATEGORY_ALIASES[value.toLowerCase()] || value;
-  const key = `enums.cases.category.${normalized}`;
-  const translated = t(key);
-  return translated === key ? value : translated;
+  const alias = CASE_CATEGORY_ALIASES[value] || CASE_CATEGORY_ALIASES[value.toLowerCase()];
+  if (!alias) return value;
+  return t(`enums.cases.category.${alias}`);
 }

@@ -1,34 +1,43 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+import inspect
 import json
-import re
 import uuid
-from typing import Dict, Any
+from typing import Callable, Dict, Any
 
+from config.settings import settings as app_settings
 from models.models import db, ToolExecutionLog
 from utils.utils_core.logger import get_logger
 
 from .registry import ToolRegistry
 from .schemas import ActionPlan, ActionRequest, ActionResult
 from .toolkit import (
-    tool_analyze_document_content,
-    tool_delete_case,
-    tool_generate_cases,
-    tool_list_cases,
-    tool_list_requirements,
-    tool_search_knowledge,
+    tool_ac_coverage_review,
+    tool_rule_skeleton_cases,
+    tool_trace_matrix,
 )
 
 logger = get_logger(__name__)
 
+# 预览后才能入库的工具：确认时按预览原样保存，不重新调用模型。
+PREVIEW_THEN_SAVE_TOOLS = {"rule_skeleton_cases"}
+_PREVIEW_ONLY_ARGS = ("save", "preview_cases")
+
+
+def _accepted_args(handler: Callable, args: Dict[str, Any]) -> Dict[str, Any]:
+    params = inspect.signature(handler).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return dict(args)
+    return {k: v for k, v in args.items() if k in params}
+
 
 class ExperimentalActionOrchestrator:
-    """Experimental NL->tool orchestrator.
+    """Experimental tool orchestrator.
 
     This module is designed to be optional and detachable:
     - Lives under experiments/ namespace
     - Works with explicit feature flag
-    - Fails closed for high-risk actions by default
+    - Writes only after the user confirms a preview
     """
 
     def __init__(self):
@@ -36,40 +45,65 @@ class ExperimentalActionOrchestrator:
         self._register_builtin_tools()
 
     def _register_builtin_tools(self) -> None:
-        self.registry.register("list_cases", tool_list_cases, risk_level="low")
-        self.registry.register("list_requirements", tool_list_requirements, risk_level="low")
-        self.registry.register("search_knowledge", tool_search_knowledge, risk_level="low")
-        self.registry.register("analyze_document_content", tool_analyze_document_content, risk_level="low")
-        self.registry.register("generate_cases", tool_generate_cases, risk_level="low")
-        self.registry.register("delete_case", tool_delete_case, risk_level="high")
+        self.registry.register("rule_skeleton_cases", tool_rule_skeleton_cases, risk_level="medium")
+        self.registry.register("ac_coverage_review", tool_ac_coverage_review, risk_level="low")
+        self.registry.register("trace_matrix", tool_trace_matrix, risk_level="low")
+
+    _CASUAL_EXACT = {
+        "你好", "您好", "hi", "hello", "hey", "在吗", "在不在", "谢谢", "感谢",
+        "thanks", "thank you", "再见", "bye", "ok", "okay", "嗯", "好的", "行",
+    }
+
+    _TRACE_HINTS = ("追溯", "trace", "traceability", "没有用例的需求", "未关联")
+
+    @classmethod
+    def _has_tool_intent(cls, raw_text: str) -> bool:
+        text = (raw_text or "").strip()
+        if not text:
+            return False
+        lowered = text.lower()
+        if lowered in cls._CASUAL_EXACT or text in cls._CASUAL_EXACT:
+            return False
+        return any(h in lowered or h in text for h in cls._TRACE_HINTS)
 
     @staticmethod
-    def _extract_case_id(text: str) -> str | None:
-        match = re.search(r"(TC-[A-Za-z0-9_-]+(?:-\d+)?)", text or "", re.IGNORECASE)
-        return match.group(1) if match else None
+    def _no_tool_plan(reason: str) -> ActionPlan:
+        return ActionPlan(
+            intent="none",
+            tool_name="",
+            args={},
+            risk_level="low",
+            reason=reason,
+            requires_confirmation=False,
+        )
 
-    @staticmethod
-    def _is_high_risk_keyword(text: str) -> bool:
-        lowered = (text or "").lower()
-        return ("删除" in lowered) or ("delete" in lowered) or ("remove" in lowered)
-
-    @staticmethod
-    def _extract_limit(text: str, default: int = 10, max_limit: int = 50) -> int:
-        raw = (text or "").strip().lower()
-        if not raw:
-            return default
-        if ("所有" in raw) or ("全部" in raw) or ("all" in raw):
-            return max_limit
-        number_match = re.search(r"(\d{1,3})\s*(条|个|items?|cases?|requirements?)?", raw, re.IGNORECASE)
-        if number_match:
-            try:
-                value = int(number_match.group(1))
-                return max(1, min(value, max_limit))
-            except (TypeError, ValueError):
-                pass
-        if ("最新" in raw) or ("最近" in raw) or ("latest" in raw) or ("last" in raw):
-            return 1
-        return default
+    def _plan_from_explicit_metadata(self, request: ActionRequest) -> ActionPlan | None:
+        metadata = request.metadata or {}
+        tool_name = str(metadata.get("tool_name") or "").strip()
+        if not tool_name:
+            return None
+        if not self.registry.get(tool_name):
+            return None
+        args = metadata.get("args") if isinstance(metadata.get("args"), dict) else {}
+        merged_args = dict(args)
+        for key in ("limit", "requirement_text", "requirement_id", "case_count", "use_llm"):
+            if key in metadata and key not in merged_args:
+                merged_args[key] = metadata[key]
+        if tool_name in PREVIEW_THEN_SAVE_TOOLS:
+            for key in _PREVIEW_ONLY_ARGS:
+                merged_args.pop(key, None)
+        intent = str(metadata.get("intent") or tool_name).strip() or tool_name
+        requires_confirmation = bool(metadata.get("requires_confirmation", False))
+        if tool_name in PREVIEW_THEN_SAVE_TOOLS:
+            requires_confirmation = True
+        return ActionPlan(
+            intent=intent,
+            tool_name=tool_name,
+            args=merged_args,
+            risk_level=self.registry.get_risk_level(tool_name),
+            reason="explicit tool_name in request metadata",
+            requires_confirmation=requires_confirmation,
+        )
 
     @staticmethod
     def _authorize(request: ActionRequest, plan: ActionPlan) -> tuple[bool, str]:
@@ -81,79 +115,29 @@ class ExperimentalActionOrchestrator:
         return False, "高风险动作必须经过确认后才能执行"
 
     def _infer_plan(self, request: ActionRequest) -> ActionPlan:
-        text = (request.query or "").strip().lower()
-        raw_text = request.query or ""
+        explicit = self._plan_from_explicit_metadata(request)
+        if explicit is not None:
+            return explicit
+
         metadata = request.metadata or {}
+        explicit_tool = str(metadata.get("tool_name") or "").strip()
+        if explicit_tool:
+            return self._no_tool_plan("unknown or invalid explicit tool_name")
 
-        if self._is_high_risk_keyword(text):
-            case_id = self._extract_case_id(raw_text) or str((request.metadata or {}).get("case_id", "")).strip()
-            return ActionPlan(
-                intent="delete_case",
-                tool_name="delete_case",
-                args={"case_id": case_id, "dry_run": True},
-                risk_level=self.registry.get_risk_level("delete_case"),
-                reason="matched delete keyword",
-                requires_confirmation=True,
-            )
+        if not getattr(app_settings, "EXPERIMENTAL_ACTIONS_ALLOW_NL", False):
+            return self._no_tool_plan("natural language planning disabled")
 
-        if ("知识库" in text) or ("knowledge" in text) or ("检索" in text) or ("搜索" in text):
-            query = str(metadata.get("query", "")).strip() or raw_text
+        # 只有只读的追溯可以由自然语言触发；骨架与覆盖评审需要需求文本或 ID，必须显式调用。
+        if self._has_tool_intent(request.query or ""):
             return ActionPlan(
-                intent="search_knowledge",
-                tool_name="search_knowledge",
-                args={"query": query, "limit": 5},
-                risk_level=self.registry.get_risk_level("search_knowledge"),
-                reason="matched knowledge/search keyword",
+                intent="trace_matrix",
+                tool_name="trace_matrix",
+                args={"limit": 50},
+                risk_level=self.registry.get_risk_level("trace_matrix"),
+                reason="matched traceability keyword",
                 requires_confirmation=False,
             )
-
-        if ("分析" in text and "文档" in text) or ("analyze" in text and "document" in text):
-            content = str(metadata.get("content", "")).strip()
-            if not content:
-                content = raw_text
-            return ActionPlan(
-                intent="analyze_document_content",
-                tool_name="analyze_document_content",
-                args={"content": content, "analysis_type": str(metadata.get("analysis_type", "requirements"))},
-                risk_level=self.registry.get_risk_level("analyze_document_content"),
-                reason="matched document analysis keyword",
-                requires_confirmation=False,
-            )
-
-        if ("生成" in text and "用例" in text) or ("generate" in text and "case" in text):
-            requirement_text = str(metadata.get("requirement_text", "")).strip() or raw_text
-            return ActionPlan(
-                intent="generate_cases",
-                tool_name="generate_cases",
-                args={
-                    "requirement_text": requirement_text,
-                    "case_count": int(metadata.get("case_count", 5) or 5),
-                    "use_rag": bool(metadata.get("use_rag", False)),
-                },
-                risk_level=self.registry.get_risk_level("generate_cases"),
-                reason="matched case generation keyword",
-                requires_confirmation=False,
-            )
-
-        if "需求" in text or "requirement" in text:
-            limit = self._extract_limit(raw_text, default=10, max_limit=50)
-            return ActionPlan(
-                intent="list_requirements",
-                tool_name="list_requirements",
-                args={"limit": limit},
-                risk_level=self.registry.get_risk_level("list_requirements"),
-                reason="matched requirement keyword",
-                requires_confirmation=False,
-            )
-        limit = self._extract_limit(raw_text, default=10, max_limit=50)
-        return ActionPlan(
-            intent="list_cases",
-            tool_name="list_cases",
-            args={"limit": limit},
-            risk_level=self.registry.get_risk_level("list_cases"),
-            reason="default safe action",
-            requires_confirmation=False,
-        )
+        return self._no_tool_plan("casual or no tool keyword")
 
     @staticmethod
     def _build_result(
@@ -186,20 +170,22 @@ class ExperimentalActionOrchestrator:
         error: str | None = None,
     ) -> None:
         try:
-            record = ToolExecutionLog(
-                execution_id=execution_id,
-                session_id=request.session_id,
-                user_id=request.user_id,
-                query_text=request.query,
-                intent=plan.intent,
-                tool_name=plan.tool_name,
-                risk_level=plan.risk_level,
-                status=status,
-                success=success,
-                tool_args=json.dumps(plan.args or {}, ensure_ascii=False),
-                tool_output=json.dumps(tool_output, ensure_ascii=False) if tool_output is not None else None,
-                error_message=error,
-            )
+            record = ToolExecutionLog.query.filter_by(execution_id=execution_id).first()
+            if record is None:
+                record = ToolExecutionLog(
+                    execution_id=execution_id,
+                    session_id=request.session_id,
+                    user_id=request.user_id,
+                    query_text=request.query,
+                    intent=plan.intent,
+                    tool_name=plan.tool_name,
+                    risk_level=plan.risk_level,
+                    tool_args=json.dumps(plan.args or {}, ensure_ascii=False),
+                )
+            record.status = status
+            record.success = success
+            record.tool_output = json.dumps(tool_output, ensure_ascii=False) if tool_output is not None else None
+            record.error_message = error
             db.session.add(record)
             db.session.commit()
         except Exception as log_error:
@@ -230,12 +216,13 @@ class ExperimentalActionOrchestrator:
             )
 
         try:
-            output = handler(**plan.args)
+            output = handler(**_accepted_args(handler, plan.args))
             tool_success = True
             if isinstance(output, dict) and "success" in output:
                 tool_success = bool(output.get("success"))
             result_status = "done" if tool_success else "failed"
-            result_message = "动作执行成功" if tool_success else "动作执行失败"
+            tool_message = str(output.get("message", "")).strip() if isinstance(output, dict) else ""
+            result_message = "动作执行成功" if tool_success else (tool_message or "动作执行失败")
             self._write_audit_log(
                 execution_id=execution_id,
                 request=request,
@@ -276,6 +263,16 @@ class ExperimentalActionOrchestrator:
                 error=error_text,
             )
 
+    def _preview(self, plan: ActionPlan) -> Dict[str, Any]:
+        handler = self.registry.get(plan.tool_name)
+        args = {k: v for k, v in _accepted_args(handler, plan.args).items() if k not in _PREVIEW_ONLY_ARGS}
+        try:
+            output = handler(**args, save=False)
+        except Exception as preview_error:  # noqa: BLE001
+            logger.warning("实验动作预览失败: %s", preview_error)
+            return {"success": False, "message": f"预览失败: {preview_error}"}
+        return output if isinstance(output, dict) else {"success": False, "message": "预览结果格式错误"}
+
     def run(self, request: ActionRequest) -> ActionResult:
         execution_id = str(uuid.uuid4())
         plan = self._infer_plan(request)
@@ -300,22 +297,79 @@ class ExperimentalActionOrchestrator:
                 error=deny_reason,
             )
 
+        if plan.tool_name in PREVIEW_THEN_SAVE_TOOLS:
+            preview = self._preview(plan)
+            if not preview.get("success"):
+                self._write_audit_log(
+                    execution_id=execution_id,
+                    request=request,
+                    plan=plan,
+                    status="failed",
+                    success=False,
+                    tool_output=preview,
+                    error=str(preview.get("message", "")),
+                )
+                return self._build_result(
+                    execution_id=execution_id,
+                    success=False,
+                    status="failed",
+                    message=str(preview.get("message", "")).strip() or "动作执行失败",
+                    plan=plan,
+                    tool_output=preview,
+                    error=str(preview.get("message", "")),
+                )
+            if not request.require_confirmation:
+                self._write_audit_log(
+                    execution_id=execution_id,
+                    request=request,
+                    plan=plan,
+                    status="done",
+                    success=True,
+                    tool_output=preview,
+                )
+                return self._build_result(
+                    execution_id=execution_id,
+                    success=True,
+                    status="done",
+                    message="已生成预览，未入库",
+                    plan=plan,
+                    tool_output=preview,
+                )
+            saved_args = dict(plan.args)
+            saved_args["preview_cases"] = preview.get("cases", [])
+            saved_plan = ActionPlan(
+                intent=plan.intent,
+                tool_name=plan.tool_name,
+                args=saved_args,
+                risk_level=plan.risk_level,
+                reason=plan.reason,
+                requires_confirmation=True,
+            )
+            self._write_audit_log(
+                execution_id=execution_id,
+                request=request,
+                plan=saved_plan,
+                status="needs_confirmation",
+                success=True,
+                tool_output=None,
+            )
+            return self._build_result(
+                execution_id=execution_id,
+                success=True,
+                status="needs_confirmation",
+                message="预览已生成，确认后入库",
+                plan=plan,
+                tool_output=preview,
+            )
+
         if request.require_confirmation and plan.requires_confirmation:
-            preview = None
-            if plan.tool_name == "delete_case":
-                preview_args = dict(plan.args)
-                preview_args["dry_run"] = True
-                try:
-                    preview = tool_delete_case(**preview_args)
-                except Exception as preview_error:
-                    logger.warning("删除预演失败: %s", preview_error)
             result = self._build_result(
                 execution_id=execution_id,
                 success=True,
                 status="needs_confirmation",
                 message="动作需要确认",
                 plan=plan,
-                tool_output=preview,
+                tool_output=None,
                 error=None,
             )
             self._write_audit_log(
@@ -329,9 +383,30 @@ class ExperimentalActionOrchestrator:
             )
             return result
 
-        if plan.risk_level == "high" and plan.tool_name == "delete_case":
-            # Explicit non-confirm flow means caller accepts execution now.
-            plan.args["dry_run"] = False
+        if not plan.tool_name:
+            hint = (
+                "未识别为工具指令，未执行任何操作。"
+                "请在实验工具页选择工具并填写参数。"
+            )
+            self._write_audit_log(
+                execution_id=execution_id,
+                request=request,
+                plan=plan,
+                status="skipped",
+                success=True,
+                tool_output=None,
+                error=None,
+            )
+            return self._build_result(
+                execution_id=execution_id,
+                success=True,
+                status="skipped",
+                message=hint,
+                plan=plan,
+                tool_output=None,
+                error=None,
+            )
+
         return self._execute_now(execution_id=execution_id, request=request, plan=plan)
 
     def confirm(self, execution_id: str, metadata: Dict[str, Any] | None = None) -> ActionResult:
@@ -383,8 +458,8 @@ class ExperimentalActionOrchestrator:
                     tool_output=None,
                     error="confirmation_required",
                 )
-        if plan.risk_level == "high" and plan.tool_name == "delete_case":
-            plan.args["dry_run"] = False
+        if plan.tool_name in PREVIEW_THEN_SAVE_TOOLS:
+            plan.args["save"] = True
         action_request = ActionRequest(
             query=record.query_text,
             session_id=record.session_id,
@@ -431,4 +506,3 @@ class ExperimentalActionOrchestrator:
             tool_output=None,
             error=record.error_message,
         )
-

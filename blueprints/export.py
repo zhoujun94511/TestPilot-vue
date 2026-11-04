@@ -15,15 +15,103 @@ export_bp = Blueprint('export', __name__)
 export_service = ExportService()
 
 
+def _scope_batch_export_config(export_config: dict) -> dict:
+    """开启认证时仅保留当前用户可见的用例/需求条目。"""
+    from services.auth_service import auth_required
+
+    if not auth_required():
+        return export_config
+
+    from services.data_scope import scoped_chat_history_query
+    from services.stats_scope import scoped_cases_query, scoped_requirements_query
+
+    cfg = dict(export_config)
+    if cfg.get('export_cases') and cfg.get('cases'):
+        allowed_cases = {
+            str(row[0])
+            for row in scoped_cases_query().with_entities(TestCase.case_id).all()
+            if row and row[0]
+        }
+        cfg['cases'] = [
+            item
+            for item in cfg['cases']
+            if str(item.get('case_id') or item.get('id') or '') in allowed_cases
+        ]
+    if cfg.get('export_requirements') and cfg.get('requirements'):
+        allowed_reqs = {
+            str(row[0])
+            for row in scoped_requirements_query().with_entities(Requirement.req_id).all()
+            if row and row[0]
+        }
+        cfg['requirements'] = [
+            item
+            for item in cfg['requirements']
+            if str(item.get('req_id') or item.get('id') or '') in allowed_reqs
+        ]
+    if cfg.get('export_chat') and cfg.get('chat_history'):
+        allowed_message_ids = {
+            int(row[0])
+            for row in scoped_chat_history_query().with_entities(ChatHistory.id).all()
+            if row and row[0] is not None
+        }
+        allowed_session_ids = {
+            str(row[0])
+            for row in scoped_chat_history_query().with_entities(ChatHistory.session_id).distinct().all()
+            if row and row[0]
+        }
+        cfg['chat_history'] = [
+            item
+            for item in cfg['chat_history']
+            if _batch_chat_item_allowed(item, allowed_message_ids, allowed_session_ids)
+        ]
+    return cfg
+
+
+def _batch_chat_item_allowed(item: dict, allowed_message_ids: set[int], allowed_session_ids: set[str]) -> bool:
+    if not isinstance(item, dict):
+        return False
+    raw_id = item.get('id')
+    if raw_id is not None:
+        try:
+            if int(raw_id) in allowed_message_ids:
+                return True
+        except (TypeError, ValueError):
+            pass
+    session_id = str(item.get('session_id') or '').strip()
+    if session_id and session_id in allowed_session_ids:
+        return True
+    return False
+
+
+@export_bp.before_request
+def _export_auth():
+    from services.auth_service import auth_required, current_user
+    from utils.utils_core.api_response import api_error
+
+    if not auth_required():
+        return None
+    user = current_user()
+    if user is None:
+        return api_error(
+            'UNAUTHORIZED',
+            message_key='common.errors.http401',
+            message='未登录或会话已过期',
+            status=401,
+        )
+    # 已登录即可导出；用例、需求、聊天和批量导出都走数据范围，只包含当前用户可见的记录
+    return None
+
+
 def _export_case_query(category, priority, status, case_ids, search):
     """按业务 case_id 和列表筛选条件查询用例。"""
-    query = TestCase.query
-    if category:
-        query = query.filter(TestCase.category == category)
-    if priority:
-        query = query.filter(TestCase.priority == priority)
-    if status:
-        query = query.filter(TestCase.status == status)
+    from services.data_scope import apply_data_scope
+
+    query = apply_data_scope(TestCase.query, TestCase, 'cases')
+    from services.sql_query_helpers import filter_column_eq
+
+    query = filter_column_eq(query, TestCase.category, category)
+    query = filter_column_eq(query, TestCase.priority, priority)
+    query = filter_column_eq(query, TestCase.status, status)
 
     raw_ids = []
     if isinstance(case_ids, list):
@@ -282,16 +370,13 @@ def export_requirements_excel():
         status = request.args.get('status')
         req_ids = request.args.get('req_ids')
 
-        # 构建查询
-        query = Requirement.query
+        from services.sql_query_helpers import filter_column_eq
+        from services.stats_scope import scoped_requirements_query
 
-        # 添加筛选条件
-        if req_type:
-            query = query.filter(Requirement.type == req_type)
-        if priority:
-            query = query.filter(Requirement.priority == priority)
-        if status:
-            query = query.filter(Requirement.status == status)
+        query = scoped_requirements_query()
+        query = filter_column_eq(query, Requirement.type, req_type)
+        query = filter_column_eq(query, Requirement.priority, priority)
+        query = filter_column_eq(query, Requirement.status, status)
         if req_ids:
             req_id_list = [req_id.strip() for req_id in req_ids.split(',') if req_id.strip()]
             if req_id_list:
@@ -349,8 +434,17 @@ def export_chat_history():
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
 
-        # 构建查询
-        query = ChatHistory.query
+        from models.models import ChatSession
+        from services.chat_access import session_access_error
+        from services.data_scope import scoped_chat_history_query
+
+        if session_id:
+            chat_session = ChatSession.query.filter_by(session_id=session_id).first()
+            denied = session_access_error(chat_session)
+            if denied:
+                return denied
+
+        query = scoped_chat_history_query()
 
         if session_id:
             query = query.filter(ChatHistory.session_id == session_id)
@@ -378,7 +472,9 @@ def export_chat_history():
         # 如果没有找到记录，尝试使用与获取历史API完全相同的查询方式
         if not chat_history and session_id:
             # 使用与 /api/chat/history 完全相同的查询逻辑
-            verify_query = ChatHistory.query.filter(ChatHistory.session_id == session_id)
+            verify_query = scoped_chat_history_query().filter(
+                ChatHistory.session_id == session_id
+            )
             verify_count = verify_query.count()
             current_app.logger.warning(f"导出查询未找到记录，使用获取历史API的查询方式验证: session_id={session_id}, 找到 {verify_count} 条记录")
             
@@ -502,6 +598,8 @@ def batch_export():
         export_config = data.get('config', {})
         if not export_config:
             raise BadRequest("导出配置不能为空")
+
+        export_config = _scope_batch_export_config(export_config)
 
         # 执行批量导出
         result = export_service.batch_export(export_config)

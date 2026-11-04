@@ -32,6 +32,7 @@ sessions/
 
 # Uploads / generated data
 uploads/
+downloads/
 vector_store/
 
 # Local env (do not commit secrets)
@@ -46,3 +47,8 @@ models/fastembed/
 # Frontend local caches/dependencies
 frontend/.npm-cache/
 frontend/node_modules/
+
+# Playwright output
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/

@@ -17,15 +17,38 @@ from flask import (
 )
 from models.models import db, ChatHistory, ChatSession
 from services.chat_service import ChatService
-from services.action_message_service import build_compact_action_history_content
 from utils.utils_ai_models.smart_quick_reply_generator import SmartQuickReplyGenerator
 from utils.utils_ai_models.get_llm import get_llm
 from utils.utils_core.api_error_handler import check_api_key_configuration, get_service_name
 from utils.utils_core.api_error_handler import build_internal_error_result
 from config.settings import settings as config_settings
+from services.auth_service import stamp_ownership
+from services.chat_access import session_access_error as _session_access_error
+from services.data_scope import apply_data_scope
+from services.chat_mode_guard import is_chat_action_mode, reject_chat_action_mode_response
 
 # 创建蓝图
 chat_bp = Blueprint('chat', __name__)
+
+
+def _get_or_create_chat_session(session_id: str, title: str):
+    chat_session = ChatSession.query.filter_by(session_id=session_id).first()
+    if chat_session:
+        denied = _session_access_error(chat_session)
+        if denied:
+            return None, denied
+        return chat_session, None
+    chat_session = ChatSession(
+        session_id=session_id,
+        title=title or '新会话',
+        created_time=datetime.now(timezone.utc),
+        updated_time=datetime.now(timezone.utc),
+        is_deleted=False,
+    )
+    stamp_ownership(chat_session)
+    db.session.add(chat_session)
+    return chat_session, None
+
 
 # 初始化服务
 chat_service = ChatService()
@@ -67,85 +90,8 @@ def send_message():
         if not user_message:
             raise BadRequest("消息内容不能为空")
 
-        mode = str(data.get('mode', 'chat')).strip().lower()
-        if mode == 'action':
-            if not getattr(config_settings, 'ENABLE_EXPERIMENTAL_ACTIONS', False):
-                return jsonify({
-                    'success': False,
-                    'message': '实验动作功能未启用',
-                    'error': 'feature_disabled'
-                }), 403
-            session_id = data.get('session_id') or get_session_id()
-            message_type = data.get('type', 'chat')
-            chat_session = ChatSession.query.filter_by(session_id=session_id).first()
-            if not chat_session:
-                session_title = user_message[:50] + '...' if len(user_message) > 50 else user_message
-                if not session_title.strip():
-                    session_title = '新会话'
-                chat_session = ChatSession(
-                    session_id=session_id,
-                    title=session_title,
-                    created_time=datetime.now(timezone.utc),
-                    updated_time=datetime.now(timezone.utc),
-                    is_deleted=False
-                )
-                db.session.add(chat_session)
-            elif chat_session.is_deleted:
-                chat_session.is_deleted = False
-            user_msg = ChatHistory(
-                session_id=session_id,
-                role="user",
-                content=user_message,
-                message_type=message_type,
-                created_time=datetime.now(timezone.utc)
-            )
-            db.session.add(user_msg)
-            chat_session.updated_time = datetime.now(timezone.utc)
-            db.session.commit()
-
-            from experiments.action_runtime.orchestrator import ExperimentalActionOrchestrator
-            from experiments.action_runtime.schemas import ActionRequest
-            action_orchestrator = ExperimentalActionOrchestrator()
-            action_result = action_orchestrator.run(ActionRequest(
-                query=user_message,
-                session_id=session_id,
-                user_id=data.get('user_id'),
-                require_confirmation=bool(data.get('require_confirmation', True)),
-                metadata=data.get('metadata') if isinstance(data.get('metadata'), dict) else {}
-            ))
-            action_response_text = build_compact_action_history_content(action_result)
-            action_msg = ChatHistory(
-                session_id=session_id,
-                role="system",
-                content=action_response_text,
-                message_type=message_type,
-                created_time=datetime.now(timezone.utc),
-                tokens_used=0,
-                model_name='experimental-action'
-            )
-            db.session.add(action_msg)
-            if chat_session:
-                chat_session.updated_time = datetime.now(timezone.utc)
-            db.session.commit()
-            return jsonify({
-                'success': action_result.success,
-                'mode': 'action',
-                'session_id': session_id,
-                'execution_id': action_result.execution_id,
-                'status': action_result.status,
-                'message': action_result.message,
-                'action_plan': {
-                    'intent': action_result.plan.intent if action_result.plan else None,
-                    'tool_name': action_result.plan.tool_name if action_result.plan else None,
-                    'args': action_result.plan.args if action_result.plan else None,
-                    'risk_level': action_result.plan.risk_level if action_result.plan else None,
-                    'requires_confirmation': action_result.plan.requires_confirmation if action_result.plan else None,
-                    'reason': action_result.plan.reason if action_result.plan else None,
-                } if action_result.plan else None,
-                'tool_results': action_result.tool_output,
-                'error': action_result.error,
-                'timestamp': action_result.created_at
-            }), (200 if action_result.success else 500)
+        if is_chat_action_mode(data.get('mode')):
+            return reject_chat_action_mode_response()
 
         # 获取会话参数
         session_id = data.get('session_id') or get_session_id()
@@ -159,20 +105,12 @@ def send_message():
             use_rag = False
             use_knowledge = False
 
-        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
-        if not chat_session:
-            session_title = user_message[:50] + '...' if len(user_message) > 50 else user_message
-            if not session_title.strip():
-                session_title = '新会话'
-
-            chat_session = ChatSession(
-                session_id=session_id,
-                title=session_title,
-                created_time=datetime.now(timezone.utc),
-                updated_time=datetime.now(timezone.utc),
-                is_deleted=False
-            )
-            db.session.add(chat_session)
+        session_title = user_message[:50] + '...' if len(user_message) > 50 else user_message
+        if not session_title.strip():
+            session_title = '新会话'
+        chat_session, denied = _get_or_create_chat_session(session_id, session_title)
+        if denied:
+            return denied
 
         user_msg = ChatHistory(
             session_id=session_id,
@@ -280,16 +218,21 @@ def send_stream_message():
     try:
         # 解析输入参数
         if request.method == 'GET':
+            try:
+                query_temperature = float(request.args.get('temperature', 0.7))
+            except (TypeError, ValueError):
+                query_temperature = 0.7
             data: dict[str, Any] = {
                 'message': request.args.get('message', ''),
                 'session_id': request.args.get('session_id'),
+                'mode': request.args.get('mode', 'chat'),
                 'type': request.args.get('type', 'chat'),
                 'use_rag': request.args.get('use_rag', 'false').lower() == 'true',
                 'use_context': request.args.get('use_context', 'false').lower() == 'true',
                 'use_knowledge': request.args.get('use_knowledge', 'false').lower() == 'true',
                 'use_smart_reply': request.args.get('use_smart_reply', 'false').lower() == 'true',
                 'auto_suggest': request.args.get('auto_suggest', 'true').lower() == 'true',
-                'temperature': float(request.args.get('temperature', 0.7))
+                'temperature': query_temperature
             }
             try:
                 settings = json.loads(request.args.get('settings', '{}'))
@@ -306,6 +249,9 @@ def send_stream_message():
         user_message = data.get('message', '').strip()
         if not user_message:
             raise BadRequest("消息内容不能为空")
+
+        if is_chat_action_mode(data.get('mode')):
+            return reject_chat_action_mode_response()
 
         session_id = data.get('session_id') or get_session_id()
         message_type = data.get('type', 'chat')
@@ -361,22 +307,13 @@ def send_stream_message():
 
         # 在生成器外部保存用户消息
         # 双保险：若会话不存在则创建；若会话被软删除则自动恢复
-        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
-        if not chat_session:
-            # 生成会话标题（使用用户消息的前50个字符）
-            session_title = user_message[:50] + '...' if len(user_message) > 50 else user_message
-            if not session_title.strip():
-                session_title = '新会话'
-
-            chat_session = ChatSession(
-                session_id=session_id,
-                title=session_title,
-                created_time=datetime.now(timezone.utc),
-                updated_time=datetime.now(timezone.utc),
-                is_deleted=False
-            )
-            db.session.add(chat_session)
-        elif chat_session.is_deleted:
+        session_title = user_message[:50] + '...' if len(user_message) > 50 else user_message
+        if not session_title.strip():
+            session_title = '新会话'
+        chat_session, denied = _get_or_create_chat_session(session_id, session_title)
+        if denied:
+            return denied
+        if chat_session.is_deleted:
             # 软删除会话被再次使用时恢复
             chat_session.is_deleted = False
             if not (chat_session.title or '').strip():
@@ -479,6 +416,12 @@ def send_stream_message():
                     )
                     db.session.add(ai_message)
                     db.session.commit()
+                    try:
+                        from services.llm_usage_service import log_chat_assistant_usage
+
+                        log_chat_assistant_usage(ai_message)
+                    except Exception as log_error:
+                        current_app.logger.warning(f"Chat Token 落库失败: {log_error}")
                     current_app.logger.info(f"AI消息已保存: session_id={session_id}")
                 except Exception as save_error:
                     current_app.logger.error(f"保存AI消息失败: {save_error}")
@@ -519,6 +462,11 @@ def get_chat_history():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         message_type = request.args.get('type')
+
+        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
+        denied = _session_access_error(chat_session)
+        if denied:
+            return denied
 
         # 构建查询
         query = ChatHistory.query.filter(ChatHistory.session_id == session_id)
@@ -565,6 +513,10 @@ def clear_chat_history():
     try:
         data = request.get_json() or {}
         session_id = data.get('session_id') or get_session_id()
+        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
+        denied = _session_access_error(chat_session)
+        if denied:
+            return denied
 
         # 删除指定会话的所有消息
         deleted_count = ChatHistory.query.filter(
@@ -602,11 +554,9 @@ def delete_chat_session(session_id):
 
         # 查找会话记录
         chat_session = ChatSession.query.filter_by(session_id=session_id).first()
-        if not chat_session:
-            return jsonify({
-                'success': False,
-                'message': '会话不存在'
-            }), 404
+        denied = _session_access_error(chat_session)
+        if denied:
+            return denied
 
         # 软删除：标记为已删除，不删除消息记录
         chat_session.is_deleted = True
@@ -646,11 +596,9 @@ def update_chat_session(session_id):
 
         # 查找会话记录
         chat_session = ChatSession.query.filter_by(session_id=session_id).first()
-        if not chat_session:
-            return jsonify({
-                'success': False,
-                'message': '会话不存在'
-            }), 404
+        denied = _session_access_error(chat_session)
+        if denied:
+            return denied
 
         # 更新会话信息
         if 'title' in data:
@@ -847,8 +795,10 @@ def handle_sessions():
                 page = 1
 
             # 基于会话表分页，避免在会话列表接口中全量扫描 ChatHistory
-            base_query = ChatSession.query.filter(
-                ChatSession.is_deleted == False
+            base_query = apply_data_scope(
+                ChatSession.query.filter(ChatSession.is_deleted == False),
+                ChatSession,
+                'chat',
             ).order_by(ChatSession.updated_time.desc())
 
             # 如果请求大数量（如1000），则返回所有会话
@@ -958,6 +908,7 @@ def handle_sessions():
                 updated_time=now,
                 is_deleted=False
             )
+            stamp_ownership(chat_session)
             db.session.add(chat_session)
             db.session.commit()
 
@@ -1076,6 +1027,11 @@ def save_ai_message():
             current_app.logger.warning(f"参数不完整: session_id={session_id}, content_length={len(content)}")
             return jsonify({'success': False, 'message': '参数不完整'}), 400
 
+        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
+        denied = _session_access_error(chat_session)
+        if denied:
+            return denied
+
         print("开始创建ChatHistory对象")
         ai_msg = ChatHistory(
             session_id=session_id,
@@ -1092,12 +1048,16 @@ def save_ai_message():
         db.session.add(ai_msg)
         
         # 更新会话的最后更新时间
-        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
-        if chat_session:
-            chat_session.updated_time = datetime.now(timezone.utc)
-        
+        chat_session.updated_time = datetime.now(timezone.utc)
+
         print("开始提交事务")
         db.session.commit()
+        try:
+            from services.llm_usage_service import log_chat_assistant_usage
+
+            log_chat_assistant_usage(ai_msg)
+        except Exception as log_error:
+            current_app.logger.warning(f"Chat Token 落库失败: {log_error}")
         print("事务提交成功")
 
         current_app.logger.info(f"AI消息保存成功: message_id={ai_msg.id}")

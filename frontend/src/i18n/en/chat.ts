@@ -3,6 +3,10 @@ export default {
     title: 'AI Chat Assistant',
     subtitle: 'Finish the session and message loop first, then layer in enhancements'
   },
+  toolbar: {
+    noSessionHint: 'Create or select a session to refresh, export, or clear messages.',
+    backendUnavailableHint: 'If sessions fail to load, check the backend connection, then try New session or Retry in the sidebar.'
+  },
   actions: {
     newSession: 'New Session',
     refresh: 'Refresh',
@@ -25,6 +29,7 @@ export default {
     emptyMessage: 'Click "New Session" to start a conversation',
     untitled: 'Untitled Session',
     defaultTitle: 'AI Chat Assistant',
+    draftTitle: 'New chat',
     emptyPreview: 'No preview',
     currentId: 'Current Session',
     noSessionSelected: 'No session selected yet'
@@ -35,8 +40,57 @@ export default {
     hint: 'Streaming is enabled and responses appear in real time',
     streamToggle: 'Enable streaming response',
     smartReplyToggle: 'Enable smart suggestions',
-    templateToggle: 'Enable prompt templates',
-    experimentalActionsToggle: 'Enable experimental actions'
+    templateToggle: 'Enable prompt templates'
+  },
+  experimentalTools: {
+    openStandaloneHint: 'Opened Case generation with the requirement prefilled. Review the fields, then generate.',
+    toolLabel: 'Tool',
+    run: 'Run tool',
+    running: 'Running…',
+    queryAudit: '[{tool}] from experimental tools page',
+    validationFailed: 'Fill required fields before running',
+    runSuccess: 'Tool run finished',
+    runSkipped: 'Tool was not executed (check args or permissions)',
+    runFailed: 'Tool run failed',
+    risk: {
+      low: 'Low risk',
+      medium: 'Medium risk',
+      high: 'High risk',
+      unknown: 'Risk unknown'
+    },
+    errors: {
+      explicitRequired: 'Tool name missing or invalid. Pick a tool and fill the form.',
+      unknownTool: 'Tool "{tool}" is not registered on the server. Check deploy version and experimentalTools config.',
+      featureDisabled: 'Experimental actions are disabled. Set ENABLE_EXPERIMENTAL_ACTIONS=true on the server.',
+      rateLimited: 'Too many experimental tool requests. Please wait and retry.'
+    },
+    fields: {
+      limit: 'Max items per group',
+      requirement_text: 'Requirement text',
+      requirement_id: 'Requirement',
+      case_count: 'Max model additions',
+      use_llm: 'Let the model add business steps the rules miss'
+    },
+    tools: {
+      rule_skeleton_cases: 'Rule skeleton preview',
+      ac_coverage_review: 'Acceptance coverage review',
+      trace_matrix: 'Requirement–case traceability'
+    },
+    toolDesc: {
+      rule_skeleton_cases:
+        'For search, login and form scenarios, rules first write the empty, not-found, special-character, overlong and repeat cases; the model only fills what the rules miss. Preview first; nothing is saved until you confirm.',
+      ac_coverage_review:
+        'Splits a requirement into acceptance points and checks them against the cases linked to it, listing coverage, gaps and step-structure problems. Read-only.',
+      trace_matrix:
+        'Lists requirements with no cases, cases pointing to missing requirements, and cases with no requirement. Read-only.'
+    },
+    placeholders: {
+      limit: 'Default 50, max 200',
+      requirement_text: 'e.g. Users search products from the search box; keywords up to 50 characters…',
+      requirement_id: 'No requirement (optional)',
+      requirement_id_required: 'Select a requirement',
+      case_count: 'Default 5, max 10'
+    }
   },
   state: {
     loadingSessions: 'Loading sessions...',
@@ -61,6 +115,8 @@ export default {
     loadSessionsFailed: 'Failed to load sessions',
     loadHistoryFailed: 'Failed to load history',
     sendFailed: 'Failed to send message',
+    actionModeNotSupported:
+      'Chat no longer supports mode=action. Use Experimental tools in the sidebar, or POST /api/experimental-actions/execute with tool_name and args.',
     llmNotInitialized: 'Chat model is not ready. Check provider and API key in Config Center, then retry.',
     apiKeyInvalid: 'API key is invalid or missing. Update it in Config Center or .env, then retry.',
     providerRateLimited: 'Provider rate limit or quota exceeded. Please retry later.',
@@ -85,11 +141,56 @@ export default {
     renameSessionFailed: 'Failed to rename session',
     renameSessionEmpty: 'Session name cannot be empty',
     experimentalToggleSuccess: 'Experimental actions setting updated',
-    experimentalToggleFailed: 'Failed to update experimental actions setting'
+    experimentalToggleFailed: 'Failed to update experimental actions setting',
+    experimentalActionsConfigDesc: 'Enable experimental action runtime'
+  },
+  toolMarkdown: {
+    genericActionSuccess: 'Action executed successfully',
+    genericOperationSuccess: 'Operation succeeded',
+    actionConfirmed: 'Action confirmed and executed',
+    actionCancelled: 'Action cancelled',
+    priority: 'Priority',
+    steps: 'Steps',
+    expectedResult: 'Expected result',
+    covers: 'Acceptance point',
+    listTruncated: 'Showing first {shown} of {total} items',
+    none: 'None',
+    scenarios: 'Detected scenarios',
+    scenario: {
+      search: 'Search',
+      login: 'Login',
+      form: 'Form'
+    },
+    ruleCases: 'Written by rules ({count})',
+    llmCases: 'Added by the model ({count})',
+    requirement: 'Requirement',
+    linkedCases: 'Linked cases',
+    noCriteria: 'No acceptance points could be split out of the requirement text.',
+    criterion: 'Acceptance point',
+    coverageState: 'State',
+    covered: 'Covered',
+    gap: 'Gap',
+    matchedCase: 'Matched case',
+    score: 'Overlap',
+    structureIssues: 'Structure to fix ({count})',
+    issue: {
+      title_too_short: 'Title too short',
+      steps_missing: 'No steps',
+      steps_too_few: 'Only one step',
+      steps_vague: 'Vague step',
+      expected_missing: 'No expected result'
+    },
+    trace: {
+      requirementsWithoutCases: 'Requirements with no cases ({count})',
+      casesWithMissingRequirement: 'Cases pointing to a missing requirement ({count})',
+      casesUnlinked: 'Cases with no requirement ({count})',
+      requirementsWithCases: 'Requirements with cases ({count}, fewest first)',
+      caseCount: '{count} cases'
+    }
   },
   roles: {
     user: 'You',
-    assistant: 'AI',
+    assistant: 'AI Assistant',
     system: 'System'
   },
   modelStatus: {
@@ -98,12 +199,21 @@ export default {
     connectionFailed: 'Connection failed',
     unknownModel: 'Unknown model'
   },
+  toolMeta: {
+    status: 'Status',
+    tool: 'Tool',
+    total: 'Total',
+    hits: 'Hits',
+    searchStatus: 'Search status',
+    generated: 'Generated',
+    rag: 'RAG'
+  },
   history: {
     title: 'History'
   },
   template: {
     title: 'Templates',
-    placeholder: 'Templates and settings are reserved for a later pass',
+    placeholder: 'Choose a template and insert it into the message box.',
     selectLabel: 'Prompt Template',
     loading: 'Loading template...',
     empty: 'No template content',
@@ -114,13 +224,6 @@ export default {
       automationAdvice: 'Automation Advice',
       performanceTest: 'Performance Test Guidance'
     }
-  },
-  setting: {
-    title: 'Settings',
-    placeholder: 'Reserved for a later enhancement'
-  },
-  export: {
-    title: 'Export'
   },
   richContent: {
     copy: 'Copy',
@@ -133,7 +236,9 @@ export default {
   messageCount: '{count} messages',
   quickReply: {
     title: 'Suggested follow-ups',
-    stats: '{total} suggested / {clicked} clicked / CTR {rate}'
+    stats: '{total} suggested / {clicked} clicked / CTR {rate}',
+    statsHint: '{count} in this batch',
+    statsGlobal: '{clicks} total clicks · {users} tracked users'
   },
   action: {
     pendingTitle: 'Pending action confirmation',

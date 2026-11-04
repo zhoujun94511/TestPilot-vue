@@ -6,25 +6,50 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "npm run typecheck && npm run quality:i18n && npm run quality:ui && npm run quality:audit",
     "preview": "vite preview",
-    "i18n:check": "node scripts/check-i18n.js",
+    "i18n:check": "node scripts/check-i18n.js && node scripts/find-missing-i18n-keys.mjs",
     "copy:check": "node scripts/check-hardcoded-copy.js",
     "native-dialog:check": "node scripts/check-no-native-dialog.js",
     "quality:i18n": "npm run i18n:check && npm run copy:check",
-    "quality:ui": "npm run native-dialog:check"
+    "quality:ui": "npm run native-dialog:check",
+    "quality:audit": "node scripts/check-theme-tokens.js && node scripts/check-display-patterns.js && node scripts/check-style-conflicts.mjs && node scripts/test-markdown-render.mjs && node scripts/test-config-infer.mjs && node scripts/check-api-error-i18n.mjs",
+    "quality:integration": "python -m pytest ../tests/test_api_get_snapshots.py -q",
+    "quality:api-contract": "python ../scripts/check_api_contract.py",
+    "quality:release": "npm run quality:i18n && npm run quality:ui && npm run quality:audit && npm run build",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium",
+    "quality:release:full": "npm run quality:release && npm run test:e2e",
+    "brand:icons": "node scripts/sync-brand-assets.mjs && node scripts/generate-brand-icons.mjs"
   },
   "dependencies": {
+    "@lucide/vue": "^1.66.0",
+    "@vueuse/core": "^15.0.0",
     "axios": "^1.8.4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "dompurify": "^3.4.1",
     "markdown-it": "^14.1.1",
     "pinia": "^2.3.1",
+    "reka-ui": "^2.11.0",
+    "tailwind-merge": "^3.7.0",
     "vue": "^3.5.13",
     "vue-i18n": "^9.14.5",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.0",
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^26.6.6",
     "@vitejs/plugin-vue": "^5.2.4",
+    "autoprefixer": "^10.6.2",
+    "postcss": "^8.5.32",
+    "sharp": "^0.34.3",
+    "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.3",
-    "vite": "^6.4.2"
+    "vite": "^6.4.2",
+    "vue-tsc": "^3.3.14"
   }
 }

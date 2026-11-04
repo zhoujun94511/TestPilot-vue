@@ -1,0 +1,12 @@
+/* AppToastStack 进出场（TransitionGroup name=app-toast，见 lib/toast-ui.ts） */
+
+.app-toast-enter-active,
+.app-toast-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.app-toast-enter-from,
+.app-toast-leave-to {
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+}

@@ -75,6 +75,15 @@ def validate_gemini_key(key: str) -> Tuple[bool, str]:
         return False, "不存在或不可用"
 
 
+def validate_anthropic_key(key: str) -> Tuple[bool, str]:
+    """Anthropic API Key：sk-ant- 开头。"""
+    if not key or not key.strip():
+        return False, "不存在或不可用"
+    if re.match(r'^sk-ant-[A-Za-z0-9_\-]{20,}$', key.strip()):
+        return True, " 可用"
+    return False, "不存在或不可用"
+
+
 def validate_qwen_key(key: str) -> Tuple[bool, str]:
     """
      Qwen API Key 校验
@@ -113,6 +122,8 @@ def get_api_key_from_config_center(company: str) -> str | None:
             api_key = config_center_service.get_config_value("GEMINI_API_KEY")
         elif company_upper == "QWEN":
             api_key = config_center_service.get_config_value("QWEN_API_KEY")
+        elif company_upper == "ANTHROPIC":
+            api_key = config_center_service.get_config_value("ANTHROPIC_API_KEY")
         else:
             logger.warning(f"不支持的AI提供商: {company}")
             return None
@@ -263,6 +274,29 @@ def get_api_key_with_fallback(company: str) -> Tuple[str | None, str | None, str
                 _log_api_key_warning_once(f"Qwen API Key (.env): {env_message}")
         
         return None, None, f"Qwen API Key 配置有误，请检查 .env 文件或配置中心"
+
+    elif company_upper == "ANTHROPIC":
+        env_key = os.getenv("ANTHROPIC_API_KEY")
+        env_is_valid = False
+        env_message = ""
+
+        if env_key and env_key.strip():
+            env_is_valid, env_message = validate_anthropic_key(env_key.strip())
+            if env_is_valid:
+                return env_key.strip(), "env", env_message
+
+        config_key = get_api_key_from_config_center("ANTHROPIC")
+        if config_key and config_key.strip():
+            config_is_valid, config_message = validate_anthropic_key(config_key.strip())
+            if config_is_valid:
+                return config_key.strip(), "config_center", config_message
+            if env_key and env_key.strip():
+                _log_api_key_warning_once(f"Anthropic API Key (.env): {env_message}")
+            _log_api_key_warning_once(f"Anthropic API Key (config_center): {config_message}")
+        elif env_key and env_key.strip() and not env_is_valid:
+            _log_api_key_warning_once(f"Anthropic API Key (.env): {env_message}")
+
+        return None, None, "Anthropic API Key 配置有误，请检查 .env 文件或配置中心"
     
     else:
         return None, None, f"不支持的AI提供商: {company}"
@@ -485,7 +519,8 @@ def get_service_name(company: str) -> str:
         "deepseek": "DeepSeek",
         "ollama": "Ollama",
         "gemini": "Google Gemini",
-        "qwen": "Qwen"
+        "qwen": "Qwen",
+        "anthropic": "Anthropic",
     }
     return service_names.get(company, company.title())
 
@@ -524,12 +559,19 @@ def normalize_provider_error(company: str, error: Exception | str) -> dict:
             "retryable": bool     # 是否建议重试
         }
     """
+    from utils.utils_performance_monitoring.token_session import normalize_token_session_error
+
+    token_session = normalize_token_session_error(error)
+    if token_session:
+        return token_session
+
     company_upper = (company or "OPENAI").upper()
     service_name = {
         "OPENAI": "OpenAI",
         "DEEPSEEK": "DeepSeek",
         "GEMINI": "Gemini",
         "QWEN": "Qwen",
+        "ANTHROPIC": "Anthropic",
         "OLLAMA": "Ollama"
     }.get(company_upper, "OpenAI")
 
@@ -614,6 +656,9 @@ def build_model_error_result(
         "retryable": bool(normalized.get("retryable", False)),
         "status_code": int(normalized.get("status_code", 500) or 500),
     }
+    if normalized.get("message_key"):
+        result["message_key"] = normalized["message_key"]
+        result["message_params"] = normalized.get("message_params") or {}
     if include_raw_error:
         result["details"] = str(error or "")
     return result
