@@ -994,7 +994,7 @@ def get_chat_config():
                 'capabilities': settings.model_capabilities,
                 'default_temperature': 0.7,
                 'default_max_tokens': getattr(settings, 'MAX_TOKENS', 4000),
-                'experimental_actions_enabled': bool(getattr(settings, 'ENABLE_EXPERIMENTAL_ACTIONS', False))
+                'experimental_actions_enabled': bool(getattr(settings, 'ENABLE_EXPERIMENTAL_ACTIONS', True))
             }
         })
     except Exception as e:

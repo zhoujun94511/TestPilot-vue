@@ -30,7 +30,7 @@ def clear_rate_limit_for_tests() -> None:
 
 
 def _ensure_enabled():
-    if not getattr(settings, "ENABLE_EXPERIMENTAL_ACTIONS", False):
+    if not getattr(settings, "ENABLE_EXPERIMENTAL_ACTIONS", True):
         return jsonify({
             "success": False,
             "message": "experimental actions disabled",

@@ -430,7 +430,7 @@ def init_database(app):
         # 必须显式导入，否则 SQLAlchemy 不会识别这些模型
         try:
             from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule
-            from models.auth_models import AuthAuditLog, Department, User, UserSession  # noqa: F401
+            from models.auth_models import AuthAuditLog, BootstrapMarker, Department, User, UserSession  # noqa: F401
         except ImportError as import_error:
             # 如果导入失败，记录警告但不阻止启动
             import logging
@@ -445,6 +445,13 @@ def init_database(app):
         except Exception as migration_error:
             import logging
             logging.getLogger(__name__).warning('认证迁移/种子失败: %s', migration_error)
+        try:
+            from services.first_run_bootstrap import run_first_run_bootstrap
+            app.config['FIRST_RUN_STATUS'] = run_first_run_bootstrap()
+        except Exception as seed_error:
+            import logging
+            logging.getLogger(__name__).warning('首次初始化未完成: %s', seed_error)
+            app.config['FIRST_RUN_STATUS'] = 'incomplete'
         import logging
 
         logging.getLogger(__name__).info('数据库表创建成功')

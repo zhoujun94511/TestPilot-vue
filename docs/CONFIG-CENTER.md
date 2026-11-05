@@ -4,14 +4,9 @@ TestPilot 通过 Web **配置中心**统一管理运行期参数，优先级：*
 
 ## 初始化
 
-首次部署或升级后建议执行：
+新装不需要单独跑脚本。首次执行 `python run.py`（或 `python scripts/init_first_run.py`）时会补齐缺失的配置项与验证规则，并写入首次初始化游标；之后启动不会覆盖已改过的值。
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-python scripts/init_config_center.py
-```
-
-脚本会写入默认分类与配置项，并做迁移（例如 `TR_MAX_TOKENS` 统一词元、`TOKEN_MAX_*` 归入 `ai_model`、legacy `TR_*_MAX_TOKENS` 同步）。
+只有要恢复出厂默认时才执行 `python scripts/init_config_center.py --force`。它会清空配置行并写入内置默认值，其中 `DEFAULT_COMPANY=OPENAI` 会覆盖 `.env` 的提供商。英文版见 [CONFIG-CENTER.en.md](CONFIG-CENTER.en.md)。
 
 ## 前端结构
 

@@ -771,7 +771,7 @@ def get_feature_flags():
             'success': True,
             'feature_flags': {
                 'enable_vector_store': bool(getattr(settings, 'ENABLE_VECTOR_STORE', True)),
-                'experimental_actions_enabled': bool(getattr(settings, 'ENABLE_EXPERIMENTAL_ACTIONS', False)),
+                'experimental_actions_enabled': bool(getattr(settings, 'ENABLE_EXPERIMENTAL_ACTIONS', True)),
             }
         })
     except Exception as e:

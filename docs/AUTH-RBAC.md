@@ -1,24 +1,30 @@
 # 认证与 RBAC（部门数据隔离）
 
+英文版：[AUTH-RBAC.en.md](AUTH-RBAC.en.md)。
+
 本文描述 TestPilot 当前实现的登录、角色、部门隔离与数据库迁移，与代码路径 `services/auth_*`、`services/data_scope.py`、`blueprints/auth.py` 保持一致。
 
 ## 设计目标
 
-- **默认兼容单机**：`AUTH_REQUIRE_AUTH=false` 时不强制登录，数据范围过滤不生效（与历史匿名使用一致）。
-- **多租户/团队部署**：`AUTH_REQUIRE_AUTH=true` 时，用例、需求、知识库、聊天、导出、统计等按 **角色 + 部门** 隔离。
+- **默认要求登录**：首次初始化创建超级管理员、管理员、普通用户各一个，由用户自行选择登录。界面不提示默认账号。用例、需求、知识库、聊天、导出、统计等按 **角色 + 部门** 隔离。
+- **单机匿名**：`AUTH_REQUIRE_AUTH=false` 时不强制登录，数据范围过滤不生效。
 - **配置中心**：仅 **super_admin** 可改运行期密钥与模型配置。
 
 ## 环境变量（`.env`）
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `AUTH_REQUIRE_AUTH` | `false` | `true` 时除公开 auth 接口外，所有 `/api/*` 需登录 |
+| `AUTH_REQUIRE_AUTH` | `true` | `true` 时除公开 auth 接口外，所有 `/api/*` 需登录 |
 | `AUTH_REGISTER_ENABLED` | `false` | `true` 时开放 `POST /api/auth/register`（注册为 **user** + 默认部门） |
 | `AUTH_REGISTER_REQUIRE_APPROVAL` | `true` | 自助注册的账号创建为**停用**，管理员在用户管理点「启用」后才能登录；设为 `false` 则注册后立即可用，并能读写默认部门（含历史数据） |
 | `AUTH_TRUST_PROXY_HEADERS` | `false` | `true` 时按 `X-Forwarded-For` 首段识别客户端 IP（登录/注册限流、审计 IP）；只在可信反向代理之后开启 |
-| `AUTH_BOOTSTRAP_SUPER_USERNAME` | `admin` | **users 表为空** 时创建的引导超管用户名 |
-| `AUTH_BOOTSTRAP_SUPER_PASSWORD` | （空） | 引导超管密码；**为空时使用 `TestPilot@2026` 并写 warning 日志** |
+| `AUTH_BOOTSTRAP_SUPER_USERNAME` | `admin` | 首次初始化的超级管理员用户名 |
+| `AUTH_BOOTSTRAP_SUPER_PASSWORD` | （空） | 超管密码；为空时用内置 `TestPilot@2026`。日志只告警，不写出口令 |
 | `AUTH_BOOTSTRAP_SUPER_EMAIL` | （空） | 可选邮箱 |
+| `AUTH_BOOTSTRAP_ADMIN_USERNAME` | `manager` | 首次初始化的管理员用户名 |
+| `AUTH_BOOTSTRAP_ADMIN_PASSWORD` | （空） | 为空时沿用超管密码，超管密码也为空则用内置密码 |
+| `AUTH_BOOTSTRAP_USER_USERNAME` | `member` | 首次初始化的普通用户用户名 |
+| `AUTH_BOOTSTRAP_USER_PASSWORD` | （空） | 规则同管理员密码 |
 
 复制模板：`cp .env.example .env`
 
@@ -36,10 +42,11 @@
 
 | 账号 | 是否自动创建 | 密码 |
 |------|----------------|------|
-| 引导 **super_admin**（默认用户名 `admin`） | **是**（仅 `users` 表为空时一次） | 见 `AUTH_BOOTSTRAP_SUPER_PASSWORD` 或默认 `TestPilot@2026` |
-| **admin** / **user** 演示账号 | **否** | 由超管在 **用户管理** 创建，或 `python scripts/seed_demo_users.py` 一次性补齐三角色（仅开发） |
+| **super_admin**（默认 `admin`） | 首次初始化一次 | `AUTH_BOOTSTRAP_SUPER_PASSWORD`，否则 `TestPilot@2026` |
+| **admin**（默认 `manager`） | 首次初始化一次 | `AUTH_BOOTSTRAP_ADMIN_PASSWORD`，否则沿用超管密码 |
+| **user**（默认 `member`） | 首次初始化一次 | `AUTH_BOOTSTRAP_USER_PASSWORD`，否则沿用超管密码 |
 
-**不会**出厂预置部门管理员、普通用户密码；避免生产误用固定弱口令。
+游标 `app_bootstrap_markers.first_run` 写入后，再启动不会补建被删掉的账号，也不会重置密码。登录页不预填、不提示这些账号。同名用户已存在时跳过，不改角色、不改密码。
 
 ## 数据库与迁移
 
@@ -50,12 +57,13 @@
 
 ### 迁移入口（推荐顺序）
 
-1. **应用启动**：`create_app()` → `init_database()` → `run_auth_migrations()`（`services/auth_migrations.py`）
-   - `ensure_scope_columns()`：SQLite `ALTER TABLE` 补列
-   - `seed_auth_bootstrap()`：默认部门 + 引导超管
+1. **应用启动**：`create_app()` → `init_database()` → `run_auth_migrations()`，再按游标决定是否 `run_first_run_bootstrap()`
+   - `ensure_scope_columns()`：SQLite `ALTER TABLE` 补列（每次启动，只加列）
+   - 无游标时：三类账号（已有同名不改）+ 配置中心缺省项（不覆盖）+ 写入 `first_run`
+   - 有游标时：跳过账号和配置种子
    - `backfill_legacy_dept_id()` / `llm_usage` 回填
 
-2. **CLI**：`python scripts/init_db.py init`（或无参数，内部调用 `create_app()`，同样会跑上述认证迁移）
+2. **CLI**：`python scripts/init_first_run.py`（同一套游标逻辑，不启动服务，也不清空向量库）
 
 3. **legacy**：`scripts/init_db.py migrate` / `full-migrate` 主要维护**历史业务表结构**；RBAC 列以 **`run_auth_migrations`** 为准，两者并存时需都执行或至少保证已启动过一次完整 `create_app`。
 
@@ -108,29 +116,20 @@
 - 登录页、`stores/auth.ts` 与 `/api/auth/check-auth` 同步
 - 路由 `meta.roles`：`/admin/users` 为 super_admin + admin；配置相关仅 super_admin（与 `canSeeConfigCenter` 一致）
 
-## 可选：开发环境演示用户
+## 手动首次初始化
 
 ```bash
-# 需数据库已迁移（脚本内会 db.create_all + run_auth_migrations，不依赖完整 create_app/LLM 栈）
-python scripts/seed_demo_users.py
+python scripts/init_first_run.py
 ```
 
-默认三账号（脚本结束会打印对照表）：
-
-| 角色 | 用户名 | 默认密码 |
-|------|--------|----------|
-| super_admin | `admin`（`AUTH_BOOTSTRAP_SUPER_USERNAME`） | `TestPilot@2026`（未设 `AUTH_BOOTSTRAP_SUPER_PASSWORD` 时） |
-| admin | `dept_admin` | `DemoAdmin@2026` |
-| user | `demo_user` | `DemoUser@2026` |
-
-可通过环境变量覆盖（见脚本与 `.env.example`）。**勿在生产使用默认演示密码。**
+`scripts/seed_demo_users.py` 只是兼容入口，调用同一套游标逻辑，不再另建 `dept_admin` / `demo_user`。游标已存在时两个脚本都不改数据。
 
 ## 测试
 
 轻量 RBAC（不拉完整 LLM 栈）：
 
 ```bash
-pytest tests/test_rbac_integration_light.py tests/test_auth_rbac.py tests/test_password_policy.py tests/test_register_flow.py -q
+pytest tests/test_first_run_bootstrap.py tests/test_rbac_integration_light.py tests/test_auth_rbac.py tests/test_password_policy.py tests/test_register_flow.py -q
 ```
 
 RAG 结果层过滤与文档分析路径限制：`pytest tests/test_scope_and_provider_guards.py -q`。

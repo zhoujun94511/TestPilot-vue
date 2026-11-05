@@ -60,12 +60,12 @@ export const shellSidebarBodyClass =
 export const shellMainNavClass = 'min-w-0 w-full shrink-0';
 
 /**
- * 个人设置 + 版权贴在侧栏底部。菜单不满一屏时整组沉底；超出时跟导航一起滚动。
- * pt-8 比分组间距（18px）更大，和个人设置上面的入口分开。
+ * 个人管理 + 版权贴在侧栏底部。菜单不满一屏时整组沉底；超出时跟导航一起滚动。
+ * pt-8 比分组间距（18px）更大，和个人管理上面的入口分开。
  */
 export const shellSidebarDockClass = 'mt-auto flex w-full shrink-0 flex-col pt-8';
 
-/** 与主导航项同一水平内缩，避免个人设置比上面的入口更宽 */
+/** 与主导航项同一水平内缩，避免个人管理比上面的入口更宽 */
 export const shellSidebarAccountTriggerClass = cn(
   'mx-1.5 mb-3 w-[calc(100%-0.75rem)] max-w-[calc(100%-0.75rem)] text-left',
   'data-[state=open]:border-[var(--tp-border-default)] data-[state=open]:bg-[var(--tp-bg-subtle)] data-[state=open]:text-[var(--tp-color-text-900)]'

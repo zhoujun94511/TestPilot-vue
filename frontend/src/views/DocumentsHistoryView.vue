@@ -17,7 +17,6 @@
           <TpButton variant="ghost" size="sm" :loading="historyRefreshLoading" @click="handleHistoryRefresh">
             {{ t('common.actions.refresh') }}
           </TpButton>
-          <span v-if="caseRagStatusLabel" class="whitespace-nowrap text-xs text-muted-foreground">{{ caseRagStatusLabel }}</span>
           <TpButton
             variant="primary"
             size="sm"
@@ -177,7 +176,6 @@ import { pageToolbarStripClass } from '@/lib/page-chrome-ui';
 import { pageMarkerDocumentsHistory, pageRootMarkedClass } from '@/lib/page-layout-ui';
 import TpButton from '@/components/ui/base/TpButton.vue';
 import { usePageNotifier } from '@/composables/usePageNotifier';
-import { useCaseGenerationRagStatus } from '@/composables/useCaseGenerationRagStatus';
 import {
   deleteRequirement,
   generateCasesFromAnalysis,
@@ -195,8 +193,6 @@ const {
   clearBanner: clearPageBanner,
   showNotice
 } = usePageNotifier();
-
-const { label: caseRagStatusLabel, refresh: refreshCaseRagStatus } = useCaseGenerationRagStatus();
 
 const filters = reactive({
   search: '',
@@ -469,7 +465,6 @@ async function executeGenerateCases(requirementsToGenerate: DocumentRequirementR
 }
 
 onMounted(async () => {
-  void refreshCaseRagStatus();
   const sourceFromQuery = typeof route.query.source === 'string' ? route.query.source.trim() : '';
   if (sourceFromQuery) {
     filters.sourceFile = sourceFromQuery;

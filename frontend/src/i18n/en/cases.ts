@@ -51,10 +51,7 @@ export default {
     requirementPlaceholder: 'e.g. Login must validate account state and show errors',
     requirementHelper: 'Be specific on scope or acceptance; priority is inferred',
     caseCountLabel: 'Case Count',
-    caseCountOption: '{count} items',
-    ragFollowsConfigOn: 'Knowledge enhancement is on. Change it in Config Center.',
-    ragFollowsConfigOff: 'Knowledge enhancement is off. Change it in Config Center.',
-    ragUnavailable: 'Knowledge base is off. Generation uses the model only.'
+    caseCountOption: '{count} items'
   },
   filters: {
     title: 'Search & Filters',

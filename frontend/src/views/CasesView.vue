@@ -41,7 +41,6 @@
             />
           </div>
         </div>
-        <p v-if="caseRagStatusLabel" class="mb-4 text-[0.78rem] leading-snug text-muted-foreground">{{ caseRagStatusLabel }}</p>
         <div :class="formActionsClass">
           <TpButton variant="ghost" type="button" @click="clearSingleRequirementInput">
             {{ t('cases.actions.clearInput') }}
@@ -86,7 +85,6 @@
             />
           </div>
         </div>
-        <p v-if="caseRagStatusLabel" class="mb-4 text-[0.78rem] leading-snug text-muted-foreground">{{ caseRagStatusLabel }}</p>
         <div :class="formActionsClass">
           <TpButton variant="ghost" type="button" @click="resetBatchForm">
             {{ t('cases.actions.clearInput') }}
@@ -399,7 +397,6 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
 import { usePageNotifier } from '@/composables/usePageNotifier';
-import { useAppStore } from '@/stores';
 import { resolveCaseCategoryDisplayName } from '@/utils/caseCategoryI18n';
 import BaseState from '@/components/common/BaseState.vue';
 import KnowledgeStatsCard from '@/components/common/KnowledgeStatsCard.vue';
@@ -512,8 +509,6 @@ function formatCaseDateTime(value: string | null | undefined) {
 }
 const router = useRouter();
 const route = useRoute();
-const appStore = useAppStore();
-
 const cases = ref<CaseRecord[]>([]);
 const stats = ref<CaseStats | null>(null);
 const config = ref<CaseGenerationConfig | null>(null);
@@ -564,15 +559,6 @@ const batchForm = reactive({
 
 const singleRequirementError = ref('');
 const batchRequirementsError = ref('');
-
-const ragAvailable = computed(() => appStore.featureFlags.enableVectorStore);
-const caseRagStatusLabel = computed(() => {
-  if (!config.value && ragAvailable.value) return '';
-  if (!ragAvailable.value) return t('cases.form.ragUnavailable');
-  return config.value?.enable_case_generation_rag
-    ? t('cases.form.ragFollowsConfigOn')
-    : t('cases.form.ragFollowsConfigOff');
-});
 
 const pagination = ref({
   page: 1,

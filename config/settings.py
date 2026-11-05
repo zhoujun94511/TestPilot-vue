@@ -146,8 +146,8 @@ class Config:
     SESSION_USE_SIGNER = True
     SESSION_FILE_DIR = str(BASE_DIR / 'sessions')
 
-    # 认证与 RBAC（默认关闭 REQUIRE_AUTH，兼容单机匿名使用）
-    AUTH_REQUIRE_AUTH = os.getenv('AUTH_REQUIRE_AUTH', 'false').strip().lower() in (
+    # 认证与 RBAC（默认开启；空库首次启动会创建引导超管，需用该账号登录）
+    AUTH_REQUIRE_AUTH = os.getenv('AUTH_REQUIRE_AUTH', 'true').strip().lower() in (
         'true', '1', 'yes', 'on',
     )
     AUTH_REGISTER_ENABLED = os.getenv('AUTH_REGISTER_ENABLED', 'false').strip().lower() in (
@@ -622,8 +622,8 @@ class Config:
     # 默认值：false，可通过环境变量 ENABLE_STREAMING 修改
     ENABLE_STREAMING = os.getenv('ENABLE_STREAMING', 'false').lower() == 'true'
 
-    # 实验功能开关（默认关闭，避免影响主业务）
-    ENABLE_EXPERIMENTAL_ACTIONS = os.getenv('ENABLE_EXPERIMENTAL_ACTIONS', 'false').strip().lower() in ('true', '1', 'yes')
+    # 实验功能默认可用；仅在显式设为 false/0/no/off 时关闭
+    ENABLE_EXPERIMENTAL_ACTIONS = os.getenv('ENABLE_EXPERIMENTAL_ACTIONS', 'true').strip().lower() in ('true', '1', 'yes', 'on')
     # execute 自然语言猜工具（默认关闭；显式 tool_name/args 为正式路径）
     EXPERIMENTAL_ACTIONS_ALLOW_NL = os.getenv('EXPERIMENTAL_ACTIONS_ALLOW_NL', 'false').strip().lower() in ('true', '1', 'yes')
 

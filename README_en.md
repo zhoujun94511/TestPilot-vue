@@ -6,14 +6,14 @@
 
 **AI-powered intelligent test case generation and management platform**
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.0+-green.svg)](https://flask.palletsprojects.com)
-[![Vue](https://img.shields.io/badge/Vue-3.x-42b883.svg)](https://vuejs.org)
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
+[![Flask](https://img.shields.io/badge/Flask-3.1-green.svg)](https://flask.palletsprojects.com)
+[![Vue](https://img.shields.io/badge/Vue-3.5-42b883.svg)](https://vuejs.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [中文](README.md) • [English](README_en.md)
 
-[Features](#features) • [Quick Start](#quick-start) • [Deployment Guide](#deployment-guide) • [API Docs](#api-documentation-high-level) • [Contributing](#contributing)
+[Features](#features) • [Architecture](#architecture--principles) • [Technology Stack](#technology-stack) • [Operations](docs/OPERATIONS.en.md) • [Configuration](docs/CONFIGURATION.en.md)
 
 </div>
 
@@ -315,21 +315,30 @@ TestPilot-vue/
 │   ├── settings.py                 Core runtime settings (models/RAG/retrieval/flags)
 │   ├── filter_keywords.json        Keyword config
 │   └── hallucination_config.json   Hallucination detection config
-├── blueprints/                     API routes (cases/chat/documents/knowledge/stats/config)
-├── services/                       Business services (case/chat/document/knowledge/export/...)
+├── blueprints/                     API routes (auth, cases, chat, documents, knowledge, stats, config, export, experimental)
+├── services/                       Business services (cases, chat, documents, knowledge, auth, config center, export)
 ├── models/                         SQLAlchemy models
-├── utils/                          Utilities (model adapters, retrieval, quality, doc processing)
-├── scripts/                        Init/check/maintenance scripts
+├── utils/                          Utilities (model adapters, retrieval, quality, document processing, config)
+├── experiments/                    Experimental action runtime (rule skeleton, orchestration, validation)
+├── pilotAgent/                     Test-case generation agent
+├── scripts/                        Init, check, and maintenance scripts
 ├── tests/                          Test suites
 ├── frontend/                       Vue 3 + TypeScript + Vite frontend
 │   ├── src/
 │   │   ├── api/                    API clients
-│   │   ├── components/             Vue components
+│   │   ├── components/             Vue components (including shadcn-style primitives)
+│   │   ├── composables/            Composables
+│   │   ├── layouts/                Page layouts
 │   │   ├── views/                  Page views
 │   │   ├── router/                 Routing
 │   │   ├── stores/                 Pinia stores
 │   │   ├── i18n/                   i18n resources (zh-CN/en)
-│   │   └── styles/                 Style system
+│   │   ├── lib/                    Page and domain UI classes, field-control, utils
+│   │   ├── config/                 Frontend config such as navigation
+│   │   ├── utils/                  Frontend helpers
+│   │   └── styles/                 Tokens, Tailwind, chat-rich-content
+│   ├── docs/UI-REDESIGN-PLAN.md    Frontend UI redesign plan
+│   ├── docs/UI-MIGRATION.md        Frontend UI migration notes (Tailwind + shadcn-vue)
 │   ├── public/                     Static assets
 │   └── package.json                Frontend scripts/dependencies
 ├── uploads/                        Uploaded files (documents/knowledge)
@@ -391,7 +400,7 @@ TestPilot-vue/
 - **Rule skeleton**: deterministic cases from acceptance criteria, optional model fill-in, saved only after preview confirmation.
 - **Coverage review**: compare linked cases against a requirement and list gaps.
 - **Trace matrix**: requirements without cases, dangling requirement IDs, and unlinked cases.
-- Off by default (`ENABLE_EXPERIMENTAL_ACTIONS`); open from the sidebar when enabled.
+- On by default. Set `ENABLE_EXPERIMENTAL_ACTIONS=false` to turn experimental tools off. Open them from the sidebar.
 
 <img src="./pictures/007-EN-实验功能.webp" alt="Experimental tools" />
 
@@ -422,12 +431,12 @@ TestPilot-vue/
 - **Versioning** for test cases.
 - **Batch operations** for case management.
 
-## 🏗️ Technology Stack
+## Technology Stack
 
 ### Backend
 
-- **Framework**: Flask 3.0+
-- **DB**: `SQLite` / `PostgreSQL` / `MySQL`
+- **Framework**: Flask 3.1
+- **DB**: SQLite (default, `testpilot.db`). The current requirements have no PostgreSQL or MySQL driver, so those are not wired up
 - **ORM**: SQLAlchemy
 - **Vector store**: SQLite + sqlite-vec + FTS5 (default and recommended)
 - **AI integration**: LangChain
@@ -436,349 +445,32 @@ TestPilot-vue/
 - **Hallucination detection**: in-house multidimensional system
 - **Config management**: Config Center
 - **Session management**: Flask-Session
-- **Async/WebSocket**: Eventlet
+- **How it runs**: development uses the Flask dev server. Production on Windows uses Waitress (pinned; selected by `run.py`). Linux and macOS use Gunicorn with an Eventlet worker (`eventlet` is pinned; install `gunicorn` separately). There is no WebSocket server
 
 ### Frontend
 
 - **Framework**: Vue 3 + TypeScript + Vite
 - **State & Routing**: Pinia + vue-router + vue-i18n
-- **UI System**: `tp-*` design system + Vue componentization
-- **Icons**: Font Awesome 6.5
-- **Charts**: Chart.js
+- **Styling**: Tailwind CSS 3 + shadcn-vue-style primitives (built on reka-ui) + `tp-*` design tokens
+- **Icons**: @lucide/vue
 
 ### AI Models
 
 - **OpenAI**: gpt-5 (default), gpt-4o  
 - **Google Gemini**: gemini-3.8-flash  
 - **DeepSeek**: deepseek-flash (V4.1-Flash)  
-- **Qwen**: qwen-flash, qwen-plus, qwen-max  
-- **Ollama**: local models  
-- **Custom**: any OpenAI-compatible provider  
+- **Qwen**: qwen-flash, qwen-plus, qwen-max
+- **Anthropic (Claude)**: claude-sonnet-5-5 (default), claude-opus-5-5, claude-haiku-5-5, claude-fable-5-1. Uses the Messages API, not an OpenAI-compatible base URL. See [Configuration](docs/CONFIGURATION.en.md)
+- **Ollama**: local models
+- **Custom**: other OpenAI-compatible endpoints. Claude is not in this group  
 
-## Quick Start
 
-### Requirements
+## Documentation
 
-- Python 3.10+
-- Node.js 16+ (optional, for frontend dev)
-- 4GB+ RAM
-- 2GB+ disk
-- **Important**: PyTorch is removed; we use FastEmbed (ONNX/CPU), no GPU needed.
-
-> **Note for Git**: `models/fastembed/` is a FastEmbed/HuggingFace model cache directory and can be large, so it should be ignored by `.gitignore` and not committed.  
-> - **Online**: if the cache is missing, the embedding model will be downloaded automatically on first use.  
-> - **Offline / packaged**: run `python scripts/preload_fastembed_models.py` on an online machine first and set `FASTEMBED_CACHE_DIR` if needed.
-
-### Installation
-
-1. **Clone**
-
-```bash
-git clone https://github.com/zhoujun94511/TestPilot-vue.git
-cd TestPilot-vue
-```
-
-1. **Virtualenv**
-
-```bash
-python -m venv venv
-# Windows
-venv\Scripts\activate
-# Linux/Mac
-source venv/bin/activate
-```
-
-1. **Install deps**
-
-```bash
-pip install -r requirements.txt
-```
-
-1. **Initialize frontend (Vue 3 + Vite)**
-
-```bash
-cd frontend
-npm install
-```
-
-Common frontend commands:
-```bash
-# Start Vue dev server (Vite)
-npm run dev
-
-# Build production bundle
-npm run build
-
-# Preview built assets locally
-npm run preview
-```
-
-Integration notes:
-- Frontend connects to backend via `VITE_FLASK_TARGET` in `frontend/.env.development.local`.
-- Recommended: run `python run.py` at repo root to handle backend startup and frontend target sync.
-- For frontend-only debugging, run `cd frontend && npm run dev`.
-
-Frontend troubleshooting:
-- `npm install` fails: verify Node.js version (recommended 18+), then run `npm cache clean --force` and retry.
-- `npm run dev` port already in use: switch to another port or stop the conflicting process.
-- API requests fail in UI: verify `VITE_FLASK_TARGET` in `frontend/.env.development.local`.
-- Blank page / static 404: remove `frontend/node_modules`, reinstall dependencies, and start again.
-- CORS issues during integration: prefer `python run.py` so backend CORS and frontend target stay aligned.
-
-1. **Preload embedding models (required for offline)**
-
-```bash
-# Default model (baai/bge-small-en-v1.5, dim=384)
-python scripts/preload_fastembed_models.py
-
-# Or specify model
-python scripts/preload_fastembed_models.py --model baai/bge-base-en-v1.5
-
-# Custom cache dir (optional)
-export FASTEMBED_CACHE_DIR=/path/to/cache
-python scripts/preload_fastembed_models.py
-```
-
-> For fully offline deployment, preload the model on an online machine, copy `~/.cache/fastembed` (or your custom cache) to the target, and set `FASTEMBED_CACHE_DIR`.
-
-1. **Configure environment**
-
-```bash
-cp .env.example .env
-# Edit .env and fill in required values
-```
-
-**Authentication (team / multi-user deployments — see [docs/AUTH-RBAC.md](docs/AUTH-RBAC.md))**:
-
-```bash
-AUTH_REQUIRE_AUTH=false   # set true in production / shared environments
-AUTH_REGISTER_ENABLED=false
-AUTH_REGISTER_REQUIRE_APPROVAL=true   # self-registered accounts stay inactive until an admin enables them
-AUTH_TRUST_PROXY_HEADERS=false        # enable only behind a trusted reverse proxy
-AUTH_BOOTSTRAP_SUPER_USERNAME=admin
-# Strong password recommended; if empty, first bootstrap uses TestPilot@2026 (logged as warning)
-AUTH_BOOTSTRAP_SUPER_PASSWORD=
-```
-
-**Key vector-store related config** (current default is SQLite + sqlite-vec; ChromaDB is deprecated and kept only for rollback):
-
-```bash
-# Vector backend (default sqlite; historically sqlite/chroma, now sqlite is recommended)
-VECTOR_BACKEND=sqlite
-
-# Embedding
-EMBEDDING_MODEL_NAME=baai/bge-small-en-v1.5
-EMBEDDING_DIM=384  # must match actual model; cannot change without rebuilding DB
-
-# SQLite vector store
-SQLITE_VECTOR_DB_PATH=  # default: vector_store/vector_store.db
-SQLITE_VEC_EXTENSION_PATH=  # optional sqlite-vec extension path
-
-# Hybrid retrieval
-ENABLE_HYBRID_RETRIEVAL=true
-FTS_CANDIDATE_K=200  # legacy; still supported for compatibility
-```
-
-1. **Init relational DB**
-
-```bash
-python scripts/init_db.py init
-# Runs RBAC migrations via create_app; empty DB gets bootstrap super_admin
-```
-
-Optional dev demo users (not shipped for production):
-
-```bash
-python scripts/seed_demo_users.py
-```
-
-1. **Init vector DB (SQLite)**
-
-```bash
-python scripts/init_vectordb.py --init-vector-db
-```
-
-1. **Init Config Center (optional)**
-
-```bash
-python scripts/init_config_center.py
-```
-
-1. **Run app**
-
-```bash
-python run.py
-```
-
-1. **Open UI**
-
-Visit `http://localhost:5000` in your browser.
-
-### Reset local data
-
-Stop the backend first, then run (both commands ask for `y`):
-
-```bash
-# All rows in testpilot.db, including config center tables, users and departments; ends with VACUUM
-python scripts/init_db.py clear
-# All documents, chunks, vectors and FTS data in vector_store/vector_store.db
-python scripts/init_vectordb.py --clear-vector-db
-```
-
-On the next start the default department and bootstrap `admin` are recreated, and an empty config center falls back to `.env`. Both clear commands delete rows and keep the table structure. Before committing, delete files inside `uploads/`, `downloads/`, and `logs/` while leaving the directories in place. Those three directories are gitignored. `python scripts/init_config_center.py --force` rewrites built-in defaults (`DEFAULT_COMPANY=OPENAI`) and overrides the `.env` provider, so use it only to restore factory config.
-
-## Configuration
-
-### Config Management
-
-TestPilot supports:
-
-1.**Environment variables** (`.env`)
-2.**Web-based Config Center**
-
-See the Chinese `README.md` or `.env.example` for full details; key vector-related items are summarized above.  
-
-### AI Model Config Examples
-
-```bash
-# OpenAI
-DEFAULT_COMPANY=OPENAI
-OPENAI_API_KEY=sk-your-openai-key
-OPENAI_MODEL=gpt-5
-
-# Google Gemini
-DEFAULT_COMPANY=GEMINI
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-3.8-flash
-
-# DeepSeek
-DEFAULT_COMPANY=DEEPSEEK
-DEEPSEEK_API_KEY=your-deepseek-key
-DEEPSEEK_MODEL=deepseek-flash
-
-# Qwen
-DEFAULT_COMPANY=QWEN
-QWEN_API_KEY=your-qwen-api-key
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_MODEL=qwen-flash
-QWEN_TEMPERATURE=0.7
-QWEN_TIMEOUT=60
-
-# Token limits (defaults when DB has no entry; prefer Config Center)
-TR_MAX_TOKENS=8000
-MAX_TOKENS=4000
-TOKEN_MAX_PER_SESSION=50000
-TOKEN_MAX_CALLS_PER_SESSION=100
-
-# Ollama (local)
-DEFAULT_COMPANY=OLLAMA
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama2
-```
-
-## Usage Guide (Overview)
-
-- **Test Case Generation**: single/batch requirements, RAG, negative cases, optimization, hallucination detection.
-- **Requirement Analysis**: file upload or text input, extract test points and rules.
-- **Knowledge Base**: upload docs, smart retrieval, RAG integration.
-- **AI Assistant**: testing Q&A, templates, context-aware chat.
-- **Hallucination Detection**: automatic checks, strategies, and thresholds.
-- **Config Center**: manage configs, priorities, audit trail sidebar, token limits under **AI model** (`MAX_TOKENS`, unified `TR_MAX_TOKENS`, session caps), export/import, and sensitive fields.
-
-See [docs/CONFIG-CENTER.md](docs/CONFIG-CENTER.md) and [frontend/docs/TOKEN-CONFIG.md](frontend/docs/TOKEN-CONFIG.md). Full narrative remains in Chinese `README.md`; feature set is identical.
-
-## API Documentation (High-level)
-
-Main endpoints (paths are the same as in the Chinese README):
-
-- `/api/cases/*` for test cases
-- `/api/documents/*` and `/api/requirements` for requirement docs
-- `/api/knowledge/*` for knowledge base
-- `/api/chat/*` for chat sessions and history
-- `/api/export/*` for exporting data
-- `/api/hallucination/*` for hallucination detection and reports
-- `/api/config/*` for config center
-- `/api/stats/*` for stats and health
-
-## Testing
-
-- **System tests**: `python scripts/test_system.py`
-- **Vector pipeline tests**: `tests/vector_pipeline` (pytest)
-- **Hallucination tests**: `scripts/test_chat_hallucination.py`, `scripts/run_hallucination_tests.py`
-
-Coverage includes health checks, UI, static assets, APIs, test generation, requirement analysis, knowledge base, chat, hallucination detection, config center, smart retrieval, keyword extraction, exports, statistics, and vector store behavior.
-
-Lightweight RBAC integration tests (no full LLM stack): `pytest tests/test_rbac_integration_light.py`
-
-## Authentication and RBAC
-
-Optional login and **department-scoped data** (cases, requirements, knowledge, chat, export, stats). Default **`AUTH_REQUIRE_AUTH=false`** keeps single-user anonymous mode compatible.
-
-| Topic | Details |
-|-------|---------|
-| Full doc | [docs/AUTH-RBAC.md](docs/AUTH-RBAC.md) |
-| Bootstrap super_admin | Created once when `users` is empty; default username `admin`; password from `AUTH_BOOTSTRAP_SUPER_PASSWORD` or `TestPilot@2026` |
-| Dept admin / user | **Not pre-seeded**; create via **User management** or `scripts/seed_demo_users.py` (dev only) |
-| Migrations | App start or `python scripts/init_db.py init` → `run_auth_migrations()` |
-
-For production: strong bootstrap password, `AUTH_REQUIRE_AUTH=true`, careful use of `AUTH_REGISTER_ENABLED`.
-
-<img src="./pictures/001-EN-登录注册界面.webp" alt="Sign in and register" />
-<img src="./pictures/009-EN-用户管理.webp" alt="User management" />
-
-## Deployment Guide
-
-### Production
-
-- Use `gunicorn` + `eventlet` to run the app (e.g. `gunicorn --bind 0.0.0.0:5001 --workers 4 --worker-class eventlet app:create_app()`).  
-- See Chinese `README.md` “生产环境部署” for exact commands.
-
-### Cloud
-
-Supported on AWS, Azure, GCP, Alibaba Cloud, Tencent Cloud via containers or services like ECS/Cloud Run/App Service, etc.
-
-## Known Limitations
-
-- **Embedding dimension fixed**: `EMBEDDING_DIM` cannot be changed without rebuilding the vector DB (sqlite-vec requirement).
-- **SQLite IN limit**: handled via batching; keep `FTS_CANDIDATE_K < 999` for safety.
-- **sqlite-vec optional**: missing extension leads to slower but functional fallback.
-- **FTS5 consistency**: handled with transactional deletes and verification tools.
-- **Distance→similarity mapping**: assumes `vec_distance_cosine` in [0, 2]; check if upgrading sqlite-vec.
-
-## Troubleshooting
-
-Common issues and solutions are the same as described in the Chinese README:
-
-- App startup failures
-- Embedding dimension mismatch
-- sqlite-vec extension loading failures
-- AI API errors
-- DB connection problems
-- Upload failures
-- Hybrid retrieval performance issues
-
-See logs under `logs/` for detailed diagnostics.
-
-## Contributing
-
-We welcome all contributions!
-
-- **Report issues** via GitHub Issues.
-- **Submit code** via Merge Requests.
-- **Improve docs** (including translations).
-- **Test & feedback** for new features.
-
-Basic workflow:
-
-```bash
-git clone https://github.com/zhoujun94511/TestPilot-vue.git
-cd TestPilot-vue
-git checkout -b feature/your-feature-name
-pip install -r requirements-dev.txt
-python -m pytest tests/
-```
-
-Please follow PEP 8, use meaningful names, add docstrings where helpful, and ensure tests cover new functionality.
+- [Operations](docs/OPERATIONS.en.md): install, first-time setup, sign-in, daily use, deployment, tests, and troubleshooting
+- [Configuration](docs/CONFIGURATION.en.md): environment variables, vector store, and model setup, including Anthropic / Claude
+- [Authentication and RBAC](docs/AUTH-RBAC.en.md)
+- [Config Center](docs/CONFIG-CENTER.en.md)
 
 ## License
 
@@ -787,15 +479,10 @@ This project is released under the [MIT License](LICENSE).
 ## Acknowledgements
 
 - [Flask](https://flask.palletsprojects.com/)
-- TestPilot Design System (`tp-*`)
+- [Vue](https://vuejs.org/)
 - [LangChain](https://langchain.com/)
 - [sqlite-vec](https://github.com/asg017/sqlite-vec) (SQLite vector search extension)
 - [SQLAlchemy](https://www.sqlalchemy.org/)
-- [Font Awesome](https://fontawesome.com/)
-- In-house hallucination detection algorithms
-- In-house smart retrieval strategies
-- In-house Config Center
-
 ## Contact
 
 - **Project**: https://github.com/zhoujun94511/TestPilot-vue

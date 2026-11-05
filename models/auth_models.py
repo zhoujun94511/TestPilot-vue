@@ -111,6 +111,15 @@ class AuthAuditLog(db.Model):
         }
 
 
+class BootstrapMarker(db.Model):
+    """首次初始化游标。存在即表示账号、配置中心缺省项已写过，后续启动不得重做。"""
+
+    __tablename__ = 'app_bootstrap_markers'
+
+    marker_key = Column(String(64), primary_key=True)
+    completed_at = Column(DateTime, nullable=False, comment='完成时间')
+
+
 class UserSession(db.Model):
     __tablename__ = 'user_sessions'
 

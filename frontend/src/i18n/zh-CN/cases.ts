@@ -51,10 +51,7 @@ export default {
     requirementPlaceholder: '如：用户登录需校验账号状态与错误提示',
     requirementHelper: '写清功能或验收点即可；优先级由模型判断',
     caseCountLabel: '生成数量',
-    caseCountOption: '{count} 个',
-    ragFollowsConfigOn: '知识库增强已开启，在配置中心修改',
-    ragFollowsConfigOff: '知识库增强已关闭，在配置中心修改',
-    ragUnavailable: '知识库未启用，按纯模型生成'
+    caseCountOption: '{count} 个'
   },
   filters: {
     title: '搜索与筛选',

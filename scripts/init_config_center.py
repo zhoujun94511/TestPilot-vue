@@ -15,14 +15,10 @@ import os
 import argparse
 from pathlib import Path
 
-# 设置环境变量，跳过 LLM 初始化（减少初始化过程中的警告）
-os.environ['SKIP_LLM_INIT'] = 'true'
-
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from app import create_app
 from models.models import db
 from models.config_models import ConfigItem, ConfigValidationRule
 from utils.utils_core.logger import get_logger
@@ -33,6 +29,7 @@ logger = get_logger(__name__)
 def clear_old_data():
     """清空旧的配置中心数据"""
     try:
+        from app import create_app
         app = create_app()
         with app.app_context():
             deleted_items = ConfigItem.query.delete()
@@ -49,6 +46,7 @@ def clear_old_data():
 def init_config_center_tables():
     """初始化配置中心数据表"""
     try:
+        from app import create_app
         app = create_app()
         with app.app_context():
             # 创建配置中心相关表
@@ -60,11 +58,10 @@ def init_config_center_tables():
         return False
 
 
-def init_default_configs():
-    """初始化默认配置"""
+def seed_default_configs():
+    """补齐缺失的配置项。调用方必须已处于 Flask app context，且不覆盖已有值。"""
     try:
-        app = create_app()
-        with app.app_context():
+        if True:
             # 默认配置项
             default_configs = [
                 # AI模型配置
@@ -176,6 +173,12 @@ def init_default_configs():
                  'category': 'ai_model', 'description': '单会话模型最大调用次数', 'is_sensitive': False},
             ]
 
+            env_company = os.getenv('DEFAULT_COMPANY', '').strip().upper()
+            if env_company:
+                for item in default_configs:
+                    if item['key'] == 'DEFAULT_COMPANY':
+                        item['value'] = env_company
+
             # 插入默认配置
             retired_models = {
                 'DEEPSEEK_MODEL': ({'deepseek-chat', 'deepseek-reasoner', 'deepseek-coder'}, 'deepseek-flash'),
@@ -239,11 +242,18 @@ def init_default_configs():
         return False
 
 
-def init_validation_rules():
-    """初始化验证规则"""
+def init_default_configs():
+    """脚本入口：新建应用上下文后补齐配置。"""
+    from app import create_app
+    app = create_app()
+    with app.app_context():
+        return seed_default_configs()
+
+
+def seed_validation_rules():
+    """补齐缺失的验证规则。调用方必须已处于 Flask app context。"""
     try:
-        app = create_app()
-        with app.app_context():
+        if True:
             validation_rules = [
                 # Token数量验证
                 {'config_key': 'TR_OPENAI_MAX_TOKENS', 'validation_type': 'enum',
@@ -413,7 +423,16 @@ def main(force_reset=False):
     return True
 
 
+def init_validation_rules():
+    """脚本入口：新建应用上下文后补齐验证规则。"""
+    from app import create_app
+    app = create_app()
+    with app.app_context():
+        return seed_validation_rules()
+
+
 if __name__ == '__main__':
+    os.environ['SKIP_LLM_INIT'] = 'true'
     parser = argparse.ArgumentParser(description="配置中心初始化工具")
     parser.add_argument('--force', action='store_true', help="启用重置模式（会清空旧数据）")
     args = parser.parse_args()

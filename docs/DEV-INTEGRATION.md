@@ -43,21 +43,23 @@ python run.py
 
 ## 首次初始化
 
+不要按 `init_db.py` → `init_vectordb.py --init-vector-db` → `init_config_center.py` 这条顺序做新环境。后两个带清空语义。
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python scripts/init_db.py
-python scripts/init_config_center.py   # 建议：配置中心默认项与 TR_MAX_TOKENS 等迁移
-pip install -r requirements.txt
+copy .env.example .env
+python scripts/init_first_run.py
 ```
+
+或直接 `python run.py`。第一次会建表、写三类账号、写配置中心缺省项、创建向量库文件，并写入游标 `first_run`。再启动不会重做。`init_vectordb.py --init-vector-db` 和 `init_config_center.py --force` 只用于确认要清空的时候。
 
 配置中心说明见 [CONFIG-CENTER.md](./CONFIG-CENTER.md)；词元键见 [../frontend/docs/TOKEN-CONFIG.md](../frontend/docs/TOKEN-CONFIG.md)。
 
 ### 登录与 RBAC（多用户联调）
 
 - 完整说明：[AUTH-RBAC.md](./AUTH-RBAC.md)
-- `.env` 中 `AUTH_REQUIRE_AUTH=true` 后需登录；默认引导超管 `admin` / `TestPilot@2026`（未设 `AUTH_BOOTSTRAP_SUPER_PASSWORD` 时）
-- 三角色演示账号：`python scripts/seed_demo_users.py`（仅开发）
-- 轻量认证测试：`pytest tests/test_auth_rbac.py tests/test_password_policy.py -q`
+- 默认 `AUTH_REQUIRE_AUTH=true`。首次初始化账号为 `admin` / `manager` / `member`，密码未设置时都是 `TestPilot@2026`。登录页不提示。
+- 白盒：`pytest tests/test_first_run_bootstrap.py tests/test_auth_rbac.py tests/test_password_policy.py -q`
 
 ## 常见问题
 

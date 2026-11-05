@@ -18,7 +18,6 @@
               <TpButton variant="ghost" size="sm" :loading="listRefreshLoading" @click="handleRefresh">
                 {{ t('common.actions.refresh') }}
               </TpButton>
-              <span v-if="caseRagStatusLabel" class="whitespace-nowrap text-xs text-muted-foreground">{{ caseRagStatusLabel }}</span>
               <TpButton
                 variant="primary"
                 size="sm"
@@ -440,7 +439,6 @@ import TpButton from '@/components/ui/base/TpButton.vue';
 import TpTruncateText from '@/components/ui/base/TpTruncateText.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
 import { useAiResult } from '@/composables/useAiResult';
-import { useCaseGenerationRagStatus } from '@/composables/useCaseGenerationRagStatus';
 import { usePageNotifier, type PageNoticeExtras } from '@/composables/usePageNotifier';
 import {
   analyzeDocument,
@@ -467,7 +465,6 @@ interface SelectOption {
 const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const { label: caseRagStatusLabel, refresh: refreshCaseRagStatus } = useCaseGenerationRagStatus();
 const documents = ref<DocumentRecord[]>([]);
 const currentAnalysis = ref<DocumentAnalysisResult | null>(null);
 const selectedDocumentKey = ref<string>('');
@@ -1573,7 +1570,6 @@ async function handleExportRequirements() {
 }
 
 onMounted(async () => {
-  void refreshCaseRagStatus();
   await loadDocuments(1, 'initial');
   await handleUploadRouteAction();
   await handleRequirementRouteAction();

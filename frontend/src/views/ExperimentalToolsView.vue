@@ -6,12 +6,6 @@
       :title="t('experimentalToolsPage.disabled.title')"
       :message="t('experimentalToolsPage.disabled.message')"
     />
-    <BaseState
-      v-else-if="sessionLoading"
-      variant="loading"
-      :title="t('experimentalToolsPage.sessionPreparing')"
-    />
-
     <template v-else>
       <PagePanel
         :title="t('experimentalToolsPage.page.title')"
@@ -238,7 +232,6 @@ const { showNotice } = usePageNotifier();
 const pageRootClass = pageRootMarkedClass('experimental-tools');
 
 const featureUnavailable = ref(false);
-const sessionLoading = ref(true);
 const sessionId = ref('');
 const experimentalToolId = ref(EXPERIMENTAL_TOOL_DEFS[0].id);
 const toolFields = ref<Record<string, string | number | boolean>>(defaultFieldValuesForTool(EXPERIMENTAL_TOOL_DEFS[0].id));
@@ -469,7 +462,6 @@ async function openSkeletonFromGaps() {
 }
 
 async function ensureSession() {
-  sessionLoading.value = true;
   try {
     let id = localStorage.getItem(EXP_SESSION_KEY) || '';
     if (!id) {
@@ -480,8 +472,6 @@ async function ensureSession() {
     sessionId.value = id;
   } catch (error) {
     showNotice('danger', getUserFacingErrorMessage(error, t('chat.message.loadSessionsFailed')));
-  } finally {
-    sessionLoading.value = false;
   }
 }
 
@@ -534,7 +524,9 @@ async function applyRouteQuery() {
 }
 
 async function runTool() {
-  if (toolRunning.value || !sessionId.value) return;
+  if (toolRunning.value) return;
+  await ensureSession();
+  if (!sessionId.value) return;
   const toolId = experimentalToolId.value;
   if (validateExperimentalToolForm(toolId, toolFields.value)) {
     showNotice('warning', t('chat.experimentalTools.validationFailed'));
@@ -626,7 +618,6 @@ async function cancelPending() {
 onMounted(async () => {
   await loadHealth();
   if (!featureUnavailable.value) {
-    await ensureSession();
     await applyRouteQuery();
   }
 });

@@ -682,7 +682,7 @@ def clear_database():
             ChatSession, ToolExecutionLog, LlmUsageLog,
         )
         from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule
-        from models.auth_models import AuthAuditLog, Department, User, UserSession
+        from models.auth_models import AuthAuditLog, BootstrapMarker, Department, User, UserSession
 
         app = create_app()
 
@@ -703,11 +703,12 @@ def clear_database():
                 'config_audit_logs': ConfigAuditLog.query.delete(),
                 'config_validation_rules': ConfigValidationRule.query.delete(),
                 'config_items': ConfigItem.query.delete(),
-                # 下次启动 run_auth_migrations() 会重建默认部门和引导超管
+                # 同时删掉首次初始化游标，下次启动才会重建三类账号和配置缺省项
                 'user_sessions': UserSession.query.delete(),
                 'auth_audit_logs': AuthAuditLog.query.delete(),
                 'users': User.query.delete(),
                 'departments': Department.query.delete(),
+                'app_bootstrap_markers': BootstrapMarker.query.delete(),
             }
             
             # 提交更改

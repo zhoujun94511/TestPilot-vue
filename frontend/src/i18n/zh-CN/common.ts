@@ -21,7 +21,7 @@ export default {
     expandSidebar: '展开侧边栏',
     openMenu: '打开菜单',
     logout: '退出登录',
-    account: '个人设置',
+    account: '个人管理',
     signedInAs: '已登录：{name}',
     closeMenu: '关闭菜单',
     switchToChinese: '切换到中文',
