@@ -47,22 +47,27 @@ export function usePaginatedList<TRow>(
   }
 ) {
   const loading = useListTableLoading(rows, { refreshLoading: options?.refreshLoading });
+  let requestSeq = 0;
 
+  /** 连续翻页或改筛选时，只有最后一次请求的结果会写入列表 */
   async function loadPage(
     page: number,
     mode: ListFetchMode,
     fetcher: () => Promise<PaginatedFetchResult<TRow>>,
     fail?: LoadFailOptions
   ): Promise<PaginatedFetchResult<TRow> | undefined> {
+    const seq = ++requestSeq;
     loading.beginLoad(mode);
     try {
       const result = await fetcher();
+      if (seq !== requestSeq) return undefined;
       rows.value = result.rows;
       if (options?.pagination) {
         options.pagination.value = result.pagination;
       }
       return result;
     } catch (error) {
+      if (seq !== requestSeq) return undefined;
       if (fail) {
         loading.failLoad(fail.resolveMessage(error), fail.onClear);
       } else {
@@ -70,7 +75,7 @@ export function usePaginatedList<TRow>(
       }
       return undefined;
     } finally {
-      loading.endLoad();
+      if (seq === requestSeq) loading.endLoad();
     }
   }
 

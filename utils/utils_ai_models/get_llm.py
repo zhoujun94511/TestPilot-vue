@@ -106,8 +106,8 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
         # 根据模型类型设置不同的参数
         if "gpt-5" in model_name:
             # verbosity 只支持 'low', 'medium', 'high'，不支持 'minimal'
-            verbosity = os.getenv("GPT5_VERBOSITY", "low")
-            reasoning_effort = os.getenv("GPT5_REASONING_EFFORT", "low")
+            verbosity = getattr(settings, 'GPT5_VERBOSITY', None) or "low"
+            reasoning_effort = getattr(settings, 'GPT5_REASONING_EFFORT', None) or "low"
             # GPT-5 使用 max_completion_tokens 而不是 max_tokens
             llm = ChatOpenAI(
                 api_key=SecretStr(api_key),
@@ -131,9 +131,9 @@ def get_llm(company: str, use_cache: bool = True, use_case: str = 'chat'):
             )
 
     elif company == "OLLAMA":
-        model = os.getenv("OLLAMA_MODEL")
+        model = getattr(settings, 'OLLAMA_MODEL', None)
         if not model:
-            raise ValueError("请在 .env 中设置 OLLAMA_MODEL，例如 OLLAMA_MODEL=gemma:2b")
+            raise ValueError("请在配置中心设置 OLLAMA_MODEL，例如 gemma:2b")
         
         # 注意：ChatOllama 不支持 timeout 参数，超时由 base_url 的 HTTP 客户端控制
         llm = ChatOllama(

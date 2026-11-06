@@ -21,6 +21,8 @@ export interface AppNavItem {
   icon: AppNavIcon;
   /** 开启 AUTH_REQUIRE_AUTH 时可见角色；未设置则所有已登录/匿名用户可见 */
   roles?: AppNavRole[];
+  /** 后端功能开关关闭时隐藏 */
+  featureFlag?: 'experimentalActionsEnabled' | 'enableVectorStore';
   /** 用于面包屑的模块根路径前缀 */
   sectionPrefix?: string;
   sectionLabelKey?: string;
@@ -84,7 +86,8 @@ export const appNavGroups: AppNavGroup[] = [
       {
         to: '/experimental-tools',
         labelKey: 'common.nav.experimentalTools',
-        icon: Sparkles
+        icon: Sparkles,
+        featureFlag: 'experimentalActionsEnabled'
       }
     ]
   },

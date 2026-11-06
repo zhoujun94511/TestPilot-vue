@@ -218,6 +218,18 @@ function toggleRow(key: string | number, checked: boolean) {
 function toggleAll(checked: boolean) {
   emit('toggleAll', checked);
   if (props.managedSelectAll) return;
-  emit('update:selectedKeys', checked ? props.data.map((row) => resolveRowKey(row)) : []);
+  const pageKeys = props.data.map((row) => resolveRowKey(row));
+  if (!checked) {
+    const pageKeySet = new Set(pageKeys.map((key) => String(key)));
+    const selectedOutsidePage = selectedKeys.value.some((key) => !pageKeySet.has(String(key)));
+    if (selectedOutsidePage) {
+      emit('update:selectedKeys', []);
+      return;
+    }
+  }
+  const next = new Set(selectedKeys.value);
+  if (checked) pageKeys.forEach((key) => next.add(key));
+  else pageKeys.forEach((key) => next.delete(key));
+  emit('update:selectedKeys', Array.from(next));
 }
 </script>

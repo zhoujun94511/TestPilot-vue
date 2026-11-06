@@ -1,11 +1,15 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+import hashlib
 import sys
 import os
-from typing import Dict, Any, List, Optional
+import threading
+from collections.abc import Buffer
+from typing import Dict, Any, List, Optional, cast
 from pathlib import Path
 from utils.utils_business_logic.requirements_analyze import analyze_requirement
-from utils.utils_performance_monitoring.token_monitor import count_tokens, record_llm_call
+from utils.utils_performance_monitoring.token_monitor import count_tokens, ensure_session_budget, record_message_usage
+from utils.utils_performance_monitoring.token_session import TokenSessionLimitExceeded
 from utils.utils_performance_monitoring.performance_monitor import get_performance_monitor
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -15,13 +19,69 @@ from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 文件解析和格式检查只接住读写、编码和解析步骤实际会抛出的异常
+_FILE_ERRORS = (OSError, ValueError, TypeError, UnicodeError, ImportError, LookupError)
+
 from utils.utils_core.common_utils import generate_id
 from utils.utils_core.api_error_handler import build_model_error_result
 from utils.utils_core import error_codes as ec
 from models.models import Requirement
 from config.settings import settings
 
+_analysis_inflight: set[str] = set()
+_analysis_inflight_guard = threading.Lock()
 
+
+def claim_document_analysis(source_key: str) -> bool:
+    """同一文档只允许一个分析任务。键名不区分大小写。"""
+    key = (source_key or '').strip().lower() or 'inline-content'
+    with _analysis_inflight_guard:
+        if key in _analysis_inflight:
+            return False
+        _analysis_inflight.add(key)
+        return True
+
+
+def release_document_analysis(source_key: str) -> None:
+    key = (source_key or '').strip().lower() or 'inline-content'
+    with _analysis_inflight_guard:
+        _analysis_inflight.discard(key)
+
+
+def analysis_busy_result() -> Dict[str, Any]:
+    return {
+        'success': False,
+        'message': '该文档正在分析，请等待当前分析结束后再试',
+        'error': 'analysis_in_progress',
+        'error_code': 'analysis_in_progress',
+        'status_code': 409,
+        'retryable': True,
+    }
+
+
+def delete_requirements(query) -> int:
+    """删除查询命中的需求，并把引用这些需求的用例改为未关联；不提交事务。"""
+    from models.models import TestCase, db
+
+    req_ids = [row[0] for row in query.with_entities(Requirement.req_id).all() if row[0]]
+    if not req_ids:
+        return 0
+    for start in range(0, len(req_ids), 500):
+        chunk = req_ids[start:start + 500]
+        TestCase.query.filter(TestCase.requirement_id.in_(chunk)).update(
+            {'requirement_id': None}, synchronize_session=False
+        )
+        Requirement.query.filter(Requirement.req_id.in_(chunk)).delete(synchronize_session=False)
+    db.session.flush()
+    return len(req_ids)
+
+
+def _analysis_source_key(file_path: str = None, content: str = None) -> str:
+    if file_path:
+        return Path(file_path).name.lower()
+    encoded = (content or '')[:4000].encode('utf-8', errors='ignore')
+    digest = hashlib.sha1(cast(Buffer, encoded)).hexdigest()
+    return f'content:{digest}'
 
 
 class DocumentService:
@@ -33,20 +93,10 @@ class DocumentService:
 
     @staticmethod
     def _normalize_priority(value: str = 'medium') -> str:
-        """统一优先级口径为 P0-P3。"""
-        key = str(value or '').strip().lower()
-        mapping = {
-            'p0': 'P0',
-            'critical': 'P0',
-            'high': 'P1',
-            'p1': 'P1',
-            'medium': 'P2',
-            'normal': 'P2',
-            'p2': 'P2',
-            'low': 'P3',
-            'p3': 'P3'
-        }
-        return mapping.get(key, 'P2')
+        """统一优先级口径为 P0-P4。"""
+        from services.case_field_filters import normalize_priority
+
+        return normalize_priority(value)
 
     def analyze_document_file(
             self,
@@ -65,6 +115,20 @@ class DocumentService:
         Returns:
             分析结果
         """
+        source_key = _analysis_source_key(file_path=file_path)
+        if not claim_document_analysis(source_key):
+            return analysis_busy_result()
+        try:
+            return self._analyze_document_file_body(file_path, analysis_type, llm)
+        finally:
+            release_document_analysis(source_key)
+
+    def _analyze_document_file_body(
+            self,
+            file_path: str,
+            analysis_type: str,
+            llm
+    ) -> Dict[str, Any]:
         try:
             if not os.path.exists(file_path):
                 return {
@@ -98,10 +162,11 @@ class DocumentService:
                         'message': '文件内容为空或无法解析',
                         'error': 'empty_content'
                     }
-            except Exception as e:
+            except _FILE_ERRORS as error:
+                logger.error(f"文件解析失败: {error}", exc_info=True)
                 return {
                     'success': False,
-                    'message': f'文件解析失败: {str(e)}',
+                    'message': '文件解析失败',
                     'error': ec.FILE_PARSE_FAILED,
                     'error_code': ec.FILE_PARSE_FAILED,
                     'status_code': 400,
@@ -137,8 +202,7 @@ class DocumentService:
             return build_model_error_result(
                 getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'),
                 e,
-                fallback_message='文档分析失败',
-                include_raw_error=True
+                fallback_message='文档分析失败'
             )
 
     @staticmethod
@@ -149,26 +213,30 @@ class DocumentService:
             priority: Optional[str] = None,
             status: Optional[str] = None,
             source_file: str = '',
-            search: str = ''
+            search: str = '',
+            exact_source: bool = False
     ) -> Dict[str, Any]:
-        """查询需求列表（筛选 + 分页）。"""
+        """查询需求列表（筛选 + 分页）。exact_source 时 source_file 按文件名精确匹配。"""
         try:
             from services.data_scope import apply_data_scope
 
             query = apply_data_scope(Requirement.query, Requirement, 'requirements')
 
-            from services.sql_query_helpers import filter_column_eq
+            from services.sql_query_helpers import filter_column_eq, filter_like_contains, path_name_matches
 
             query = filter_column_eq(query, Requirement.type, req_type)
             query = filter_column_eq(query, Requirement.priority, priority)
             query = filter_column_eq(query, Requirement.status, status)
             if source_file:
-                query = query.filter(Requirement.source_file.contains(source_file))
+                if exact_source:
+                    query = query.filter(path_name_matches(Requirement.source_file, source_file))
+                else:
+                    query = filter_like_contains(query, Requirement.source_file, source_file)
             if search:
                 query = query.filter(
-                    Requirement.title.contains(search) |
-                    Requirement.content.contains(search) |
-                    Requirement.req_id.contains(search)
+                    Requirement.title.contains(search, autoescape=True) |
+                    Requirement.content.contains(search, autoescape=True) |
+                    Requirement.req_id.contains(search, autoescape=True)
                 )
 
             query = query.order_by(Requirement.created_time.desc())
@@ -195,7 +263,7 @@ class DocumentService:
             return {
                 'success': False,
                 'message': '获取需求列表失败',
-                'error': str(e)
+                'error': 'internal_error'
             }
 
     def analyze_document_content(
@@ -215,6 +283,20 @@ class DocumentService:
         Returns:
             分析结果
         """
+        source_key = _analysis_source_key(content=content)
+        if not claim_document_analysis(source_key):
+            return analysis_busy_result()
+        try:
+            return self._analyze_document_content_body(content, analysis_type, llm)
+        finally:
+            release_document_analysis(source_key)
+
+    def _analyze_document_content_body(
+            self,
+            content: str,
+            analysis_type: str,
+            llm
+    ) -> Dict[str, Any]:
         try:
             if not content.strip():
                 return {
@@ -258,8 +340,7 @@ class DocumentService:
             return build_model_error_result(
                 getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'),
                 e,
-                fallback_message='内容分析失败',
-                include_raw_error=True
+                fallback_message='内容分析失败'
             )
 
     def _analyze_content(
@@ -271,11 +352,8 @@ class DocumentService:
     ) -> Dict[str, Any]:
         """内部分析方法"""
         try:
-            # Token计数和记录
+            # 仅作为响应里的估算字段。实际用量在模型返回后按 usage 记账。
             estimated_tokens = count_tokens(content)
-            record_llm_call(
-                estimated_tokens, is_actual=True, input_text=content, source='document_analysis'
-            )
 
             if analysis_type == 'requirements':
                 # 需求分析
@@ -424,30 +502,53 @@ class DocumentService:
                                     'priority': self._normalize_priority(req.get('priority', 'medium')),
                                     'category': req.get('category', 'general')
                                 })
+                except TokenSessionLimitExceeded:
+                    raise
                 except Exception as e:
                     logger.error(f"综合分析 - 需求分析失败: {e}", exc_info=True)
                 
                 try:
                     # 2. 测试点提取
                     test_points = self._extract_test_points(content, llm)
+                except TokenSessionLimitExceeded:
+                    raise
                 except Exception as e:
                     logger.error(f"综合分析 - 测试点提取失败: {e}", exc_info=True)
                 
                 try:
                     # 3. 业务规则提取
                     business_rules = self._extract_business_rules(content, llm)
+                except TokenSessionLimitExceeded:
+                    raise
                 except Exception as e:
                     logger.error(f"综合分析 - 业务规则提取失败: {e}", exc_info=True)
                 
-                # 合并所有结果并覆盖该文档上一次的分析记录
+                # 合并所有结果并覆盖该文档上一次的分析记录；哪一部分失败或为空就保留那部分的旧结果
                 requirement_rows = requirements_result or []
                 point_rows = self._rows_from_extracted_items(test_points, 'test_point')
                 rule_rows = self._rows_from_extracted_items(business_rules, 'business_rule')
+                keep_types = set()
+                if not point_rows:
+                    keep_types.add('test_point')
+                if not rule_rows:
+                    keep_types.add('business_rule')
+                if not requirement_rows:
+                    keep_types.update(self._previous_requirement_types(file_path) - {'test_point', 'business_rule'})
                 total_items = len(requirement_rows) + len(point_rows) + len(rule_rows)
+                if total_items == 0:
+                    return {
+                        'success': False,
+                        'message': '综合分析没有提取到需求、测试点或业务规则，原有结果已保留',
+                        'error': ec.EMPTY_CONTENT,
+                        'error_code': ec.EMPTY_CONTENT,
+                        'status_code': 422,
+                        'retryable': True,
+                    }
                 saved_requirements, save_error = self._persist_requirement_rows(
                     requirement_rows + point_rows + rule_rows,
                     file_path,
-                    replace_all=True
+                    replace_all=True,
+                    keep_types=keep_types,
                 )
                 if save_error:
                     return {
@@ -494,8 +595,7 @@ class DocumentService:
             return build_model_error_result(
                 getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'),
                 e,
-                fallback_message='分析处理失败',
-                include_raw_error=True
+                fallback_message='分析处理失败'
             )
 
     def _rows_from_extracted_items(self, items: List[Dict[str, Any]], row_type: str) -> List[Dict[str, Any]]:
@@ -526,8 +626,30 @@ class DocumentService:
         return rows
 
     @staticmethod
-    def _persist_requirement_rows(rows: List[Dict[str, Any]], file_path: str = None, replace_types=None, replace_all: bool = False):
-        """按来源文件覆盖旧记录后再写入。空结果不删除已有数据。"""
+    def _previous_requirement_types(file_path: str = None) -> set:
+        """这份文档上一次分析留下的需求类型（当前用户范围内）。"""
+        from models.models import Requirement
+        from pathlib import Path
+
+        if not file_path:
+            return set()
+        from services.sql_query_helpers import path_name_matches
+        from services.stats_scope import scoped_requirements_query
+
+        rows = (
+            scoped_requirements_query()
+            .filter(path_name_matches(Requirement.source_file, Path(file_path).name))
+            .with_entities(Requirement.type)
+            .distinct()
+            .all()
+        )
+        return {row[0] for row in rows if row and row[0]}
+
+    @staticmethod
+    def _persist_requirement_rows(rows: List[Dict[str, Any]], file_path: str = None, replace_types=None,
+                                  replace_all: bool = False, keep_types=None):
+        """按来源文件覆盖旧记录后再写入。空结果不删除已有数据。
+        replace_all 时 keep_types 里的类型不删，用于综合分析里失败的那部分保留旧结果。"""
         from models.models import Requirement, db
         from pathlib import Path
 
@@ -537,11 +659,21 @@ class DocumentService:
         source_filename = Path(file_path).name if file_path else None
         try:
             if source_filename:
-                query = Requirement.query.filter(Requirement.source_file == source_filename)
-                if replace_all:
-                    query.delete(synchronize_session=False)
+                from services.sql_query_helpers import path_name_matches
+                from services.stats_scope import scoped_requirements_query
+
+                query = scoped_requirements_query().filter(path_name_matches(Requirement.source_file, source_filename))
+                if replace_all and keep_types:
+                    from sqlalchemy import or_
+
+                    delete_requirements(query.filter(or_(
+                        Requirement.type.is_(None),
+                        Requirement.type.notin_(list(keep_types)),
+                    )))
+                elif replace_all:
+                    delete_requirements(query)
                 elif replace_types:
-                    query.filter(Requirement.type.in_(list(replace_types))).delete(synchronize_session=False)
+                    delete_requirements(query.filter(Requirement.type.in_(list(replace_types))))
 
             saved = []
             for row in rows:
@@ -558,7 +690,7 @@ class DocumentService:
                     title=row.get('title') or row['req_id'],
                     content=row.get('content') or '',
                     type=row.get('type'),
-                    priority=row.get('priority') or 'medium',
+                    priority=DocumentService._normalize_priority(row.get('priority') or 'medium'),
                     status='active',
                     source_file=source_filename
                 )
@@ -598,7 +730,9 @@ class DocumentService:
             prompt = PromptTemplate.from_template(prompt_template)
             formatted_prompt = prompt.format(content=content, language_instruction=language_instruction)
             
+            ensure_session_budget()
             response = llm.invoke(formatted_prompt)
+            record_message_usage(response, source='document_analysis')
             
             # 获取响应内容
             if hasattr(response, 'content'):
@@ -649,6 +783,8 @@ class DocumentService:
             
             return standardized_points[:20]  # 限制返回数量
 
+        except TokenSessionLimitExceeded:
+            raise
         except Exception as e:
             logger.error(f"测试点提取失败: {e}", exc_info=True)
             return []
@@ -676,7 +812,9 @@ class DocumentService:
             prompt = PromptTemplate.from_template(prompt_template)
             formatted_prompt = prompt.format(content=content, language_instruction=language_instruction)
             
+            ensure_session_budget()
             response = llm.invoke(formatted_prompt)
+            record_message_usage(response, source='document_analysis')
             
             # 获取响应内容
             if hasattr(response, 'content'):
@@ -727,6 +865,8 @@ class DocumentService:
             
             return standardized_rules[:15]  # 限制返回数量
 
+        except TokenSessionLimitExceeded:
+            raise
         except Exception as e:
             logger.error(f"业务规则提取失败: {e}", exc_info=True)
             return []
@@ -782,18 +922,20 @@ class DocumentService:
                     }
                 }
 
-            except Exception as e:
+            except _FILE_ERRORS as error:
+                logger.error(f"文件内容读取失败: {error}", exc_info=True)
                 return {
                     'valid': False,
-                    'message': f'文件内容读取失败: {str(e)}',
+                    'message': '文件内容读取失败',
                     'error': 'content_read_failed'
                 }
 
-        except Exception as e:
+        except _FILE_ERRORS as error:
+            logger.error(f"文档验证失败: {error}", exc_info=True)
             return {
                 'valid': False,
-                'message': f'文档验证失败: {str(e)}',
-                'error': str(e)
+                'message': '文档验证失败',
+                'error': 'internal_error'
             }
 
     @staticmethod
@@ -832,7 +974,9 @@ class DocumentService:
             请用中文回答，控制在200字以内。
             """
 
+            ensure_session_budget()
             response = llm.invoke(prompt)
+            record_message_usage(response, source='document_analysis')
             summary = response.content if hasattr(response, 'content') else str(response)
 
             return {
@@ -846,6 +990,5 @@ class DocumentService:
             return build_model_error_result(
                 getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'),
                 e,
-                fallback_message='摘要生成失败',
-                include_raw_error=True
+                fallback_message='摘要生成失败'
             )

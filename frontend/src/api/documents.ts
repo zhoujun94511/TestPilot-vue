@@ -1,4 +1,4 @@
-import http, { del, get, post, put } from './http';
+import http, { del, get, LONG_TASK_TIMEOUT_MS, post, put } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -76,6 +76,7 @@ export interface DocumentRequirementRecord {
   source_file?: string;
   is_test_point?: boolean;
   is_business_rule?: boolean;
+  updated_time?: string | null;
   raw?: Record<string, unknown>;
 }
 
@@ -120,6 +121,7 @@ export interface RequirementUpdatePayload {
   type?: string;
   priority?: string;
   status?: string;
+  updated_time?: string | null;
 }
 
 export interface DocumentRequirementsQuery {
@@ -129,6 +131,8 @@ export interface DocumentRequirementsQuery {
   priority?: string;
   status?: string;
   source_file?: string;
+  /** source_file 按存储文件名精确匹配 */
+  exact_source?: boolean;
   search?: string;
 }
 
@@ -209,6 +213,7 @@ function normalizeRequirementRecord(raw: Record<string, unknown>, index = 0, opt
     source_file: String(pickCompatField(raw, ['source_file', 'source'], options.source_file || '')),
     is_test_point: Boolean(pickCompatField(raw, ['is_test_point'], options.is_test_point || false)),
     is_business_rule: Boolean(pickCompatField(raw, ['is_business_rule'], options.is_business_rule || false)),
+    updated_time: (pickCompatField(raw, ['updated_time', 'updated_at'], options.updated_time ?? null) as string | null) || null,
     raw
   };
 }
@@ -338,6 +343,7 @@ export async function listDocuments(
 export async function uploadDocument(formData: FormData): Promise<DocumentUploadResponse> {
   try {
     const response = await post<unknown>('/documents/upload', formData, {
+      timeout: LONG_TASK_TIMEOUT_MS,
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
@@ -371,7 +377,7 @@ export async function uploadDocument(formData: FormData): Promise<DocumentUpload
 
 export async function analyzeDocument(payload: DocumentAnalysisPayload): Promise<DocumentAnalysisResult> {
   try {
-    const response = await post<unknown>('/documents/analyze', payload);
+    const response = await post<unknown>('/documents/analyze', payload, { timeout: LONG_TASK_TIMEOUT_MS });
     const rawPayload = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to analyze document'
     });
@@ -406,7 +412,7 @@ export async function getDocumentRequirements(params: DocumentRequirementsQuery 
 
 export async function reanalyzeDocument(documentId: string, payload: { analysis_type?: DocumentAnalysisType } = {}): Promise<DocumentAnalysisResult> {
   try {
-    const response = await post<unknown>(`/documents/${encodeURIComponent(documentId)}/reanalyze`, payload);
+    const response = await post<unknown>(`/documents/${encodeURIComponent(documentId)}/reanalyze`, payload, { timeout: LONG_TASK_TIMEOUT_MS });
     const rawPayload = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to reanalyze document'
     });
@@ -536,7 +542,8 @@ export async function exportRequirementsExcel(params: {
         status: params.status,
         req_ids: Array.isArray(params.req_ids) && params.req_ids.length ? params.req_ids.join(',') : undefined
       },
-      responseType: 'blob'
+      responseType: 'blob',
+      timeout: LONG_TASK_TIMEOUT_MS
     });
     return {
       blob: response.data as Blob,

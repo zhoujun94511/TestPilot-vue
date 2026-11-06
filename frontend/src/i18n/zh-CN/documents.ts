@@ -1,29 +1,23 @@
 export default {
   page: {
-    title: '需求文档分析',
-    subtitle: '上传需求文档，触发分析，并将分析结果生成测试用例'
+    title: '需求文档分析'
   },
   tabs: {
     upload: '需求文档上传',
     manage: '需求文档与需求管理',
     history: '需求历史'
   },
-  toolbar: {
-    manageLead: '上传并分析文档；选中列表项后可批量维护或生成用例。',
-    historyLead: '浏览历史需求；选中后可生成用例或批量删除。',
-    generateSettings: '生成设置'
-  },
   actions: {
     upload: '上传文档',
     backToDocuments: '返回文档分析',
     analyzeCurrent: '分析当前',
     reanalyze: '重新分析',
-    refresh: '刷新列表',
     generateCases: '生成测试用例',
     exportRequirements: '导出需求',
     exportingRequirements: '导出需求中',
     analyzing: '分析中',
     generating: '生成中',
+    generatingProgress: '已完成 {done}/{total}，已入库 {saved}',
     uploading: '上传中',
     deleteDocuments: '删除文档',
     deleteRequirements: '删除需求',
@@ -44,7 +38,6 @@ export default {
     fileHint: '支持 TXT / CSV / DOCX / PDF / JSON / MD / XLSX / YAML',
     analysisType: '默认分析类型',
     empty: '请选择一个文档后再上传',
-    autoAnalyzeHint: '上传后可自动分析并进入结果页',
     autoAnalyzeToggle: '上传后自动分析并打开结果'
   },
   table: {
@@ -81,12 +74,11 @@ export default {
   },
   history: {
     title: '已解析历史需求',
-    subtitle: '查看并管理所有已落库的需求解析结果',
     loading: '正在加载历史需求...',
     empty: '暂无历史需求',
     source: '来源文档',
     sourceAll: '全部来源文档',
-    selectedRequirementsCount: '已选需求 {count} 条（跨分页）',
+    selectedRequirementsCount: '已选需求 {count} 条',
     searchPlaceholder: '搜索',
     typeAll: '全部类型',
     priorityAll: '全部优先级'
@@ -98,7 +90,7 @@ export default {
     businessRulesCount: '业务规则数量',
     totalCount: '总计',
     selected: '已选文档',
-    selectedDocumentsCount: '已选文档 {count} 个（跨分页）'
+    selectedDocumentsCount: '已选文档 {count} 个'
   },
   requirement: {
     id: '编号',
@@ -121,8 +113,10 @@ export default {
     uploadFailed: '文档上传失败',
     analyzeSuccess: '文档分析成功',
     analyzeFailed: '文档分析失败',
+    analyzeInProgress: '该文档正在分析，请等待当前分析结束',
     generateSuccess: '测试用例生成已触发',
     generateFailed: '生成测试用例失败',
+    generatePartial: '已入库 {saved} 条用例，{failed} 条需求失败。已入库的用例已保留。',
     exportRequirementsSuccess: '需求导出已开始',
     exportRequirementsFailed: '导出需求失败',
     selectDocumentFirst: '请先选择一个文档',
@@ -144,8 +138,8 @@ export default {
   confirm: {
     generateCases: '是否基于当前分析结果生成测试用例？',
     batchGenerateTitle: '批量生成确认',
-    batchGenerateByRequirementsMessage: '批量生成：将处理需求 {reqCount} 条（按每需求3条，约 {caseCount} 条用例）。继续？',
-    batchGenerateByDocumentsMessage: '批量生成：文档 {count} 个，处理需求 {reqCount} 条（约 {caseCount} 条用例），跳过未分析 {skippedCount} 个。继续？',
+    batchGenerateByRequirementsMessage: '批量生成：将处理需求 {reqCount} 条（每需求 {perReq} 条，约 {caseCount} 条用例）。继续？',
+    batchGenerateByDocumentsMessage: '批量生成：文档 {count} 个，处理需求 {reqCount} 条（每需求 {perReq} 条，约 {caseCount} 条用例），跳过未分析 {skippedCount} 个。继续？',
     deleteDocuments: '确认删除选中文档吗？删除后无法恢复。',
     deleteRequirements: '确认删除选中需求吗？删除后无法恢复。'
   }

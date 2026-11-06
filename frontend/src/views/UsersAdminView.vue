@@ -2,7 +2,6 @@
   <section class="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
     <PagePanel
       :title="t('admin.users.page.title')"
-      :subtitle="t('admin.users.page.subtitle')"
     >
       <template #actions>
         <TpButton
@@ -58,9 +57,6 @@
             message: t('admin.users.hint.authOff')
           }"
         />
-        <p v-else-if="authStore.hasRole('admin')" class="text-sm text-muted-foreground">
-          {{ t('admin.users.hint.adminScope') }}
-        </p>
         <p
           v-if="authStore.authRequired && authStore.registerEnabled && authStore.registerRequiresApproval"
           class="text-sm text-muted-foreground"
@@ -76,7 +72,6 @@
         >
           <header :class="adminInlineFormHeaderClass">
             <h3 :class="sectionTitleClass">{{ t('admin.users.form.deptCreateTitle') }}</h3>
-            <p :class="sectionSubtitleClass">{{ t('admin.users.form.deptCreateHint') }}</p>
           </header>
           <div :class="adminInlineFormBodyClass">
             <div :class="adminInlineFormRowClass">
@@ -645,38 +640,47 @@ function syncUsersPagination() {
   };
 }
 
+let usersRequestSeq = 0;
+let auditRequestSeq = 0;
+
 async function reload(mode: ListFetchMode = 'refresh') {
+  const seq = ++usersRequestSeq;
   beginUsersLoad(mode);
   if (mode === 'initial' || !users.value.length) {
     error.value = '';
   }
   try {
     const [userRows, deptRows] = await Promise.all([fetchManagedUsers(), fetchDepartments()]);
+    if (seq !== usersRequestSeq) return;
     users.value = userRows;
     departments.value = deptRows;
     syncUsersPagination();
     error.value = '';
   } catch (err) {
+    if (seq !== usersRequestSeq) return;
     error.value = getUserFacingErrorMessage(err, t('common.errors.requestFailed'));
   } finally {
-    endUsersLoad();
+    if (seq === usersRequestSeq) endUsersLoad();
   }
 }
 
 async function loadAuditLogs(page = auditPagination.value.page ?? 1, mode: ListFetchMode = 'refresh') {
+  const seq = ++auditRequestSeq;
   beginAuditLoad(mode);
   if (mode === 'initial' || !auditLogs.value.length) {
     auditError.value = '';
   }
   try {
     const result = await fetchAuthAuditLogs(page, ADMIN_LIST_PER_PAGE);
+    if (seq !== auditRequestSeq) return;
     auditLogs.value = result.logs;
     auditPagination.value = result.pagination;
     auditError.value = '';
   } catch (err) {
+    if (seq !== auditRequestSeq) return;
     auditError.value = getUserFacingErrorMessage(err, t('common.errors.requestFailed'));
   } finally {
-    endAuditLoad();
+    if (seq === auditRequestSeq) endAuditLoad();
   }
 }
 

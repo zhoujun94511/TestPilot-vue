@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section :class="pageRootMarkedClass(pageMarkerCases)">
     <PageNoticeBanner
       :notice="pageBanner"
@@ -13,7 +13,7 @@
       <BaseState
         variant="loading"
         :title="batchLoading ? t('cases.actions.batchGenerating') : t('cases.actions.generating')"
-        :message="batchLoading ? t('cases.state.batchGeneratingHint') : t('cases.state.generatingHint')"
+        :message="batchLoading ? batchProgressMessage : undefined"
       />
     </PagePanel>
 
@@ -24,8 +24,6 @@
           as="textarea"
           class="mb-4"
           :label="t('cases.form.requirementLabel')"
-          :helper="t('cases.form.requirementHelper')"
-          helper-placement="label"
           :rows="8"
           :placeholder="t('cases.form.requirementPlaceholder')"
           required
@@ -45,8 +43,13 @@
           <TpButton variant="ghost" type="button" @click="clearSingleRequirementInput">
             {{ t('cases.actions.clearInput') }}
           </TpButton>
-          <TpButton type="submit" :loading="generateLoading" :disabled="generateLoading || !singleForm.requirementText.trim()">
-            {{ generateLoading ? t('cases.actions.generating') : t('cases.actions.generate') }}
+          <TpButton
+            type="submit"
+            :loading="generateLoading"
+            :disabled="!singleForm.requirementText.trim()"
+            :aria-label="generateLoading ? t('cases.actions.generating') : undefined"
+          >
+            {{ t('cases.actions.generate') }}
           </TpButton>
         </div>
       </form>
@@ -75,22 +78,18 @@
               :options="caseCountOptions"
             />
           </div>
-          <div :class="colSpan12Md6">
-            <TpInput
-              v-model="batchForm.processMode"
-              as="select"
-              :label="t('cases.batch.processModeLabel')"
-              :helper="t('cases.batch.processModeHelper')"
-              :options="processModeOptions"
-            />
-          </div>
         </div>
         <div :class="formActionsClass">
           <TpButton variant="ghost" type="button" @click="resetBatchForm">
             {{ t('cases.actions.clearInput') }}
           </TpButton>
-          <TpButton type="submit" :loading="batchLoading" :disabled="batchLoading || !batchForm.requirementsText.trim()">
-            {{ batchLoading ? t('cases.actions.batchGenerating') : t('cases.actions.batchGenerate') }}
+          <TpButton
+            type="submit"
+            :loading="batchLoading"
+            :disabled="!batchForm.requirementsText.trim()"
+            :aria-label="batchLoading ? t('cases.actions.batchGenerating') : undefined"
+          >
+            {{ t('cases.actions.batchGenerate') }}
           </TpButton>
         </div>
       </form>
@@ -100,38 +99,54 @@
       v-if="isManageMode"
       :class="manageSyncedHighlight && casesSyncHighlightClass"
       :title="t('cases.tabs.manage')"
-      :subtitle="t('cases.toolbar.manageLead')"
     >
       <template #actions>
         <div :class="pageToolbarStripClass">
           <TpButton variant="ghost" size="sm" :loading="listRefreshLoading" @click="handleRefresh">
             {{ t('common.actions.refresh') }}
           </TpButton>
-          <TpButton variant="primary" size="sm" :loading="exporting" :disabled="exporting" @click="handleExport">
-            {{ exporting ? t('cases.actions.exporting') : t('cases.actions.export') }}
-          </TpButton>
-          <ToolbarOverflowMenu>
-            <DropdownMenuLabel>{{ t('cases.actions.export') }}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup v-model="exportFormat">
-              <DropdownMenuRadioItem value="excel">
+          <DropdownMenu :modal="false">
+            <DropdownMenuTrigger as-child>
+              <TpButton
+                variant="primary"
+                size="sm"
+                type="button"
+                :loading="exporting"
+                :disabled="selectedCaseIds.length === 0"
+                :aria-label="exporting ? t('cases.actions.exporting') : undefined"
+              >
+                {{ t('cases.actions.export') }}
+              </TpButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" :side-offset="6">
+              <DropdownMenuItem
+                :disabled="exporting || selectedCaseIds.length === 0"
+                @select="handleExport('excel')"
+              >
                 {{ t('cases.actions.exportExcel') }}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="csv">
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                :disabled="exporting || selectedCaseIds.length === 0"
+                @select="handleExport('csv')"
+              >
                 {{ t('cases.actions.exportCsv') }}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="json">
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                :disabled="exporting || selectedCaseIds.length === 0"
+                @select="handleExport('json')"
+              >
                 {{ t('cases.actions.exportJson') }}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem :disabled="templateDownloading" @select="handleDownloadTemplate">
-              {{
-                templateDownloading
-                  ? t('cases.actions.templateDownloading')
-                  : t('cases.actions.downloadTemplate')
-              }}
-            </DropdownMenuItem>
-          </ToolbarOverflowMenu>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem :disabled="templateDownloading" @select="handleDownloadTemplate">
+                {{
+                  templateDownloading
+                    ? t('cases.actions.templateDownloading')
+                    : t('cases.actions.downloadTemplate')
+                }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </template>
 
@@ -142,7 +157,6 @@
             <KnowledgeStatsCard
               :label="card.label"
               :value="card.value"
-              :hint="card.hint"
               :icon="card.icon"
             />
           </div>
@@ -210,8 +224,17 @@
         <TableToolbar :title="t('cases.filters.title')">
           <template #actions>
             <span :class="tableToolbarSubtitle()">
-              {{ t('cases.filters.selectedCount', { count: selectedCaseIds.length }) }}
+              {{ selectionCountLabel }}
             </span>
+            <TpButton
+              v-if="showSelectAllMatching"
+              variant="secondary"
+              size="sm"
+              type="button"
+              @click="selectAllMatchingCases"
+            >
+              {{ t('common.toolbar.selectAllMatching', { count: pagination.total }) }}
+            </TpButton>
             <TpButton
               variant="danger"
               size="sm"
@@ -397,19 +420,18 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
 import { usePageNotifier } from '@/composables/usePageNotifier';
-import { resolveCaseCategoryDisplayName } from '@/utils/caseCategoryI18n';
+import { canonicalCaseCategory, resolveCaseCategoryDisplayName } from '@/utils/caseCategoryI18n';
 import BaseState from '@/components/common/BaseState.vue';
 import KnowledgeStatsCard from '@/components/common/KnowledgeStatsCard.vue';
 import PageNoticeBanner from '@/components/common/PageNoticeBanner.vue';
 import PagePanel from '@/components/common/PagePanel.vue';
 import TableToolbar from '@/components/common/TableToolbar.vue';
-import ToolbarOverflowMenu from '@/components/common/ToolbarOverflowMenu.vue';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { TableFilterForm, TableFilterInput, TableFilterSelect } from '@/components/common/table';
 import {
@@ -443,11 +465,11 @@ import {
   casesCellClamp2Class,
   casesCellClamp3Class,
   casesCellMetaClass,
-  casesExportFormatClass,
   casesRowHighlightClass,
   casesSyncHighlightClass
 } from '@/lib/cases-ui';
 import { parseBatchRequirementText } from '@/lib/cases-batch-requirements';
+import { CASE_COUNT_CHOICES, MAX_CASES_PER_REQUIREMENT, clampCaseCount } from '@/lib/case-count';
 import { selectVariants } from '@/lib/field-control';
 import { cn } from '@/lib/utils';
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
@@ -460,7 +482,7 @@ import TpButton from '@/components/ui/base/TpButton.vue';
 import TpInput from '@/components/ui/base/TpInput.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
 import {
-  batchGenerateCases,
+  streamBatchGenerateCases,
   deleteCase,
   downloadCasesTemplate,
   exportCases,
@@ -475,8 +497,7 @@ import {
   type CaseGenerationConfig,
   type CaseExportFormat,
   type CaseRecord,
-  type CaseStats,
-  type CaseProcessMode
+  type CaseStats
 } from '@/api/cases';
 
 interface SelectOption {
@@ -518,6 +539,11 @@ const listRefreshLoading = ref(false);
 const statsLoading = ref(false);
 const generateLoading = ref(false);
 const batchLoading = ref(false);
+const batchProgress = ref({ done: 0, total: 0, saved: 0 });
+const batchProgressMessage = computed(() => {
+  if (!batchProgress.value.total) return t('cases.state.batchGeneratingHint');
+  return t('cases.state.batchGeneratingProgress', batchProgress.value);
+});
 const exporting = ref(false);
 const templateDownloading = ref(false);
 const statsError = ref('');
@@ -533,7 +559,6 @@ type GenerateKind = 'single' | 'batch';
 
 const generateKind = ref<GenerateKind>('single');
 const pendingAction = ref<PendingActionState>({ action: null, payload: undefined, row: null });
-const exportFormat = ref<CaseExportFormat>('excel');
 const isGenerateMode = computed(() => props.mode === 'generate');
 const isManageMode = computed(() => props.mode === 'manage');
 
@@ -553,8 +578,7 @@ const singleForm = reactive({
 
 const batchForm = reactive({
   requirementsText: '',
-  caseCountPerRequirement: 3,
-  processMode: 'sequential' as CaseProcessMode
+  caseCountPerRequirement: 3
 });
 
 const singleRequirementError = ref('');
@@ -577,36 +601,41 @@ const { listLoading, listError, loadPage: loadCasesPage } = usePaginatedList(cas
 const confirmDialog = useConfirmAction(t('common.actions.cancel'));
 
 const caseCountOptions = computed<CountOption[]>(() => {
-  const options = config.value?.case_count_options || [];
-  if (options.length > 0) {
-    return options.map((option) => ({
-      value: option.value,
-      label: t('cases.form.caseCountOption', { count: option.value })
-    }));
-  }
-  return [1, 3, 5, 8, 10, 15, 20].map((value) => ({
+  const configuredLimit = Number(config.value?.max_cases_per_requirement);
+  const limit = Math.min(
+    MAX_CASES_PER_REQUIREMENT,
+    Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : MAX_CASES_PER_REQUIREMENT
+  );
+  return CASE_COUNT_CHOICES.filter((value) => value <= limit).map((value) => ({
     value,
     label: t('cases.form.caseCountOption', { count: value })
   }));
 });
 
 const categoryOptions = computed<SelectOption[]>(() => {
-  const options = config.value?.test_type_options || [];
-  if (options.length > 0) {
-    return options.map((option) => ({
-      value: option.value,
-      label: translateEnum(`enums.cases.category.${option.value}`, option.label || option.value)
-    }));
+  const configured = config.value?.test_type_options || [];
+  const options = configured.length
+    ? configured.map((option) => ({
+        value: option.value,
+        label: translateEnum(`enums.cases.category.${option.value}`, option.label || option.value)
+      }))
+    : [
+        { value: 'functional', label: translateEnum('enums.cases.category.functional', 'Functional') },
+        { value: 'performance', label: translateEnum('enums.cases.category.performance', 'Performance') },
+        { value: 'security', label: translateEnum('enums.cases.category.security', 'Security') },
+        { value: 'compatibility', label: translateEnum('enums.cases.category.compatibility', 'Compatibility') },
+        { value: 'usability', label: translateEnum('enums.cases.category.usability', 'Usability') },
+        { value: 'integration', label: translateEnum('enums.cases.category.integration', 'Integration') },
+        { value: 'regression', label: translateEnum('enums.cases.category.regression', 'Regression') }
+      ];
+  const known = new Set(options.map((option) => canonicalCaseCategory(option.value)));
+  for (const key of Object.keys(stats.value?.by_category || {})) {
+    const canonical = canonicalCaseCategory(key);
+    if (!key || known.has(canonical) || known.has(key)) continue;
+    options.push({ value: key, label: translateCategory(key) });
+    known.add(key);
   }
-  return [
-    { value: 'functional', label: translateEnum('enums.cases.category.functional', 'Functional') },
-    { value: 'performance', label: translateEnum('enums.cases.category.performance', 'Performance') },
-    { value: 'security', label: translateEnum('enums.cases.category.security', 'Security') },
-    { value: 'compatibility', label: translateEnum('enums.cases.category.compatibility', 'Compatibility') },
-    { value: 'usability', label: translateEnum('enums.cases.category.usability', 'Usability') },
-    { value: 'integration', label: translateEnum('enums.cases.category.integration', 'Integration') },
-    { value: 'regression', label: translateEnum('enums.cases.category.regression', 'Regression') }
-  ];
+  return options;
 });
 
 const priorityOptions = computed<SelectOption[]>(() => [
@@ -621,11 +650,6 @@ const statusOptions = computed<SelectOption[]>(() => [
   { value: 'draft', label: translateEnum('enums.cases.status.draft', 'Draft') },
   { value: 'active', label: translateEnum('enums.cases.status.active', 'Active') },
   { value: 'deprecated', label: translateEnum('enums.cases.status.deprecated', 'Deprecated') }
-]);
-
-const processModeOptions = computed<SelectOption[]>(() => [
-  { value: 'sequential', label: translateEnum('enums.cases.processMode.sequential', 'Sequential') },
-  { value: 'parallel', label: translateEnum('enums.cases.processMode.parallel', 'Parallel') }
 ]);
 
 const tableColumns = computed<BaseTableColumn[]>(() => [
@@ -650,28 +674,24 @@ const statsCards = computed(() => [
     key: 'total',
     label: t('cases.stats.total'),
     value: formatNumber(stats.value?.total_cases ?? 0),
-    hint: t('cases.stats.totalHint'),
     icon: 'TC'
   },
   {
     key: 'draft',
     label: t('cases.stats.draft'),
     value: formatNumber(stats.value?.by_status?.draft ?? 0),
-    hint: t('cases.stats.statusHint'),
     icon: 'DR'
   },
   {
     key: 'active',
     label: t('cases.stats.active'),
     value: formatNumber(stats.value?.by_status?.active ?? 0),
-    hint: t('cases.stats.statusHint'),
     icon: 'OK'
   },
   {
     key: 'deprecated',
     label: t('cases.stats.deprecated'),
     value: formatNumber(stats.value?.by_status?.deprecated ?? 0),
-    hint: t('cases.stats.statusHint'),
     icon: 'AR'
   }
 ]);
@@ -816,7 +836,7 @@ function syncGenerateKindFromRoute() {
 
 function resetSingleForm() {
   singleForm.requirementText = '';
-  singleForm.caseCount = config.value?.default_case_count || 5;
+  singleForm.caseCount = clampCaseCount(config.value?.default_case_count, 5);
 }
 
 function clearSingleRequirementInput() {
@@ -825,14 +845,12 @@ function clearSingleRequirementInput() {
 
 function resetBatchForm() {
   batchForm.requirementsText = '';
-  batchForm.caseCountPerRequirement = Math.max(1, Math.min(3, config.value?.default_case_count || 3));
-  batchForm.processMode = 'sequential';
+  batchForm.caseCountPerRequirement = 3;
 }
 
 function applyConfigDefaults() {
-  const defaultCaseCount = config.value?.default_case_count || 5;
-  singleForm.caseCount = defaultCaseCount;
-  batchForm.caseCountPerRequirement = Math.max(1, Math.min(defaultCaseCount, config.value?.max_case_num || defaultCaseCount));
+  singleForm.caseCount = clampCaseCount(config.value?.default_case_count, 5);
+  batchForm.caseCountPerRequirement = clampCaseCount(batchForm.caseCountPerRequirement, 3);
 }
 
 async function loadConfig() {
@@ -878,8 +896,8 @@ async function loadCasesData(mode: ListFetchMode = 'page') {
       }
     }
   );
-  if (result) {
-    selectedCaseIds.value = selectedCaseIds.value.filter((id) => cases.value.some((item) => item.case_id === id));
+  if (result && mode === 'filter') {
+    selectedCaseIds.value = [];
   }
 }
 
@@ -952,13 +970,51 @@ function resolveCaseRowClass(row: CaseRecord) {
 
 async function handleRefresh() {
   await refreshAll('refresh');
+  if (listError.value || statsError.value) return;
   showNotice('success', t('common.feedback.success'), t('cases.message.refreshSuccess'));
 }
+
+const selectionCountLabel = computed(() => {
+  const count = selectedCaseIds.value.length;
+  const total = Number(pagination.value.total || 0);
+  if (count > 0 && total > 0 && count === total) {
+    return t('cases.filters.selectedAll', { count });
+  }
+  return t('cases.filters.selectedCount', { count });
+});
+
+const showSelectAllMatching = computed(() => {
+  const total = Number(pagination.value.total || 0);
+  return cases.value.length > 0
+    && cases.value.every((item) => selectedCaseIds.value.includes(item.case_id))
+    && total > selectedCaseIds.value.length;
+});
 
 function handleSearch() {
   filters.search = filters.search.trim();
   filters.page = 1;
-  void loadCasesData('filter');
+  selectedCaseIds.value = [];
+  const mode: ListFetchMode = cases.value.length > 0 ? 'page' : 'filter';
+  void loadCasesData(mode);
+}
+
+async function selectAllMatchingCases() {
+  const ids: string[] = [];
+  let page = 1;
+  while (page <= 100) {
+    const response = await listCases({
+      page,
+      per_page: 200,
+      search: filters.search,
+      priority: filters.priority,
+      status: filters.status,
+      category: filters.category
+    });
+    ids.push(...response.cases.map((item) => String(item.case_id || '')).filter(Boolean));
+    if (!response.pagination.has_next || page >= (response.pagination.pages || 1)) break;
+    page += 1;
+  }
+  selectedCaseIds.value = ids;
 }
 
 function handleSelectionUpdate(nextKeys: Array<string | number>) {
@@ -977,13 +1033,13 @@ function openGenerateConfirm() {
     action: 'generate',
     payload: {
       requirement_text: requirementText,
-      case_count: singleForm.caseCount
+      case_count: clampCaseCount(singleForm.caseCount, 5)
     }
   };
 
   confirmDialog.open({
     title: t('cases.confirm.generateTitle'),
-    message: t('cases.confirm.generateMessage', { count: singleForm.caseCount }),
+    message: t('cases.confirm.generateMessage', { count: clampCaseCount(singleForm.caseCount, 5) }),
     confirmText: t('cases.actions.generate'),
     variant: 'primary',
     onConfirm: runConfirmedAction
@@ -1002,16 +1058,14 @@ function openBatchConfirm() {
     action: 'batchGenerate',
     payload: {
       requirements,
-      case_count_per_req: batchForm.caseCountPerRequirement,
-      process_mode: batchForm.processMode
+      case_count_per_req: clampCaseCount(batchForm.caseCountPerRequirement, 3)
     }
   };
 
   confirmDialog.open({
     title: t('cases.confirm.batchGenerateTitle'),
     message: t('cases.confirm.batchGenerateMessage', {
-      count: requirements.length,
-      mode: translateEnum(`enums.cases.processMode.${batchForm.processMode}`, batchForm.processMode)
+      count: requirements.length
     }),
     confirmText: t('cases.actions.batchGenerate'),
     variant: 'warning',
@@ -1043,7 +1097,7 @@ async function handleCaseSaved(updated: CaseRecord) {
 function openRowGenerateConfirm(row: CaseRecord) {
   const payload: CaseGeneratePayload = {
     requirement_text: buildRequirementFromCase(row),
-    case_count: singleForm.caseCount
+    case_count: clampCaseCount(singleForm.caseCount, 5)
   };
 
   pendingAction.value = {
@@ -1156,6 +1210,10 @@ async function executeGenerate(payload: CaseGeneratePayload) {
     generateLoading.value = true;
     const result = await generateCases(payload);
     lastGenerationResult.value = result;
+    if (!result.cases.length) {
+      showNotice('warning', t('common.feedback.warning'), t('cases.message.generateFailed'));
+      return;
+    }
     showNotice('success', t('common.feedback.success'), result.message || t('cases.message.generateSuccess', { count: result.total }));
     resetSingleForm();
     const highlightIds = result.cases.map((item) => String(item.case_id)).filter(Boolean);
@@ -1179,14 +1237,60 @@ async function executeGenerate(payload: CaseGeneratePayload) {
   }
 }
 
+let batchGenerateAbort: AbortController | null = null;
+onBeforeUnmount(() => batchGenerateAbort?.abort());
+
 async function executeBatchGenerate(payload: CaseBatchGeneratePayload) {
+  const highlightIds: string[] = [];
+  batchGenerateAbort = new AbortController();
+  const { signal } = batchGenerateAbort;
   try {
     batchLoading.value = true;
-    const result = await batchGenerateCases(payload);
-    lastGenerationResult.value = result;
-    showNotice('success', t('common.feedback.success'), result.message || t('cases.message.batchGenerateSuccess', { count: result.total_cases }));
+    batchProgress.value = { done: 0, total: payload.requirements.length, saved: 0 };
+    const result = await streamBatchGenerateCases(
+      {
+        requirements: payload.requirements,
+        case_count_per_req: payload.case_count_per_req
+      },
+      (event) => {
+        if (event.type === 'start') {
+          batchProgress.value = { done: 0, total: event.total || payload.requirements.length, saved: 0 };
+          return;
+        }
+        if (event.type === 'requirement_done' || event.type === 'requirement_failed') {
+          if (event.type === 'requirement_done') {
+            highlightIds.push(...event.cases.map((item) => String(item.case_id)).filter(Boolean));
+          }
+          batchProgress.value = {
+            done: event.index + 1,
+            total: event.total || payload.requirements.length,
+            saved: event.savedCount
+          };
+        }
+      },
+      signal
+    );
+    if (signal.aborted) return;
+    lastGenerationResult.value = {
+      cases: result.cases,
+      total: result.total_cases,
+      message: result.message,
+      failed_count: Number(result.summary?.failed_count || 0)
+    };
+    const failedCount = Number(result.summary?.failed_count || 0);
+    if (!result.total_cases) {
+      showNotice('danger', t('common.status.error'), result.message || t('cases.message.batchGenerateFailed'));
+      return;
+    }
+    if (failedCount > 0) {
+      showNotice('warning', t('common.feedback.warning'), result.message || t('cases.message.batchGeneratePartial', {
+        saved: result.total_cases,
+        failed: failedCount
+      }));
+    } else {
+      showNotice('success', t('common.feedback.success'), result.message || t('cases.message.batchGenerateSuccess', { count: result.total_cases }));
+    }
     resetBatchForm();
-    const highlightIds = result.cases.map((item) => String(item.case_id)).filter(Boolean);
     if (isGenerateMode.value) {
       await router.push({
         name: 'cases-manage',
@@ -1201,17 +1305,38 @@ async function executeBatchGenerate(payload: CaseBatchGeneratePayload) {
       highlightRows(highlightIds);
     }
   } catch (error) {
-    showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.batchGenerateFailed')));
+    if (signal.aborted) return;
+    if (batchProgress.value.saved > 0) {
+      showNotice('warning', t('common.feedback.warning'), t('cases.message.batchGeneratePartial', {
+        saved: batchProgress.value.saved,
+        failed: Math.max(batchProgress.value.total - batchProgress.value.done, 1)
+      }));
+      if (isGenerateMode.value) {
+        await router.push({
+          name: 'cases-manage',
+          query: {
+            from: 'batchGenerate',
+            at: String(Date.now()),
+            hids: highlightIds.slice(0, 12).join(',')
+          }
+        });
+      } else {
+        await refreshAll('refresh');
+      }
+    } else {
+      showNotice('danger', t('common.status.error'), getUserFacingErrorMessage(error, t('cases.message.batchGenerateFailed')));
+    }
   } finally {
     batchLoading.value = false;
   }
 }
 
-async function handleExport() {
+async function handleExport(format: CaseExportFormat) {
+  const caseIds = selectedCaseIds.value.map((id) => String(id)).filter(Boolean);
+  if (!caseIds.length || exporting.value) return;
   try {
     exporting.value = true;
-    const payload = buildExportPayload();
-    const result = await exportCases(payload, exportFormat.value);
+    const result = await exportCases({ case_ids: caseIds }, format);
     triggerBlobDownload(result.blob, result.filename);
     showNotice('success', t('common.feedback.success'), t('cases.message.exportSuccess'));
   } catch (error) {
@@ -1247,41 +1372,6 @@ async function exportSingle(row: CaseRecord) {
   }
 }
 
-function buildExportPayload() {
-  const payload: {
-    category?: string;
-    priority?: string;
-    status?: string;
-    search?: string;
-    case_ids?: Array<string | number>;
-  } = {};
-
-  const total = Number(pagination.value.total || 0);
-  const currentPageCount = cases.value.length;
-  const selectedCount = selectedCaseIds.value.length;
-  const isCurrentPageAllSelected = currentPageCount > 0 && selectedCount === currentPageCount;
-
-  // UX约定：当“当前页全选”且列表还有跨页数据时，导出应覆盖当前筛选下的全部数据，而不是仅当前页。
-  if (isCurrentPageAllSelected && total > currentPageCount) {
-    if (filters.category) payload.category = filters.category;
-    if (filters.priority) payload.priority = filters.priority;
-    if (filters.status) payload.status = filters.status;
-    if (filters.search) payload.search = filters.search;
-    return payload;
-  }
-
-  if (selectedCaseIds.value.length > 0) {
-    payload.case_ids = [...selectedCaseIds.value];
-    return payload;
-  }
-
-  if (filters.category) payload.category = filters.category;
-  if (filters.priority) payload.priority = filters.priority;
-  if (filters.status) payload.status = filters.status;
-  if (filters.search) payload.search = filters.search;
-  return payload;
-}
-
 function buildRequirementFromCase(row: CaseRecord) {
   const parts = [
     row.title,
@@ -1294,12 +1384,8 @@ function buildRequirementFromCase(row: CaseRecord) {
 }
 
 function applyConfigFallbacks() {
-  if (!singleForm.caseCount) {
-    singleForm.caseCount = config.value?.default_case_count || 5;
-  }
-  if (!batchForm.caseCountPerRequirement) {
-    batchForm.caseCountPerRequirement = Math.max(1, config.value?.default_case_count || 3);
-  }
+  singleForm.caseCount = clampCaseCount(singleForm.caseCount || config.value?.default_case_count, 5);
+  batchForm.caseCountPerRequirement = clampCaseCount(batchForm.caseCountPerRequirement, 3);
 }
 
 async function bootstrapManageMode() {

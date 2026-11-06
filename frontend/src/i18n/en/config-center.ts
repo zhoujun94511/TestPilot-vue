@@ -35,6 +35,7 @@ export default {
     modelSelection: 'Model selection',
     saveHint: '',
     noApiKeyNeeded: 'This provider uses default settings and does not require an API key.',
+    keySavedHint: 'A key is saved. A new value replaces it; clearing it and saving removes it.',
     providerLabels: {
       ollamaLocal: 'Ollama (Local)'
     },
@@ -106,6 +107,8 @@ export default {
     MAX_WORKERS: 'Max worker threads',
     ENABLE_PARALLEL_PROCESSING: 'Enable parallel processing',
     ENABLE_STREAMING: 'Enable streaming responses',
+    ENABLE_EXPERIMENTAL_ACTIONS: 'Enable experimental tools',
+    ENABLE_VECTOR_STORE: 'Enable knowledge vector store',
     RAG_TOP_K: 'RAG retrieval result count (top K)',
     RAG_SCORE_THRESHOLD: 'RAG relevance score threshold',
     MAX_MEMORY_MB: 'Max memory usage (MB)'

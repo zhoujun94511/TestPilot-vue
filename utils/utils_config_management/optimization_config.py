@@ -3,7 +3,7 @@
 import os
 import json
 from typing import Dict, Any
-from config.settings import Settings
+from config.settings import settings
 from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,56 +63,43 @@ class OptimizationConfig:
             logger.error(f"加载配置文件 {filename} 出错: {e}")
             return default_value
 
-    def reload_from_settings(self):
-        """从 Settings 和 JSON 文件重新加载配置"""
-
-        # -----------------------
-        # 基础配置
-        # -----------------------
-        self.config = {
-            'max_workers': getattr(Settings, "MAX_WORKERS", 3),
-            'chunk_size': getattr(Settings, "CHUNK_SIZE", 1000),
-            'max_memory_mb': getattr(Settings, "MAX_MEMORY_MB", 500),
-            'enable_parallel': getattr(Settings, "ENABLE_PARALLEL", True),
-            'enable_streaming': getattr(Settings, "ENABLE_STREAMING", False),
-            'max_case_num': getattr(Settings, "MAX_CASE_NUM", 50),
+    def refresh_settings_values(self):
+        """从 settings 实例读取当前值；配置中心保存后会写回 settings，所以每次取配置都要重读。"""
+        self.config.update({
+            'max_workers': getattr(settings, "MAX_WORKERS", 3),
+            'chunk_size': getattr(settings, "CHUNK_SIZE", 1000),
+            'max_memory_mb': getattr(settings, "MAX_MEMORY_MB", 500),
+            'enable_parallel': getattr(settings, "ENABLE_PARALLEL", True),
+            'enable_streaming': getattr(settings, "ENABLE_STREAMING", False),
+            'max_case_num': getattr(settings, "MAX_CASE_NUM", 50),
             'supported_formats': getattr(
-                Settings,
+                settings,
                 "SUPPORTED_FORMATS",
                 ['.txt', '.md', '.docx', '.csv', '.json', '.xlsx', '.pdf', '.yaml', '.yml']
-            )
-        }
-
-        # -----------------------
-        # 内容去重配置
-        # -----------------------
-        self.config.update({
-            'content_similarity_threshold': getattr(Settings, "CONTENT_SIMILARITY_THRESHOLD", 0.8),
-            'enable_content_dedup': getattr(Settings, "ENABLE_CONTENT_DEDUP", True),
-            'content_dedup_weights': getattr(Settings, "CONTENT_DEDUP_WEIGHTS", {
+            ),
+            'content_similarity_threshold': getattr(settings, "CONTENT_SIMILARITY_THRESHOLD", 0.8),
+            'enable_content_dedup': getattr(settings, "ENABLE_CONTENT_DEDUP", True),
+            'content_dedup_weights': getattr(settings, "CONTENT_DEDUP_WEIGHTS", {
                 'title': 0.4, 'steps': 0.3, 'expected': 0.2, 'preconditions': 0.1
             }),
-            'content_dedup_batch_size': getattr(Settings, "CONTENT_DEDUP_BATCH_SIZE", 100),
-            'enable_content_dedup_report': getattr(Settings, "ENABLE_CONTENT_DEDUP_REPORT", False)
+            'content_dedup_batch_size': getattr(settings, "CONTENT_DEDUP_BATCH_SIZE", 100),
+            'enable_content_dedup_report': getattr(settings, "ENABLE_CONTENT_DEDUP_REPORT", False),
+            'risk_weight_map': getattr(settings, "RISK_WEIGHT_MAP", {
+                "low": 1,
+                "medium": 4,
+                "high": 8,
+                "critical": 15
+            }),
         })
 
-        # -----------------------
-        # 加载知识库 JSON
-        # -----------------------
-        knowledge_base = self._load_json_config("knowledge_base.json", {})
-        self.config['knowledge_base'] = knowledge_base
-
-        # 风险等级 -> 关键字权重 映射（可被 Settings 覆盖）
-        default_risk_weight_map = {
-            "low": 1,
-            "medium": 4,
-            "high": 8,
-            "critical": 15
-        }
-        self.config['risk_weight_map'] = getattr(Settings, "RISK_WEIGHT_MAP", default_risk_weight_map)
+    def reload_from_settings(self):
+        """从 settings 和 JSON 文件重新加载配置"""
+        self.config = {'knowledge_base': self._load_json_config("knowledge_base.json", {})}
+        self.refresh_settings_values()
 
     def get_config(self) -> Dict[str, Any]:
         """获取当前配置"""
+        self.refresh_settings_values()
         return self.config.copy()
 
     def update_config(self, new_config: Dict[str, Any]):
@@ -225,6 +212,8 @@ def get_optimization_config() -> OptimizationConfig:
     global _optimization_config
     if _optimization_config is None:
         _optimization_config = OptimizationConfig()
+    else:
+        _optimization_config.refresh_settings_values()
     return _optimization_config
 
 

@@ -6,7 +6,7 @@ from flask import Flask
 
 from blueprints.experimental_actions import experimental_actions_bp
 from config.settings import settings
-from models.models import ChatHistory, db, TestCase
+from models.models import ChatHistory, ChatSession, db, TestCase
 
 
 def _chat_app():
@@ -81,13 +81,11 @@ def test_chat_stream_post_rejects_action_mode():
     assert payload.get("error") == "action_mode_not_supported"
 
 
-def test_chat_stream_get_rejects_action_mode():
+def test_chat_stream_get_is_not_accepted():
     app = _chat_app()
     client = app.test_client()
     resp = client.get("/api/chat/stream?message=hello&mode=action")
-    assert resp.status_code == 400
-    payload = resp.get_json()
-    assert payload.get("error") == "action_mode_not_supported"
+    assert resp.status_code == 405
 
 
 def test_experimental_health_reports_explicit_only(monkeypatch):
@@ -237,6 +235,9 @@ def test_experimental_execute_persists_chat_history(monkeypatch):
     try:
         app = _experimental_app()
         _insert_case(app, "TC-CHAN-PERSIST-01")
+        with app.app_context():
+            db.session.add(ChatSession(session_id=session_id, title="exp"))
+            db.session.commit()
         client = app.test_client()
         resp = client.post("/api/experimental-actions/execute", json={
             "query": "[trace_matrix] panel",
@@ -258,6 +259,32 @@ def test_experimental_execute_persists_chat_history(monkeypatch):
     finally:
         settings.ENABLE_EXPERIMENTAL_ACTIONS = old_flag
         settings.AUTH_REQUIRE_AUTH = old_auth
+
+
+def test_experimental_execute_rejects_unknown_or_deleted_session(monkeypatch):
+    old_flag = getattr(settings, "ENABLE_EXPERIMENTAL_ACTIONS", False)
+    monkeypatch.setattr(settings, "AUTH_REQUIRE_AUTH", False)
+    settings.ENABLE_EXPERIMENTAL_ACTIONS = True
+    try:
+        app = _experimental_app()
+        with app.app_context():
+            db.session.add(ChatSession(session_id="sess-exp-deleted", title="x", is_deleted=True))
+            db.session.commit()
+        client = app.test_client()
+        for session_id in ("sess-exp-missing", "sess-exp-deleted"):
+            resp = client.post("/api/experimental-actions/execute", json={
+                "query": "[trace_matrix] panel",
+                "session_id": session_id,
+                "tool_name": "trace_matrix",
+                "args": {"limit": 1},
+                "metadata": {"send_source": "experimental_tool_panel"},
+            })
+            assert resp.status_code == 404
+            assert resp.get_json()["error"] == "session_unavailable"
+        with app.app_context():
+            assert ChatHistory.query.filter_by(message_type="action").count() == 0
+    finally:
+        settings.ENABLE_EXPERIMENTAL_ACTIONS = old_flag
 
 
 def test_experimental_execute_with_tool_name(monkeypatch):

@@ -75,8 +75,7 @@ def main():
             knowledge_service = KnowledgeService()
             result = knowledge_service.rebuild_knowledge_base(
                 vector_db=vector_db,
-                force=True,
-                clear_all=False  # 已经手动清空了
+                clear_all=True
             )
             
             if result['success']:

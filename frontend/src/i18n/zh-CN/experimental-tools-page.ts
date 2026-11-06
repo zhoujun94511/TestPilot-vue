@@ -1,7 +1,6 @@
 export default {
   page: {
-    title: '实验工具',
-    subtitle: '选择工具并填写参数后运行，结果显示在下方'
+    title: '实验工具'
   },
   disabled: {
     title: '实验工具暂不可用',
@@ -21,6 +20,5 @@ export default {
     empty: '当前账号没有可见的需求。请先在「文档」中解析并保存需求。',
     truncated: '仅列出最近 {shown} 条需求，共 {total} 条。',
     loadFailed: '需求列表加载失败，请刷新页面重试。'
-  },
-  sessionPreparing: '正在准备工具会话…'
+  }
 };

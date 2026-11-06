@@ -5,6 +5,7 @@ export interface DepartmentRecord {
   id: number;
   code: string;
   name: string;
+  name_key?: string | null;
   is_active: boolean;
 }
 
@@ -67,6 +68,12 @@ export async function deleteManagedUser(userId: number) {
 export async function changeOwnPassword(oldPassword: string, newPassword: string) {
   await post('/auth/change-password', {
     old_password: oldPassword,
+    new_password: newPassword
+  });
+}
+
+export async function changeForcedPassword(newPassword: string) {
+  await post('/auth/change-password', {
     new_password: newPassword
   });
 }

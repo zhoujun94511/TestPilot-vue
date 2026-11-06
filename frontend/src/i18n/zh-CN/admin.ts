@@ -4,8 +4,7 @@ export default {
   },
   users: {
     page: {
-      title: '用户管理',
-      subtitle: '为本部门或全平台创建与维护账号'
+      title: '用户管理'
     },
     tabs: {
       users: '账号',
@@ -76,7 +75,10 @@ export default {
         user_created: '创建用户',
         user_updated: '更新用户',
         user_deleted: '删除用户',
-        account_unlocked: '手动解锁'
+        account_unlocked: '手动解锁',
+        project_created: '新建项目',
+        project_renamed: '重命名项目',
+        project_deleted: '删除项目'
       }
     },
     dept: {
@@ -84,10 +86,8 @@ export default {
     },
     form: {
       createTitle: '新建账号',
-      createHint:
-        "标有 * 为必填。初始密码：8～128 位，且须同时包含字母、数字与符号；用户名 3～64 位，仅限字母、数字、汉字及 . _ - {'@'}。",
+      createHint: '密码 8～128 位，须含字母、数字与符号',
       deptCreateTitle: '新建部门',
-      deptCreateHint: '部门编码创建后不可随意修改，请使用简短英文标识。',
       username: '用户名',
       password: '初始密码',
       email: '邮箱',
@@ -99,7 +99,6 @@ export default {
     },
     hint: {
       authOff: '未开启 AUTH_REQUIRE_AUTH，账号管理 API 不可用',
-      adminScope: '管理员仅可管理本部门普通用户',
       pendingApproval: '自助注册的账号默认为「停用」，确认身份后点「启用」即可登录'
     },
     delete: {

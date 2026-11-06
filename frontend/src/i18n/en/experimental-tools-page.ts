@@ -1,7 +1,6 @@
 export default {
   page: {
-    title: 'Experimental tools',
-    subtitle: 'Pick a tool, fill in the parameters, and run it. Results appear below.'
+    title: 'Experimental tools'
   },
   disabled: {
     title: 'Experimental tools unavailable',
@@ -21,6 +20,5 @@ export default {
     empty: 'This account has no visible requirements. Parse and save some in Documents first.',
     truncated: 'Showing the latest {shown} of {total} requirements.',
     loadFailed: 'Could not load requirements. Refresh the page and try again.'
-  },
-  sessionPreparing: 'Preparing tool session…'
+  }
 };

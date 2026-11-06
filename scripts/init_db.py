@@ -4,7 +4,8 @@ TestPilot 数据库初始化脚本
 用于创建数据库表和初始化数据
 
 RBAC / 认证：本脚本通过 create_app() 间接执行 models.init_database() →
-run_auth_migrations()（部门表、users 表、业务表 dept_id 列、引导 super_admin）。
+run_auth_migrations()（部门表、users 表、projects 表、业务表 dept_id / project_id 列、
+默认项目回填、引导 super_admin）。
 业务表 legacy 结构迁移见 migrate / full-migrate，与 auth_migrations 互补。
 详见 docs/AUTH-RBAC.md
 
@@ -455,8 +456,12 @@ def show_database_status():
             config_items_count = ConfigItem.query.count()
             config_audit_logs_count = ConfigAuditLog.query.count()
             config_validation_rules_count = ConfigValidationRule.query.count()
+            from models.auth_models import Project
+
+            projects_count = Project.query.count()
             
             print(f"测试用例总数: {test_cases_count}")
+            print(f"项目总数: {projects_count}")
             print(f"需求文档总数: {requirements_count}")
             print(f"聊天记录总数: {chat_history_count}")
             print(f"聊天会话总数: {chat_sessions_count}")
@@ -682,7 +687,7 @@ def clear_database():
             ChatSession, ToolExecutionLog, LlmUsageLog,
         )
         from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule
-        from models.auth_models import AuthAuditLog, BootstrapMarker, Department, User, UserSession
+        from models.auth_models import AuthAuditLog, BootstrapMarker, Department, Project, User, UserSession
 
         app = create_app()
 
@@ -707,6 +712,7 @@ def clear_database():
                 'user_sessions': UserSession.query.delete(),
                 'auth_audit_logs': AuthAuditLog.query.delete(),
                 'users': User.query.delete(),
+                'projects': Project.query.delete(),
                 'departments': Department.query.delete(),
                 'app_bootstrap_markers': BootstrapMarker.query.delete(),
             }
@@ -749,6 +755,11 @@ def reset_database():
             # 重新创建表
             db.create_all()
             logger.info("已重新创建数据库表")
+
+            from services.auth_migrations import run_auth_migrations
+
+            run_auth_migrations()
+            logger.info("已重建部门、默认项目和引导账号")
 
             # 创建初始数据
             create_initial_data()

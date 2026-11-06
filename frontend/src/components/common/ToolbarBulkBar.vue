@@ -2,6 +2,15 @@
   <div v-if="count > 0" :class="toolbarBulkBarClass">
     <span :class="toolbarBulkBarMetaClass">{{ countLabel }}</span>
     <div class="flex flex-wrap items-center justify-end gap-2">
+      <TpButton
+        v-if="selectAllCount > count"
+        variant="secondary"
+        size="sm"
+        type="button"
+        @click="emit('selectAll')"
+      >
+        {{ t('common.toolbar.selectAllMatching', { count: selectAllCount }) }}
+      </TpButton>
       <slot />
       <TpButton v-if="clearable" variant="ghost" size="sm" type="button" @click="emit('clear')">
         {{ clearText }}
@@ -22,16 +31,20 @@ const props = withDefaults(
     countLabel?: string;
     clearable?: boolean;
     clearText?: string;
+    /** 大于 count 时显示「选择全部 N 条」，N 是当前筛选下的总条数 */
+    selectAllCount?: number;
   }>(),
   {
     countLabel: '',
     clearable: true,
-    clearText: ''
+    clearText: '',
+    selectAllCount: 0
   }
 );
 
 const emit = defineEmits<{
   (event: 'clear'): void;
+  (event: 'selectAll'): void;
 }>();
 
 const { t } = useI18n();

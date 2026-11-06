@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import type { PageBannerNotice } from '@/composables/usePageNotice';
 import { ApiError } from '@/api/http';
 import { useAppStore } from '@/stores';
+import { useAuthStore } from '@/stores/auth';
 
 const DISMISS_KEY = 'tp.knowledge_vector_off_dismissed';
 
@@ -30,6 +31,7 @@ export function useKnowledgeVectorNotice() {
   const { t } = useI18n();
   const router = useRouter();
   const appStore = useAppStore();
+  const authStore = useAuthStore();
   const dismissed = ref(sessionStorage.getItem(DISMISS_KEY) === '1');
 
   const vectorDisabled = computed(() => !appStore.featureFlags.enableVectorStore);
@@ -40,7 +42,7 @@ export function useKnowledgeVectorNotice() {
       type: 'warning',
       title: t('knowledge.banner.vectorDisabledTitle'),
       message: t('knowledge.banner.vectorDisabledMessage'),
-      actionLabel: t('knowledge.banner.vectorDisabledAction')
+      actionLabel: authStore.canSeeConfigCenter() ? t('knowledge.banner.vectorDisabledAction') : undefined
     };
   });
 
@@ -54,7 +56,7 @@ export function useKnowledgeVectorNotice() {
   }
 
   function openConfigCenter() {
-    void router.push({ name: 'config' });
+    if (authStore.canSeeConfigCenter()) void router.push({ name: 'config' });
   }
 
   /** 后端改 ENABLE_VECTOR_STORE 后应重新展示提示 */

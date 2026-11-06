@@ -91,12 +91,14 @@ def main():
         # 启动应用
         if debug:
             def _run_dev_server() -> None:
+                # 监听所有网卡时交互式调试台等于把远程执行代码的入口暴露给局域网
                 app.run(
                     host=bind_host,
                     port=port,
                     debug=True,
                     threaded=True,
                     use_reloader=False,
+                    use_debugger=False,
                 )
 
             server_thread = threading.Thread(target=_run_dev_server, daemon=True)
@@ -163,30 +165,26 @@ def main():
                 if gunicorn_available:
                     logger.info("使用Gunicorn服务器 (Linux/Mac)")
 
-                    # Gunicorn配置
+                    # gunicorn 不读 GUNICORN_BIND 这类环境变量，只认命令行参数（或 GUNICORN_CMD_ARGS）
                     # noinspection SpellCheckingInspection
-                    gunicorn_config = {
-                        'bind': f'{host}:{port}',
-                        'workers': os.getenv('WORKERS', 4),
-                        'worker_class': 'eventlet',
-                        'worker_connections': 1000,
-                        'timeout': 30,
-                        'keepalive': 2,
-                        'max_requests': 1000,
-                        'max_requests_jitter': 100,
-                        'preload_app': True,
-                        'accesslog': 'logs/access.log',
-                        'errorlog': 'logs/error.log',  # Gunicorn官方配置项名称
-                        'loglevel': 'info'
-                    }
-
-                    # 设置环境变量给Gunicorn
-                    for key, value in gunicorn_config.items():
-                        os.environ[f'GUNICORN_{key.upper()}'] = str(value)
-
-                    # 启动Gunicorn
-                    sys.argv = ['gunicorn', 'app:create_app()']
-                    os.execvp('gunicorn', sys.argv)
+                    gunicorn_args = [
+                        sys.executable, '-m', 'gunicorn',
+                        '--bind', f'{host}:{port}',
+                        '--workers', str(os.getenv('WORKERS', 4)),
+                        '--worker-class', 'eventlet',
+                        '--worker-connections', '1000',
+                        # 用例生成与流式聊天单次可能超过 30 秒
+                        '--timeout', str(os.getenv('GUNICORN_TIMEOUT', 300)),
+                        '--keep-alive', '2',
+                        '--max-requests', '1000',
+                        '--max-requests-jitter', '100',
+                        '--preload',
+                        '--access-logfile', 'logs/access.log',
+                        '--error-logfile', 'logs/error.log',
+                        '--log-level', 'info',
+                        'app:create_app()',
+                    ]
+                    os.execv(sys.executable, gunicorn_args)
                 else:
                     logger.warning("Gunicorn未安装，使用Flask内置服务器")
                     logger.info("提示: 运行 'pip install gunicorn' 安装Gunicorn")

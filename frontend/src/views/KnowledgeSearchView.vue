@@ -166,6 +166,8 @@ const pagination = ref<KnowledgePagination>({
   has_next: false
 });
 
+let searchSeq = 0;
+
 function searchResultKey(item: KnowledgeSearchResult) {
   return `${item.file_id ?? item.file_name}-${item.chunk_index ?? item.content?.slice(0, 32)}`;
 }
@@ -175,9 +177,10 @@ function formatScore(score?: number) {
   return score.toFixed(3);
 }
 
-async function runSearch(page: number, mode: ListFetchMode = 'filter') {
+async function runSearch(page: number, mode: ListFetchMode = 'filter', options: { pager?: boolean } = {}) {
   if (vectorDisabled.value) return;
-  searchPaging.value = mode === 'page';
+  const seq = ++searchSeq;
+  searchPaging.value = mode === 'page' && options.pager !== false;
   beginLoad(mode);
   try {
     const requestPayload = {
@@ -186,24 +189,21 @@ async function runSearch(page: number, mode: ListFetchMode = 'filter') {
       page,
       per_page: pagination.value.per_page
     };
-    let response = await searchKnowledge(requestPayload);
-
-    if ((!response.documents || response.documents.length === 0) && scoreThreshold.value > 0.1) {
-      response = await searchKnowledge({
-        ...requestPayload,
-        score_threshold: 0.1
-      });
-    }
+    const response = await searchKnowledge(requestPayload);
+    if (seq !== searchSeq) return;
 
     results.value = response.documents;
     pagination.value = response.pagination;
   } catch (error) {
+    if (seq !== searchSeq) return;
     failLoad(getUserFacingErrorMessage(error, t('knowledge.message.searchFailed')), () => {
       results.value = [];
     });
   } finally {
-    endLoad();
-    searchPaging.value = false;
+    if (seq === searchSeq) {
+      endLoad();
+      searchPaging.value = false;
+    }
   }
 }
 
@@ -211,7 +211,8 @@ async function handleSearch() {
   if (vectorDisabled.value) return;
   keyword.value = keyword.value.trim();
   pagination.value.page = 1;
-  await runSearch(1, 'filter');
+  const mode: ListFetchMode = results.value.length > 0 ? 'page' : 'filter';
+  await runSearch(1, mode, { pager: false });
 }
 
 const { changePage } = useListPageChange(

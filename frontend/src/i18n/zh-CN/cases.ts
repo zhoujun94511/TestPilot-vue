@@ -1,18 +1,10 @@
 export default {
   page: {
-    title: '测试用例',
-    subtitle: '迁移核心用例闭环，验证列表、筛选、生成、批量操作、导出与统计能力'
+    title: '测试用例'
   },
   tabs: {
     generate: '用例生成',
     manage: '用例管理'
-  },
-  generateMode: {
-    aria: '生成方式'
-  },
-  toolbar: {
-    manageLead: '查看统计与列表；导出与模板下载在「更多」中。',
-    exportMenu: '导出与模板'
   },
   actions: {
     generate: '生成用例',
@@ -24,7 +16,6 @@ export default {
     exportJson: 'JSON',
     downloadTemplate: '下载模板',
     templateDownloading: '下载模板中',
-    refresh: '刷新',
     generating: '生成中',
     batchGenerating: '批量生成中',
     deleteSelected: '删除已选',
@@ -36,20 +27,17 @@ export default {
   batch: {
     title: '批量生成',
     requirementsPlaceholder: '登录校验;订单退款',
-    requirementsHelper: '若存在多条需求，每条需求以 ; 做拆分！',
-    processModeLabel: '处理模式',
-    processModeHelper: '顺序：逐条；并行：多条同时'
+    requirementsHelper: '多条需求用 ; 分隔'
   },
   state: {
     generatingTitle: '正在生成用例',
-    generatingHint: '模型正在分析需求并写入用例，通常需要数十秒到数分钟，请勿关闭页面。',
     batchGeneratingTitle: '正在批量生成',
-    batchGeneratingHint: '正在按需求逐条或并行生成，耗时与条数、是否启用知识库有关。'
+    batchGeneratingHint: '正在按需求逐条生成。每完成一条就入库，请保持页面打开。',
+    batchGeneratingProgress: '已完成 {done}/{total} 条需求，已入库 {saved} 条用例。'
   },
   form: {
     requirementLabel: '需求描述',
     requirementPlaceholder: '如：用户登录需校验账号状态与错误提示',
-    requirementHelper: '写清功能或验收点即可；优先级由模型判断',
     caseCountLabel: '生成数量',
     caseCountOption: '{count} 个'
   },
@@ -64,7 +52,8 @@ export default {
     categoryLabel: '类别',
     categoryAll: '全部类别',
     apply: '查询',
-    selectedCount: '已选择 {count} 条'
+    selectedCount: '已选择 {count} 条',
+    selectedAll: '已选择全部 {count} 条'
   },
   table: {
     title: '用例列表',
@@ -114,8 +103,6 @@ export default {
     draft: '草稿',
     active: '生效',
     deprecated: '已废弃',
-    totalHint: '来源于用例列表',
-    statusHint: '按状态汇总',
     priorityDistribution: '优先级分布',
     categoryDistribution: '类别分布',
     emptyDistribution: '暂无分布数据'
@@ -124,7 +111,7 @@ export default {
     generateTitle: '确认生成测试用例',
     generateMessage: '将根据当前需求生成 {count} 条测试用例，是否继续？',
     batchGenerateTitle: '确认批量生成',
-    batchGenerateMessage: '将对 {count} 条需求执行 {mode} 处理，是否继续？',
+    batchGenerateMessage: '将对 {count} 条需求逐条生成。每完成一条就入库，失败不影响已入库的用例，是否继续？',
     regenerateTitle: '确认重新生成',
     regenerateMessage: '将基于「{title}」重新生成测试用例，是否继续？',
     deleteTitle: '确认删除测试用例',
@@ -138,6 +125,7 @@ export default {
     generateSuccess: '已生成 {count} 条测试用例',
     generateFailed: '生成测试用例失败',
     batchGenerateSuccess: '批量生成完成，共生成 {count} 条测试用例',
+    batchGeneratePartial: '已入库 {saved} 条用例，{failed} 条需求失败。已入库的用例已保留。',
     batchGenerateFailed: '批量生成测试用例失败',
     generateSynced: '已同步到用例管理，可继续筛选与导出',
     batchGenerateSynced: '批量结果已同步到用例管理，可继续筛选与导出',

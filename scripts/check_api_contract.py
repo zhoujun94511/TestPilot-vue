@@ -33,7 +33,6 @@ API_HELPER_MODULES = {"http.ts", "core.ts"}
 # - internal fallback endpoints
 # - operation-specific orchestration endpoints that require server-side assembled payload
 IGNORED_BACKEND_ONLY: Set[str] = {
-    "/api/chat/save-ai-message",
     "/api/export/batch",
 }
 
@@ -48,6 +47,14 @@ IGNORED_UNUSED_API_EXPORTS: Set[str] = {
     "getChatSuggestions",
     "getChatTemplates",
     "resolveAnalysisRequirements",
+    # 保留给配置页和总览页的可选客户端，当前视图未直接调用。
+    "updateConfigItem",
+    "getNetworkInfo",
+    "getPerformanceStats",
+    "loadDashboardSummary",
+    # 批量生成页面改走 SSE。这两个 JSON 入口仍保留给兼容调用。
+    "batchGenerateCases",
+    "generateCasesFromAnalysis",
 }
 
 
@@ -97,15 +104,18 @@ def parse_backend_routes() -> List[RouteDef]:
     prefixes = _route_prefixes()
     out: List[RouteDef] = []
     route_re = re.compile(
-        r"@(\w+)\.route\(\s*['\"]([^'\"]+)['\"](?:,\s*methods\s*=\s*\[([^]]+)])?"
+        r"@(\w+)\.(route|get|post|put|patch|delete)\(\s*['\"]([^'\"]+)['\"](?:,\s*methods\s*=\s*\[([^]]+)])?"
     )
     for py in BLUEPRINTS_DIR.glob("*.py"):
         text = py.read_text(encoding="utf-8", errors="ignore")
         for m in route_re.finditer(text):
             bp_var = m.group(1)
-            sub_path = m.group(2)
-            methods_raw = m.group(3)
-            if methods_raw:
+            verb = m.group(2).lower()
+            sub_path = m.group(3)
+            methods_raw = m.group(4)
+            if verb != "route":
+                methods = {verb.upper()}
+            elif methods_raw:
                 methods = {
                     s.strip().strip("'\"").upper()
                     for s in methods_raw.split(",")
@@ -272,7 +282,8 @@ def normalize_method(method: str) -> str:
 
 def normalize_front_path(path: str) -> str:
     # Turn TS template placeholders into flask-like dynamic segments.
-    p = re.sub(r"\$\{[^}]+}", "<param>", path)
+    p = path.split("?", 1)[0].split("#", 1)[0]
+    p = re.sub(r"\$\{[^}]+}", "<param>", p)
     return p
 
 

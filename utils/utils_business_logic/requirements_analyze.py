@@ -6,6 +6,9 @@
 """
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.runnables import RunnableLambda
+from utils.utils_performance_monitoring.token_monitor import ensure_session_budget, record_message_usage
+from utils.utils_performance_monitoring.token_session import TokenSessionLimitExceeded
 from config.settings import settings
 from models.models import RequirementAnalysisList
 from utils.utils_core.logger import get_logger
@@ -58,11 +61,18 @@ def analyze_requirement(llm, requirement):
             format_instructions=custom_format_instructions,
             language_instruction=_infer_language_instruction(requirement)
         )
-        chain = requirement_prompt | llm | parser
+
+        def _record_and_parse(response):
+            record_message_usage(response, source='document_analysis')
+            return parser.invoke(response)
+
+        chain = requirement_prompt | llm | RunnableLambda(_record_and_parse)
         
-        # 先获取原始响应，用于调试
+        ensure_session_budget()
         try:
             result = chain.invoke({"context": requirement})
+        except TokenSessionLimitExceeded:
+            raise
         except Exception as parse_error:
             # 如果解析失败，尝试直接调用 LLM 获取原始响应
             logger.warning(f"JSON解析失败，尝试获取原始响应: {str(parse_error)}")
@@ -70,6 +80,7 @@ def analyze_requirement(llm, requirement):
                 # 直接调用 LLM 获取原始文本响应
                 prompt_text = requirement_prompt.format(context=requirement)
                 raw_response = llm.invoke(prompt_text)
+                record_message_usage(raw_response, source='document_analysis')
                 
                 # 记录原始响应
                 if hasattr(raw_response, 'content'):
@@ -103,6 +114,8 @@ def analyze_requirement(llm, requirement):
                         logger.error(f"手动JSON解析也失败: {str(json_err)}")
                 
                 return []
+            except TokenSessionLimitExceeded:
+                raise
             except Exception as llm_error:
                 normalized = normalize_provider_error(getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'), llm_error)
                 logger.error(f"获取原始响应失败: {normalized.get('message')}", exc_info=True)
@@ -119,6 +132,8 @@ def analyze_requirement(llm, requirement):
             logger.warning(f"未知结果类型: {type(result)}, 内容: {result}")
             return []
             
+    except TokenSessionLimitExceeded:
+        raise
     except Exception as e:
         normalized = normalize_provider_error(getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'), e)
         logger.error(f"解析需求失败: {normalized.get('message')}", exc_info=True)

@@ -27,8 +27,10 @@ def log_llm_usage(
     ref_type: Optional[str] = None,
     ref_id: Optional[int] = None,
     created_time: Optional[datetime] = None,
+    owner: Optional[tuple] = None,
 ) -> None:
-    """写入一条 Token 消耗记录；带 ref 时幂等（同一 ref 不重复插入）。"""
+    """写入一条 Token 消耗记录；带 ref 时幂等（同一 ref 不重复插入）。
+    owner=(dept_id, user_id) 时按它归属，否则记到当前登录用户。"""
     total = int(tokens or 0)
     if total <= 0:
         return
@@ -38,7 +40,10 @@ def log_llm_usage(
         if existing:
             return
 
-    actor = current_user()
+    if owner is not None:
+        actor = {'dept_id': owner[0], 'id': owner[1]}
+    else:
+        actor = current_user()
     row = LlmUsageLog(
         tokens=total,
         input_tokens=int(input_tokens or 0),
@@ -65,7 +70,31 @@ def log_chat_assistant_usage(chat_row: ChatHistory) -> None:
         ref_type='chat_history',
         ref_id=chat_row.id,
         created_time=chat_row.created_time,
+        owner=_chat_owner(chat_row.session_id),
     )
+
+
+def _chat_owner(session_id: Optional[str], cache: Optional[dict] = None) -> Optional[tuple]:
+    """聊天用量归会话属主，而不是触发记账的人（回填时触发人是查看报表的管理员）。"""
+    if not session_id:
+        return None
+    if cache is not None and session_id in cache:
+        return cache[session_id]
+    from models.models import ChatSession
+
+    chat_session = ChatSession.query.filter_by(session_id=session_id).first()
+    owner = None
+    if chat_session is not None:
+        user_id = chat_session.owner_user_id
+        if user_id is None and chat_session.user_id:
+            try:
+                user_id = int(chat_session.user_id)
+            except (TypeError, ValueError):
+                user_id = None
+        owner = (chat_session.dept_id, user_id)
+    if cache is not None:
+        cache[session_id] = owner
+    return owner
 
 
 def backfill_chat_usage_since(start_date: datetime) -> int:
@@ -79,9 +108,17 @@ def backfill_chat_usage_since(start_date: datetime) -> int:
         .order_by(ChatHistory.id.asc())
         .all()
     )
+    logged_ids = {
+        ref_id for (ref_id,) in db.session.query(LlmUsageLog.ref_id)
+        .filter(LlmUsageLog.ref_type == 'chat_history', LlmUsageLog.ref_id.isnot(None))
+        .all()
+    }
+    owners: dict = {}
     for row in rows:
-        before = LlmUsageLog.query.filter_by(ref_type='chat_history', ref_id=row.id).count()
-        if before:
+        if row.id in logged_ids:
+            continue
+        owner = _chat_owner(row.session_id, owners)
+        if owner is None:
             continue
         try:
             log_llm_usage(
@@ -91,6 +128,7 @@ def backfill_chat_usage_since(start_date: datetime) -> int:
                 ref_type='chat_history',
                 ref_id=row.id,
                 created_time=row.created_time,
+                owner=owner,
             )
             inserted += 1
         except Exception as error:

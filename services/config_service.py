@@ -8,6 +8,7 @@ API配置服务模块
 import os
 from typing import Dict, List, Any
 from config.settings import settings
+from services.case_count import MAX_CASES_PER_REQUIREMENT
 from services.config_center_service import config_center_service
 
 
@@ -34,9 +35,10 @@ class ConfigService:
         try:
             # 获取最大生成数量
             max_case_num = getattr(settings, 'MAX_CASE_NUM', 50)
+            per_requirement_limit = min(max_case_num, MAX_CASES_PER_REQUIREMENT)
             
-            # 生成数量选项
-            case_count_options = self._get_case_count_options(max_case_num)
+            # 生成数量选项：单个需求不超过 10 条
+            case_count_options = self._get_case_count_options(per_requirement_limit)
             
             # 测试类型选项
             test_type_options = self._get_test_type_options()
@@ -46,7 +48,8 @@ class ConfigService:
                 'case_count_options': case_count_options,
                 'test_type_options': test_type_options,
                 'max_case_num': max_case_num,
-                'default_case_count': min(5, max_case_num),
+                'max_cases_per_requirement': per_requirement_limit,
+                'default_case_count': min(5, per_requirement_limit),
                 'priority_auto_determined': True,  # 优先级由AI自动判断
                 'enable_case_generation_rag': enable_case_generation_rag
             }
@@ -77,12 +80,12 @@ class ConfigService:
         case_count_options = []
         
         # 从环境变量获取常用选项
-        common_options_str = os.getenv('CASE_COUNT_OPTIONS', '1,2,3,5,8,10,15,20,25,30')
+        common_options_str = os.getenv('CASE_COUNT_OPTIONS', '1,2,3,5,8,10')
         try:
             common_options = [int(x.strip()) for x in common_options_str.split(',') if x.strip()]
         except ValueError:
             # 如果解析失败，使用默认值
-            common_options = [1, 2, 3, 5, 8, 10, 15, 20, 25, 30]
+            common_options = [1, 2, 3, 5, 8, 10]
         
         # 添加常用选项（不超过最大限制）
         for option in common_options:

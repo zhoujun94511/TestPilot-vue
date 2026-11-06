@@ -28,6 +28,16 @@ def first_run_completed() -> bool:
     return BootstrapMarker.query.filter_by(marker_key=FIRST_RUN_MARKER).first() is not None
 
 
+def load_config_seed():
+    """加载配置中心种子脚本。供启动补齐缺失的服务商行，不覆盖已有密钥。"""
+    return _load_config_seed()
+
+
+def ensure_ai_provider_rows() -> bool:
+    """补齐缺失的服务商密钥和启用开关。不覆盖已有值。"""
+    return bool(load_config_seed().ensure_ai_provider_rows())
+
+
 def _load_config_seed():
     seed_path = Path(__file__).resolve().parents[1] / 'scripts' / 'init_config_center.py'
     spec = importlib.util.spec_from_file_location('testpilot_config_center_seed', seed_path)
@@ -45,7 +55,7 @@ def run_first_run_bootstrap() -> str:
         return 'skipped'
 
     ensure_bootstrap_accounts()
-    seed = _load_config_seed()
+    seed = load_config_seed()
     configs_ok = bool(seed.seed_default_configs())
     rules_ok = bool(seed.seed_validation_rules())
     if not configs_ok or not rules_ok:

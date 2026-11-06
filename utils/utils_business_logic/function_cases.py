@@ -78,7 +78,14 @@ class OptimizedCaseGenerator:
                     logger.info(f"   总体Tokens消耗: {total_tokens}")
 
                     if total_tokens > 0:
-                        record_llm_call(total_tokens, is_actual=True, source='case_generation')
+                        record_llm_call(
+                            actual_tokens={
+                                'prompt_tokens': input_tokens,
+                                'completion_tokens': output_tokens,
+                                'total_tokens': total_tokens,
+                            },
+                            source='case_generation',
+                        )
 
             # 继续解析
             return self.parser.invoke(response)

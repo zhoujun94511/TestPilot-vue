@@ -160,7 +160,8 @@ async function handleSubmit() {
     content,
     type: form.type,
     priority: form.priority,
-    status: form.status
+    status: form.status,
+    updated_time: activeRecord.value?.updated_time ?? null
   };
 
   try {

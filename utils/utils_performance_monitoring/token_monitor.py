@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 import re
+import threading
 import time
 import tiktoken
 from typing import Any, Dict, Optional
@@ -23,6 +24,8 @@ class TokenMonitor:
     def __init__(self, model_name: str = None):  # 改为None
         if model_name is None:
             model_name = settings.MODEL  # 从配置获取
+        # 全进程共用一个实例，多个请求线程同时累加会丢计数
+        self._lock = threading.RLock()
         self.session_start = time.time()
         self.total_tokens = 0
         self.call_count = 0
@@ -58,6 +61,11 @@ class TokenMonitor:
         if calls_limit > 0:
             self.max_calls_per_session = calls_limit
         self.refresh_session_notice()
+
+    def switch_model(self, model_name: str) -> None:
+        """换模型只换计数用的编码器，会话累计不能清零。"""
+        self.model_name = model_name
+        self._init_encoding()
 
     def _init_encoding(self):
         """初始化TikToken编码器"""
@@ -123,7 +131,7 @@ class TokenMonitor:
 
     def record_call(self, estimated_tokens: int = 1000, is_actual: bool = False,
                     input_text: str = "", output_text: str = "",
-                    actual_tokens: Optional[Dict] = None):
+                    actual_tokens: Optional[Dict] = None, raise_on_limit: bool = True):
         """
         记录LLM调用 - 增强版本，保持向后兼容
 
@@ -133,7 +141,15 @@ class TokenMonitor:
             input_text: 输入文本（新增）
             output_text: 输出文本（新增）
             actual_tokens: 实际token数据（新增）
+            raise_on_limit: 超限时是否抛错；调用已完成的记账传 False
         """
+        with self._lock:
+            return self._record_call_locked(
+                estimated_tokens, is_actual, input_text, output_text, actual_tokens, raise_on_limit
+            )
+
+    def _record_call_locked(self, estimated_tokens, is_actual, input_text, output_text,
+                            actual_tokens, raise_on_limit):
         self.call_count += 1
 
         # 计算token数量
@@ -163,12 +179,12 @@ class TokenMonitor:
         self.apply_session_limits_from_settings()
 
         # 检查限制（使用实际总计）
-        if self.total_tokens > self.max_tokens_per_session:
+        if raise_on_limit and self.total_tokens > self.max_tokens_per_session:
             raise TokenSessionLimitExceeded(
                 "tokens", self.total_tokens, self.max_tokens_per_session
             )
 
-        if self.call_count > self.max_calls_per_session:
+        if raise_on_limit and self.call_count > self.max_calls_per_session:
             raise TokenSessionLimitExceeded(
                 "calls", self.call_count, self.max_calls_per_session
             )
@@ -267,17 +283,19 @@ class TokenMonitor:
 
     def reset(self):
         """重置监控器"""
-        self.session_start = time.time()
-        self.total_tokens = 0
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cost = 0.0
-        self.call_count = 0
-        self.session_notice_signature = None
+        with self._lock:
+            self.session_start = time.time()
+            self.total_tokens = 0
+            self.total_input_tokens = 0
+            self.total_output_tokens = 0
+            self.total_cost = 0.0
+            self.call_count = 0
+            self.session_notice_signature = None
 
 
 # 全局监控器实例
 _token_monitor: Optional[TokenMonitor] = None
+_token_monitor_lock = threading.Lock()
 
 
 def get_token_monitor(model_name: str = None) -> TokenMonitor:
@@ -286,11 +304,16 @@ def get_token_monitor(model_name: str = None) -> TokenMonitor:
         model_name = settings.MODEL  # 从配置获取
     global _token_monitor
     monitor = _token_monitor
-    if monitor is None or monitor.model_name != model_name:
-        monitor = TokenMonitor(model_name)
-        _token_monitor = monitor
-    else:
-        monitor.apply_session_limits_from_settings()
+    if monitor is None:
+        with _token_monitor_lock:
+            if _token_monitor is None:
+                _token_monitor = TokenMonitor(model_name)
+                return _token_monitor
+            monitor = _token_monitor
+    if monitor.model_name != model_name:
+        # 换模型只换计数用的编码器，会话累计不能清零，否则额度形同虚设
+        monitor.switch_model(model_name)
+    monitor.apply_session_limits_from_settings()
     return monitor
 
 
@@ -346,7 +369,7 @@ def record_llm_call(
         model_name = settings.MODEL
     monitor = get_token_monitor(model_name)
     breakdown = monitor.record_call(
-        estimated_tokens, is_actual, input_text, output_text, actual_tokens
+        estimated_tokens, is_actual, input_text, output_text, actual_tokens, raise_on_limit=False
     )
     if not breakdown.get("counted"):
         return
@@ -365,6 +388,65 @@ def record_llm_call(
         )
     except Exception as error:
         logger.warning("全站 Token 落库失败: %s", error)
+
+
+def track_session_usage(input_tokens: int = 0, output_tokens: int = 0, model_name: str = None) -> None:
+    """只计入进程内会话额度，不写用量表（调用方已按业务记录落库）。
+    本次已经付费的调用不再回头报错，超限由下一次调用前的 ensure_session_budget 拦截。"""
+    monitor = get_token_monitor(model_name)
+    monitor.record_call(actual_tokens={
+        'prompt_tokens': max(0, int(input_tokens or 0)),
+        'completion_tokens': max(0, int(output_tokens or 0)),
+    }, raise_on_limit=False)
+
+
+def ensure_session_budget() -> None:
+    """调用模型前检查会话额度。已经用尽就直接拒绝，不再先付费调用再报错。"""
+    monitor = get_token_monitor()
+    if monitor.total_tokens >= monitor.max_tokens_per_session:
+        raise TokenSessionLimitExceeded("tokens", monitor.total_tokens, monitor.max_tokens_per_session)
+    if monitor.call_count >= monitor.max_calls_per_session:
+        raise TokenSessionLimitExceeded("calls", monitor.call_count, monitor.max_calls_per_session)
+
+
+def record_message_usage(message, source: str = "llm", model_name: str = None) -> Optional[Dict]:
+    """按模型响应里的 usage 记账。没有 usage 时不记估算值，避免输出 token 被记成 0。"""
+    usage = usage_from_message(message)
+    if not usage or int(usage.get("total_tokens") or 0) <= 0:
+        logger.debug("模型响应没有 usage，只计调用次数")
+        track_session_usage(model_name=model_name)
+        return None
+    record_llm_call(actual_tokens=usage, source=source, model_name=model_name)
+    return usage
+
+
+def usage_from_message(message) -> Optional[Dict]:
+    meta = getattr(message, "response_metadata", None) or {}
+    raw = {}
+    if isinstance(meta, dict):
+        candidate = meta.get("token_usage") or meta.get("usage") or {}
+        if isinstance(candidate, dict):
+            raw = candidate
+    if not raw:
+        candidate = getattr(message, "usage_metadata", None) or {}
+        if isinstance(candidate, dict):
+            raw = candidate
+    if not raw:
+        return None
+    prompt = int(raw.get("prompt_tokens") or raw.get("input_tokens") or 0)
+    completion = int(raw.get("completion_tokens") or raw.get("output_tokens") or 0)
+    total = int(raw.get("total_tokens") or 0)
+    if completion <= 0 and total > prompt:
+        completion = total - prompt
+    if total <= 0:
+        total = prompt + completion
+    if total <= 0:
+        return None
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    }
 
 
 def count_tokens(text: str, model_name: str = None) -> int:

@@ -23,6 +23,36 @@ MAX_SAVE_CASES = 40
 COVERAGE_THRESHOLD = 0.35
 _VAGUE_STEP = re.compile(r"^(?:正常|相关|按需|适当|检查|验证|测试)(?:操作|功能|内容)?$")
 
+# message 保留中文供审计日志；前端按 message_key + message_params 本地化
+_MESSAGES = {
+    "requirement_not_found": "需求不存在",
+    "requirement_forbidden": "没有权限访问该需求",
+    "requirement_required": "请选择需求",
+    "requirement_text_required": "请填写需求描述或选择关联需求",
+    "no_preview_cases": "没有可保存的预览用例",
+    "save_failed": "保存失败",
+    "cases_saved": "已保存 {count} 条草稿用例",
+    "no_scenario": "没有识别出搜索、登录或表单场景，也未启用模型补充",
+    "skeleton_preview": "规则写出 {rule} 条，模型补充 {llm} 条，确认后入库",
+    "coverage_summary": "{total} 个验收点覆盖 {covered} 个，{issues} 条用例结构待改",
+    "trace_summary": (
+        "{requirements} 条需求中 {uncovered} 条没有用例；"
+        "{dangling} 条用例指向不存在的需求，{unlinked} 条用例未关联需求"
+    ),
+    "llm_unavailable": "用例生成模型未初始化，只返回规则骨架",
+    "llm_failed": "模型补充失败，只返回规则骨架",
+    "llm_unparsed": "模型没有返回可解析的补充用例，只返回规则骨架",
+    "llm_budget_exhausted": "模型调用额度已用尽，只返回规则骨架",
+}
+
+
+def _message_text(key: str, **params: Any) -> str:
+    return _MESSAGES[key].format(**params) if key else ""
+
+
+def _message(key: str, **params: Any) -> Dict[str, Any]:
+    return {"message": _message_text(key, **params), "message_key": key, "message_params": params}
+
 
 def _safe_int(value: Any, default: int) -> int:
     try:
@@ -90,9 +120,10 @@ def _parse_llm_cases(raw: str) -> List[Dict[str, Any]]:
 
 def _llm_supplements(requirement_text: str, criteria: List[str], rule_cases: List[Dict[str, Any]],
                      count: int) -> tuple[List[Dict[str, Any]], str]:
+    """返回 (补充用例, 说明 message key)；成功时 key 为空。"""
     llm = getattr(current_app, "llm_case_generation", None)
     if llm is None:
-        return [], "用例生成模型未初始化，只返回规则骨架"
+        return [], "llm_unavailable"
     rule_titles = "\n".join(f"- {case['title']}" for case in rule_cases) or "（无）"
     criteria_text = "\n".join(f"- {item}" for item in criteria) or "（未拆出验收点）"
     prompt = (
@@ -102,29 +133,43 @@ def _llm_supplements(requirement_text: str, criteria: List[str], rule_cases: Lis
         "title, precondition, steps(字符串数组), expected_result(字符串数组), priority(P0-P4), covers(对应的验收点原文)。\n\n"
         f"需求：\n{requirement_text}\n\n验收点：\n{criteria_text}\n\n已有规则用例：\n{rule_titles}\n"
     )
+    from utils.utils_performance_monitoring.token_monitor import (
+        ensure_session_budget,
+        record_message_usage,
+        track_session_usage,
+    )
+    from utils.utils_performance_monitoring.token_session import TokenSessionLimitExceeded
+
+    try:
+        ensure_session_budget()
+    except TokenSessionLimitExceeded:
+        return [], "llm_budget_exhausted"
     try:
         response = llm.invoke(prompt)
     except Exception as llm_error:  # noqa: BLE001 - 模型异常不应让规则结果一起丢失
+        track_session_usage()
         logger.warning("规则骨架补充调用模型失败: %s", llm_error)
-        return [], "模型补充失败，只返回规则骨架"
+        return [], "llm_failed"
+    record_message_usage(response, source="agent")
     content = getattr(response, "content", response)
     if isinstance(content, list):
         content = "".join(str(part.get("text", "")) if isinstance(part, dict) else str(part) for part in content)
     supplements = _parse_llm_cases(str(content or ""))
     if not supplements:
-        return [], "模型没有返回可解析的补充用例，只返回规则骨架"
+        return [], "llm_unparsed"
     return supplements[:count], ""
 
 
 def _resolve_requirement(requirement_id: str) -> tuple[Requirement | None, str]:
+    """返回 (需求, 错误 message key)。"""
     req_id = str(requirement_id or "").strip()
     if not req_id:
         return None, ""
     row = Requirement.query.filter_by(req_id=req_id).first()
     if not row:
-        return None, "需求不存在"
+        return None, "requirement_not_found"
     if not can_access_record(row, "requirements"):
-        return None, "没有权限访问该需求"
+        return None, "requirement_forbidden"
     return row, ""
 
 
@@ -171,23 +216,23 @@ def tool_rule_skeleton_cases(
     """规则先写出确定性用例，模型只补缺口。save=False 只预览；确认后按预览原样入库。"""
     requirement, req_error = _resolve_requirement(requirement_id)
     if req_error:
-        return {"success": False, "message": req_error, "cases": []}
+        return {"success": False, **_message(req_error), "cases": []}
     linked_req_id = requirement.req_id if requirement else ""
 
     if save:
         cases = preview_cases if isinstance(preview_cases, list) else []
         if not cases:
-            return {"success": False, "message": "没有可保存的预览用例", "cases": []}
+            return {"success": False, **_message("no_preview_cases"), "cases": []}
         try:
             saved = _save_cases(cases, linked_req_id)
         except Exception as save_error:  # noqa: BLE001
             db.session.rollback()
             logger.error("规则骨架入库失败: %s", save_error)
-            return {"success": False, "message": f"保存失败: {save_error}", "cases": []}
+            return {"success": False, **_message("save_failed"), "cases": []}
         return {
             "success": True,
             "dry_run": False,
-            "message": f"已保存 {len(saved)} 条草稿用例",
+            **_message("cases_saved", count=len(saved)),
             "cases": saved,
             "count": len(saved),
             "requirement_id": linked_req_id,
@@ -195,29 +240,29 @@ def tool_rule_skeleton_cases(
 
     text = str(requirement_text or "").strip() or (requirement.content if requirement else "")
     if not text:
-        return {"success": False, "message": "请填写需求描述或选择关联需求", "cases": []}
+        return {"success": False, **_message("requirement_text_required"), "cases": []}
 
     built = build_rule_cases(text)
     rule_cases = built["cases"]
     supplements: List[Dict[str, Any]] = []
-    llm_note = ""
+    llm_note_key = ""
     supplement_count = max(1, min(_safe_int(case_count, 5), MAX_LLM_SUPPLEMENTS))
     if use_llm:
-        supplements, llm_note = _llm_supplements(text, built["criteria"], rule_cases, supplement_count)
+        supplements, llm_note_key = _llm_supplements(text, built["criteria"], rule_cases, supplement_count)
     cases = rule_cases + supplements
     if not cases:
         return {
             "success": False,
-            "message": llm_note or "没有识别出搜索、登录或表单场景，也未启用模型补充",
+            **_message(llm_note_key or "no_scenario"),
             "cases": [],
             "scenarios": built["scenarios"],
         }
-    message = f"规则写出 {len(rule_cases)} 条，模型补充 {len(supplements)} 条，确认后入库"
     return {
         "success": True,
         "dry_run": True,
-        "message": message,
-        "llm_note": llm_note,
+        **_message("skeleton_preview", rule=len(rule_cases), llm=len(supplements)),
+        "llm_note": _message_text(llm_note_key),
+        "llm_note_key": llm_note_key,
         "cases": cases,
         "count": len(cases),
         "rule_count": len(rule_cases),
@@ -259,7 +304,7 @@ def tool_ac_coverage_review(requirement_id: str = "") -> Dict[str, Any]:
     """只读：按需求拆出的验收点对照关联用例，列出缺口和结构问题。"""
     requirement, req_error = _resolve_requirement(requirement_id)
     if req_error or requirement is None:
-        return {"success": False, "message": req_error or "请选择需求"}
+        return {"success": False, **_message(req_error or "requirement_required")}
 
     criteria = extract_acceptance_criteria(requirement.content)
     query = filter_column_eq(
@@ -296,7 +341,7 @@ def tool_ac_coverage_review(requirement_id: str = "") -> Dict[str, Any]:
     total = len(rows)
     return {
         "success": True,
-        "message": f"{total} 个验收点覆盖 {covered_count} 个，{len(issues)} 条用例结构待改",
+        **_message("coverage_summary", total=total, covered=covered_count, issues=len(issues)),
         "requirement": {"req_id": requirement.req_id, "title": requirement.title},
         "criteria": rows,
         "gaps": gaps,
@@ -346,9 +391,12 @@ def tool_trace_matrix(limit: int = 50) -> Dict[str, Any]:
     )
     return {
         "success": True,
-        "message": (
-            f"{len(requirements)} 条需求中 {len(uncovered)} 条没有用例；"
-            f"{len(dangling)} 条用例指向不存在的需求，{len(unlinked)} 条用例未关联需求"
+        **_message(
+            "trace_summary",
+            requirements=len(requirements),
+            uncovered=len(uncovered),
+            dangling=len(dangling),
+            unlinked=len(unlinked),
         ),
         "requirement_total": len(requirements),
         "case_total": len(cases),

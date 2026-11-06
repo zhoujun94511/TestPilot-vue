@@ -95,7 +95,7 @@ class StatsService:
             logger.error(f"获取概览统计失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'获取统计数据失败: {str(e)}'
+                'message': '获取统计数据失败'
             }
 
     @staticmethod
@@ -400,7 +400,7 @@ class StatsService:
             logger.error(f"获取性能指标失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'获取性能指标失败: {str(e)}'
+                'message': '获取性能指标失败'
             }
 
     def get_usage_statistics(self, db_session: Session) -> Dict[str, Any]:
@@ -440,7 +440,7 @@ class StatsService:
             logger.error(f"获取使用统计失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'获取使用统计失败: {str(e)}'
+                'message': '获取使用统计失败'
             }
 
     @staticmethod
@@ -645,7 +645,7 @@ class StatsService:
             logger.error(f"获取Token使用统计失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'获取Token使用统计失败: {str(e)}'
+                'message': '获取Token使用统计失败'
             }
 
     def get_log_statistics(self, db_session: Session, hours: int = 24) -> Dict[str, Any]:
@@ -712,7 +712,7 @@ class StatsService:
             logger.error(f"获取日志统计失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'获取日志统计失败: {str(e)}'
+                'message': '获取日志统计失败'
             }
 
     @staticmethod
@@ -763,7 +763,7 @@ class StatsService:
             logger.error(f"记录自定义指标失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'记录自定义指标失败: {str(e)}'
+                'message': '记录自定义指标失败'
             }
 
     def get_system_health(self, db_session: Session) -> Dict[str, Any]:
@@ -813,7 +813,7 @@ class StatsService:
             return {
                 'success': False,
                 'status': 'unhealthy',
-                'message': f'健康检查失败: {str(e)}'
+                'message': '健康检查失败'
             }
 
     @staticmethod
@@ -1079,7 +1079,7 @@ class StatsService:
                 'cpu_healthy': True,
                 'disk_healthy': True,
                 'has_data': False,
-                'error': str(e),
+                'error': 'internal_error',
                 'from_cache': False
             }
             # 即使出错也缓存结果，避免频繁重试
@@ -1138,7 +1138,7 @@ class StatsService:
                 'overall': True,  # 改为True，避免误报
                 'error_rate': 0.0,
                 'threshold': 5.0,
-                'message': f'检查失败: {str(e)}'
+                'message': '检查失败'
             }
 
     @staticmethod

@@ -1,4 +1,15 @@
-import http, { ApiError, del, get, notifyUnauthorized, post, put } from './http';
+import http, {
+  ApiError,
+  del,
+  errorCodeFromPayload,
+  get,
+  LONG_TASK_TIMEOUT_MS,
+  notifyPasswordChangeRequired,
+  notifyUnauthorized,
+  post,
+  put,
+  resolveProjectHeaders
+} from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -14,9 +25,13 @@ export type ChatMode = 'chat';
 export type ChatExportFormat = 'json' | 'txt' | 'excel';
 export type ChatStreamEventType = 'start' | 'chunk' | 'end' | 'error';
 
+/** 空表示标题未定，auto 为自动生成后锁定，manual 为用户命名 */
+export type ChatSessionTitleSource = 'auto' | 'manual' | null;
+
 export interface ChatSessionRecord {
   session_id: string;
   title: string;
+  title_source?: ChatSessionTitleSource;
   last_activity?: string | null;
   message_count?: number;
   total_tokens?: number;
@@ -200,10 +215,15 @@ function normalizeTextArray(value: unknown): string[] {
   return [];
 }
 
+function normalizeTitleSource(value: unknown): ChatSessionTitleSource {
+  return value === 'auto' || value === 'manual' ? value : null;
+}
+
 function normalizeSessionRecord(raw: Record<string, unknown>): ChatSessionRecord {
   return {
     session_id: String(pickCompatField(raw, ['session_id', 'id'], '')),
     title: String(pickCompatField(raw, ['title'], '')),
+    title_source: normalizeTitleSource(raw.title_source),
     last_activity: pickCompatField(raw, ['last_activity', 'updated_time', 'updated_at'], null),
     message_count: raw.message_count != null ? Number(raw.message_count) : undefined,
     total_tokens: raw.total_tokens != null ? Number(raw.total_tokens) : undefined,
@@ -325,7 +345,8 @@ async function fetchSse(url: string, body: ChatMessagePayload, signal?: AbortSig
     headers: {
       'Content-Type': 'application/json',
       'Accept-Language': localStorage.getItem('testpilot_locale') || 'zh-CN',
-      'X-Requested-With': 'XMLHttpRequest'
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(await resolveProjectHeaders())
     },
     credentials: 'include',
     body: JSON.stringify(body),
@@ -340,11 +361,12 @@ async function fetchSse(url: string, body: ChatMessagePayload, signal?: AbortSig
     try {
       const payload = await response.json();
       if (isRecord(payload)) {
+        notifyPasswordChangeRequired(response.status, payload.code);
         const message = pickCompatField(payload, ['message', 'error', 'details'], '');
         if (message) {
           errorMessage = String(message);
         }
-        const normalizedErrorCode = pickCompatField(payload, ['error_code'], '');
+        const normalizedErrorCode = pickCompatField(payload, ['error_code'], '') || errorCodeFromPayload(payload);
         if (normalizedErrorCode) {
           errorCode = String(normalizedErrorCode);
         }
@@ -416,6 +438,8 @@ async function fetchSse(url: string, body: ChatMessagePayload, signal?: AbortSig
         if (done) break;
       }
     } finally {
+      // 调用方中途 break 时要取消底层流，否则连接会一直挂到服务端结束
+      await reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   }
@@ -452,7 +476,7 @@ export async function getChatHistory(sessionId: string, params: Record<string, u
 
 export async function sendChatMessage(payload: ChatMessagePayload): Promise<ChatMessageResult> {
   try {
-    const response = await post<unknown>('/chat/message', payload);
+    const response = await post<unknown>('/chat/message', payload, { timeout: LONG_TASK_TIMEOUT_MS });
     const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to send chat message'
     });
@@ -555,6 +579,19 @@ export async function updateChatSession(
   }
 }
 
+/** 第一轮有效问答后请求后端生成标题；标题已定或还没有有效问答时返回原标题 */
+export async function generateChatSessionTitle(sessionId: string): Promise<ChatSessionRecord | null> {
+  try {
+    const response = await post<unknown>(`/chat/session/${encodeURIComponent(sessionId)}/title`, {});
+    const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
+      fallbackMessage: 'Failed to generate chat session title'
+    });
+    return isRecord(normalized.session) ? normalizeSessionRecord(normalized.session) : null;
+  } catch (error) {
+    coreNormalizeError(error, 'Failed to generate chat session title');
+  }
+}
+
 export async function deleteChatSession(sessionId: string): Promise<{ success: boolean; raw?: Record<string, unknown> }> {
   try {
     const response = await del<unknown>(`/chat/session/${encodeURIComponent(sessionId)}`);
@@ -640,7 +677,8 @@ export async function exportChatHistory(sessionId: string, format: ChatExportFor
       url: '/export/chat/history',
       method: 'GET',
       params: { session_id: sessionId, format },
-      responseType: 'blob'
+      responseType: 'blob',
+      timeout: LONG_TASK_TIMEOUT_MS
     });
 
     return {

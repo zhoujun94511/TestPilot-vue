@@ -4,6 +4,7 @@
 智能检索策略模块
 实现多策略检索、动态权重调整、上下文感知检索等功能
 """
+import threading
 import time
 from enum import Enum
 from dataclasses import dataclass
@@ -86,7 +87,8 @@ class SmartRetrievalStrategy:
             'strategy_usage': {strategy.value: 0 for strategy in RetrievalStrategy},
             'success_rate': 0.0
         }
-        self._active_vector_search_kwargs: dict = {}
+        self._call_state = threading.local()
+        self._stats_lock = threading.Lock()
 
     @staticmethod
     def _is_empty_query_error(error: Exception) -> bool:
@@ -101,6 +103,7 @@ class SmartRetrievalStrategy:
         strategy: Optional[RetrievalStrategy] = None,
         top_k: Optional[int] = None,
         vector_search_kwargs: Optional[dict] = None,
+        score_threshold: Optional[float] = None,
     ) -> List[RetrievalResult]:
         """
         执行智能检索
@@ -112,37 +115,30 @@ class SmartRetrievalStrategy:
             strategy: 指定检索策略，如果为None则自动选择
             top_k: 返回结果数量，如果为None则使用配置中的top_k
             vector_search_kwargs: 传给向量检索的额外参数（如部门 pre-filter）
+            score_threshold: 相似度阈值，None 时用配置中心的 RAG_SCORE_THRESHOLD
             
         Returns:
             检索结果列表
         """
         start_time = time.time()
-        self._active_vector_search_kwargs = vector_search_kwargs or {}
-        
-        # 使用传入的 top_k 或配置中的 top_k
-        effective_top_k = top_k if top_k is not None else self.config.top_k
-        
+        effective_top_k = top_k if top_k is not None else self._live_top_k()
+        # 单例被多个请求线程共用：部门过滤和 top_k 只能放在线程本地，写到实例上会串到别人的检索里
+        self._call_state.vector_search_kwargs = vector_search_kwargs or {}
+        self._call_state.top_k = effective_top_k
+
         try:
             # 自动选择最佳策略
             if strategy is None:
                 strategy = self._select_optimal_strategy(query, context)
-            
-            # 临时更新配置以使用指定的 top_k
-            original_top_k = self.config.top_k
-            self.config.top_k = effective_top_k
-            
-            try:
-                # 执行检索
-                results = self._execute_retrieval(query, vector_db, context, strategy)
-            finally:
-                # 恢复原始配置
-                self.config.top_k = original_top_k
+
+            results = self._execute_retrieval(query, vector_db, context, strategy)
             
             # 重排序
             if self.config.enable_reranking:
                 results = self._rerank_results(results, query, context)
 
-            results = self._apply_score_threshold(results, self._live_score_threshold())
+            cutoff = self._live_score_threshold() if score_threshold is None else float(score_threshold)
+            results = self._apply_score_threshold(results, cutoff)
             
             # 更新性能统计
             self._update_performance_stats(strategy, time.time() - start_time, True)
@@ -158,10 +154,14 @@ class SmartRetrievalStrategy:
             )
             return []
         finally:
-            self._active_vector_search_kwargs = {}
+            self._call_state.vector_search_kwargs = {}
+            self._call_state.top_k = None
 
     def _vector_search_kwargs(self) -> dict:
-        return getattr(self, '_active_vector_search_kwargs', {}) or {}
+        return getattr(self._call_state, 'vector_search_kwargs', None) or {}
+
+    def _call_top_k(self) -> int:
+        return getattr(self._call_state, 'top_k', None) or self._live_top_k()
     
     def _select_optimal_strategy(self, query: str, context: Optional[str] = None) -> RetrievalStrategy:
         """
@@ -263,7 +263,7 @@ class SmartRetrievalStrategy:
             # 如果方法不存在，降级到 similarity_search
             try:
                 docs_with_scores = vector_db.similarity_search_with_score(
-                    query, k=self.config.top_k, **self._vector_search_kwargs()
+                    query, k=self._call_top_k(), **self._vector_search_kwargs()
                 )
                 
                 results = []
@@ -283,7 +283,7 @@ class SmartRetrievalStrategy:
             except AttributeError:
                 # 如果 similarity_search_with_score 不存在，使用 similarity_search
                 docs = vector_db.similarity_search(
-                    query, k=self.config.top_k, **self._vector_search_kwargs()
+                    query, k=self._call_top_k(), **self._vector_search_kwargs()
                 )
                 
                 results = []
@@ -321,7 +321,7 @@ class SmartRetrievalStrategy:
             
             # 执行搜索
             docs = vector_db.similarity_search(
-                keyword_query, k=self.config.top_k, **self._vector_search_kwargs()
+                keyword_query, k=self._call_top_k(), **self._vector_search_kwargs()
             )
             
             results = []
@@ -544,17 +544,27 @@ class SmartRetrievalStrategy:
         except (ImportError, TypeError, ValueError):
             return float(self.config.score_threshold)
 
+    def _live_top_k(self) -> int:
+        try:
+            from config.settings import settings
+
+            value = int(getattr(settings, 'RAG_TOP_K', self.config.top_k))
+            return value if value > 0 else self.config.top_k
+        except (ImportError, TypeError, ValueError):
+            return self.config.top_k
+
     def _apply_score_threshold(
         self,
         results: List[RetrievalResult],
         threshold: Optional[float] = None,
     ) -> List[RetrievalResult]:
-        """丢弃低于 score_threshold 的检索结果（与知识库搜索 API 行为一致）。"""
+        """丢弃相似度低于 score_threshold 的检索结果（与知识库搜索 API 行为一致）。
+        混合、上下文感知的加权分最高只有 0.6 左右，只能用来排序；有语义相似度时按语义相似度过滤。"""
         if not results:
             return results
         cutoff = self.config.score_threshold if threshold is None else threshold
         threshold = float(cutoff)
-        kept = [r for r in results if float(r.score or 0) >= threshold]
+        kept = [r for r in results if self.threshold_score(r) >= threshold]
         dropped = len(results) - len(kept)
         if dropped:
             logger.debug(
@@ -564,6 +574,14 @@ class SmartRetrievalStrategy:
                 len(results),
             )
         return kept
+
+    @staticmethod
+    def threshold_score(result: RetrievalResult) -> float:
+        factors = result.relevance_factors or {}
+        semantic = factors.get('semantic_similarity')
+        if semantic is not None:
+            return float(semantic or 0)
+        return float(result.score or 0)
 
     def _rerank_results(self, results: List[RetrievalResult], query: str, context: Optional[str] = None) -> List[RetrievalResult]:
         """重排序检索结果"""
@@ -612,6 +630,10 @@ class SmartRetrievalStrategy:
     
     def _update_performance_stats(self, strategy: RetrievalStrategy, response_time: float, success: bool):
         """更新性能统计"""
+        with self._stats_lock:
+            self._update_performance_stats_locked(strategy, response_time, success)
+
+    def _update_performance_stats_locked(self, strategy: RetrievalStrategy, response_time: float, success: bool):
         self.performance_stats['total_queries'] += 1
         self.performance_stats['strategy_usage'][strategy.value] += 1
         

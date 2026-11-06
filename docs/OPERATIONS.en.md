@@ -272,8 +272,8 @@ See logs under `logs/` for detailed diagnostics.
 
 We welcome all contributions!
 
-- **Report issues** via GitLab Issues.
-- **Submit code** via Merge Requests.
+- **Report issues** via GitHub Issues.
+- **Submit code** via Pull Requests.
 - **Improve docs** (including translations).
 - **Test & feedback** for new features.
 

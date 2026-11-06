@@ -117,7 +117,7 @@ class DocumentPreprocessor:
         except Exception as e:
             logger.error(f"文档分析失败: {e}")
             return {
-                'error': str(e),
+                'error': 'internal_error',
                 'total_modules': 0,
                 'estimated_cases': 0,
                 'batches_needed': 0,

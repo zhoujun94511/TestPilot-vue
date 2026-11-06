@@ -38,6 +38,12 @@ const CASE_CATEGORY_ALIASES: Record<string, string> = {
 /**
  * Display name for a test case category, using i18n when the value matches known aliases.
  */
+export function canonicalCaseCategory(raw: string): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  return CASE_CATEGORY_ALIASES[value] || CASE_CATEGORY_ALIASES[value.toLowerCase()] || value;
+}
+
 export function resolveCaseCategoryDisplayName(raw: string, t: ComposerTranslation): string {
   const value = String(raw).trim();
   if (!value) return '';

@@ -27,6 +27,10 @@ EVENT_USER_UPDATED = 'user_updated'
 EVENT_USER_DELETED = 'user_deleted'
 EVENT_USER_DEACTIVATED = 'user_deactivated'
 EVENT_ACCOUNT_UNLOCKED = 'account_unlocked'
+# 项目管理
+EVENT_PROJECT_CREATED = 'project_created'
+EVENT_PROJECT_RENAMED = 'project_renamed'
+EVENT_PROJECT_DELETED = 'project_deleted'
 
 
 def auth_audit_enabled() -> bool:

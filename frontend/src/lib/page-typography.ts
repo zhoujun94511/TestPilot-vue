@@ -47,13 +47,6 @@ export const brandNameClass = 'text-base font-bold text-[var(--tp-color-text-900
 export const brandSubtitleClass =
   'mt-0.5 truncate text-[0.6875rem] font-medium leading-tight tracking-normal text-[var(--tp-color-text-500)]';
 
-/**
- * 顶栏 kicker（`common.shell.pageKicker`）
- * 桌面侧栏已展示品牌，≥1200px 隐藏以免与侧栏 IA 重复；窄屏抽屉模式保留作上下文锚点。
- */
-export const shellPageKickerClass =
-  'mb-0.5 text-[0.68rem] font-bold uppercase leading-none tracking-[0.1em] text-[var(--tp-color-text-500)] max-[1199px]:block min-[1200px]:hidden';
-
 export const pageContextClass =
   'mt-1.5 text-lg font-bold leading-tight tracking-tight text-[var(--tp-color-text-900)]';
 

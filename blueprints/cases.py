@@ -5,11 +5,14 @@ from typing import Any
 from models.models import db, TestCase
 from datetime import datetime, timezone
 from werkzeug.exceptions import BadRequest
+from services.case_count import clamp_cases_per_requirement
 from services.case_service import CaseService
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, stream_with_context
 from utils.utils_business_logic.case_id_generator import generate_case_id_from_data
 from utils.utils_core.api_error_handler import build_internal_error_result
+from utils.utils_core import error_codes as ec
 from config.settings import settings as config_settings
+from services.case_field_filters import normalize_priority
 from services.auth_service import stamp_ownership
 from services.data_scope import apply_data_scope, can_access_record
 import re
@@ -19,6 +22,8 @@ cases_bp = Blueprint('cases', __name__)
 
 # 初始化服务
 case_service = CaseService()
+
+_BUDGET_ERROR_CODES = {ec.TOKEN_SESSION_CALL_LIMIT, ec.TOKEN_SESSION_TOKEN_LIMIT}
 
 
 def _infer_language_from_text(text: str) -> str:
@@ -74,6 +79,37 @@ def _json_text(value):
     return json.dumps([] if value is None else value, ensure_ascii=False)
 
 
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _requirement_job(req, index: int):
+    if isinstance(req, dict):
+        text = str(
+            req.get('content') or req.get('text') or req.get('requirement') or req.get('title') or ''
+        ).strip()
+        req_id = str(req.get('req_id') or req.get('id') or f'req_{index + 1}')
+        return req_id, text
+    return f'req_{index + 1}', str(req or '').strip()
+
+
+def _persist_generated_cases(case_rows, requirement_id=None):
+    """只提交当前需求的用例。失败时回滚这一批，不影响已经提交的需求。"""
+    saved = []
+    try:
+        for case_data in case_rows or []:
+            if not isinstance(case_data, dict):
+                continue
+            test_case = _new_test_case(case_data, requirement_id or case_data.get('requirement_id'))
+            db.session.add(test_case)
+            saved.append(test_case)
+        db.session.commit()
+        return [test_case.to_dict() for test_case in saved]
+    except Exception:
+        db.session.rollback()
+        raise
+
+
 def _new_test_case(case_data, requirement_id=None):
     tags = case_data.get('tags') or []
     if isinstance(tags, str):
@@ -88,17 +124,30 @@ def _new_test_case(case_data, requirement_id=None):
         precondition=case_data.get('precondition', case_data.get('preconditions', '')),
         steps=_json_text(case_data.get('steps', [])),
         expected_result=_json_text(case_data.get('expected_result', case_data.get('expected', []))),
-        priority=case_data.get('priority', 'P2'),
+        priority=normalize_priority(case_data.get('priority')),
         category=case_data.get('category', case_data.get('test_type', 'functional')),
         test_method=case_data.get('test_method', ''),
         module=case_data.get('module', ''),
         tags=tag_text,
         status='draft',
         created_by='system',
-        requirement_id=requirement_id
+        requirement_id=_accessible_requirement_id(requirement_id)
     )
     stamp_ownership(test_case)
     return test_case
+
+
+def _accessible_requirement_id(requirement_id):
+    """只关联当前用户看得到的已有需求；批量生成里的 req_1 这类临时编号和别部门的需求一律不关联。"""
+    text = str(requirement_id or '').strip()
+    if not text:
+        return None
+    from models.models import Requirement
+
+    requirement = Requirement.query.filter_by(req_id=text).first()
+    if requirement is None or not can_access_record(requirement, 'requirements'):
+        return None
+    return text
 
 
 def _hallucination_payload(result):
@@ -132,7 +181,7 @@ def generate_test_cases():
 
         # 可选参数
         use_rag = _resolve_case_generation_use_rag()
-        case_count = data.get('case_count', 5)
+        case_count = clamp_cases_per_requirement(data.get('case_count', 5), 5)
         # 优先级由AI模型自动判断，不需要用户输入
         category = data.get('category', 'functional')
         output_language = _resolve_output_language(data, requirement_text)
@@ -217,8 +266,9 @@ def batch_generate_cases():
 
         # 批量生成参数
         use_rag = _resolve_case_generation_use_rag()
-        case_count_per_req = data.get('case_count_per_req', 3)
-        process_mode = data.get('process_mode', 'sequential')
+        case_count_per_req = clamp_cases_per_requirement(data.get('case_count_per_req', 3), 3)
+        # 并行模式在线程里跑模型调用，额度计数和数据库会话都不是线程安全的，接口只允许顺序处理
+        process_mode = 'sequential'
         language_sample_text = '\n'.join([str(item) for item in requirements])
         output_language = _resolve_output_language(data, language_sample_text)
 
@@ -234,20 +284,36 @@ def batch_generate_cases():
         )
 
         if result['success']:
-            # 保存所有生成的用例
             all_saved_cases = []
+            save_failures = 0
             for req_result in result['results']:
-                if req_result['success']:
-                    for case_data in req_result['cases']:
-                        test_case = _new_test_case(case_data, req_result.get('requirement_id'))
-                        db.session.add(test_case)
-                        all_saved_cases.append(test_case.to_dict())
+                if not req_result.get('success'):
+                    continue
+                try:
+                    saved = _persist_generated_cases(
+                        req_result.get('cases') or [],
+                        req_result.get('requirement_id')
+                    )
+                    all_saved_cases.extend(saved)
+                except Exception as save_error:
+                    save_failures += 1
+                    current_app.logger.error(f"保存需求用例失败: {save_error}")
 
-            db.session.commit()
+            if not all_saved_cases:
+                return jsonify({
+                    'success': False,
+                    'message': '批量生成完成，但用例入库失败',
+                    'error': 'case_save_failed',
+                    'error_code': 'case_save_failed',
+                    'retryable': True
+                }), 500
 
+            message = f'批量生成完成，共生成{len(all_saved_cases)}个测试用例'
+            if save_failures:
+                message = f'{message}，{save_failures}个需求入库失败'
             return jsonify({
                 'success': True,
-                'message': f'批量生成完成，共生成{len(all_saved_cases)}个测试用例',
+                'message': message,
                 'cases': all_saved_cases,
                 'results': result['results'],
                 'total_cases': len(all_saved_cases),
@@ -281,13 +347,159 @@ def batch_generate_cases():
         }), error_payload['status_code']
 
 
+@cases_bp.route('/batch-generate/stream', methods=['POST'])
+def batch_generate_cases_stream():
+    """按需求逐条生成。每完成一条就入库并推送，失败只丢掉当前这条。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        requirements = data.get('requirements') or []
+        if not isinstance(requirements, list) or not requirements:
+            raise BadRequest("需求列表不能为空")
+
+        case_count_per_req = clamp_cases_per_requirement(data.get('case_count_per_req') or 3, 3)
+        max_case_num = int(getattr(config_settings, 'MAX_CASE_NUM', 50))
+        if len(requirements) * case_count_per_req > max_case_num:
+            return jsonify({
+                'success': False,
+                'message': f'批量生成用例数({len(requirements) * case_count_per_req})超过最大限制({max_case_num})',
+                'error': 'validation_failed',
+                'error_code': 'validation_failed',
+                'retryable': False
+            }), 400
+
+        use_rag = _resolve_case_generation_use_rag()
+        texts = [_requirement_job(item, index)[1] for index, item in enumerate(requirements)]
+        output_language = _resolve_output_language(data, '\n'.join(texts))
+        llm = getattr(current_app, 'llm_case_generation', None)
+        vector_db = getattr(current_app, 'vector_db', None) if use_rag else None
+        total = len(requirements)
+
+        def generate_response():
+            saved_count = 0
+            failed_count = 0
+            yield _sse({
+                'type': 'start',
+                'total': total,
+                'saved_count': 0,
+                'failed_count': 0
+            })
+            for index, req in enumerate(requirements):
+                req_id, req_text = _requirement_job(req, index)
+                if not req_text:
+                    failed_count += 1
+                    yield _sse({
+                        'type': 'requirement_failed',
+                        'index': index,
+                        'total': total,
+                        'requirement_id': req_id,
+                        'saved_count': saved_count,
+                        'failed_count': failed_count,
+                        'message': '需求内容为空',
+                        'cases': []
+                    })
+                    continue
+                try:
+                    result = case_service.generate_cases(
+                        requirement_text=req_text,
+                        use_rag=use_rag,
+                        case_count=case_count_per_req,
+                        output_language=output_language,
+                        llm=llm,
+                        vector_db=vector_db,
+                        start_monitoring=False
+                    )
+                    cases = result.get('cases') if isinstance(result, dict) else None
+                    if not (isinstance(result, dict) and result.get('success') and cases):
+                        failed_count += 1
+                        yield _sse({
+                            'type': 'requirement_failed',
+                            'index': index,
+                            'total': total,
+                            'requirement_id': req_id,
+                            'saved_count': saved_count,
+                            'failed_count': failed_count,
+                            'message': (result.get('message') if isinstance(result, dict) else '') or '生成失败',
+                            'cases': []
+                        })
+                        if isinstance(result, dict) and result.get('error_code') in _BUDGET_ERROR_CODES:
+                            # 额度用尽后后面的需求也不会成功，直接收尾
+                            failed_count += total - index - 1
+                            break
+                        continue
+                    saved = _persist_generated_cases(cases, req_id)
+                    saved_count += len(saved)
+                    yield _sse({
+                        'type': 'requirement_done',
+                        'index': index,
+                        'total': total,
+                        'requirement_id': req_id,
+                        'saved_count': saved_count,
+                        'failed_count': failed_count,
+                        'message': result.get('message') or '',
+                        'cases': saved
+                    })
+                except Exception as item_error:
+                    db.session.rollback()
+                    failed_count += 1
+                    current_app.logger.error(f"流式生成需求 {req_id} 失败: {item_error}")
+                    yield _sse({
+                        'type': 'requirement_failed',
+                        'index': index,
+                        'total': total,
+                        'requirement_id': req_id,
+                        'saved_count': saved_count,
+                        'failed_count': failed_count,
+                        'message': '生成失败',
+                        'cases': []
+                    })
+
+            message = f'批量生成完成，共入库{saved_count}个测试用例'
+            if failed_count:
+                message = f'{message}，{failed_count}个需求失败，已入库的用例已保留'
+            yield _sse({
+                'type': 'done',
+                'total': total,
+                'saved_count': saved_count,
+                'failed_count': failed_count,
+                'message': message,
+                'cases': []
+            })
+
+        return current_app.response_class(
+            stream_with_context(generate_response()),
+            mimetype='text/event-stream; charset=utf-8',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+                'Content-Type': 'text/event-stream; charset=utf-8'
+            }
+        )
+    except BadRequest as e:
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'error': 'bad_request'
+        }), 400
+    except Exception as e:
+        current_app.logger.error(f"流式批量生成失败: {e}")
+        error_payload = build_internal_error_result(message='批量生成测试用例失败')
+        return jsonify({
+            'success': False,
+            'message': error_payload['message'],
+            'error': error_payload['error'],
+            'error_code': error_payload['error_code'],
+            'retryable': error_payload['retryable']
+        }), error_payload['status_code']
+
+
 @cases_bp.route('/list', methods=['GET'])
 def list_test_cases():
     """获取测试用例列表"""
     try:
         # 获取查询参数
         page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
+        per_page = min(max(1, request.args.get('per_page', 20, type=int) or 20), 1000)
         category = request.args.get('category')
         priority = request.args.get('priority')
         status = request.args.get('status')
@@ -297,17 +509,18 @@ def list_test_cases():
         query = apply_data_scope(TestCase.query, TestCase, 'cases')
 
         # 添加筛选条件
+        from services.case_field_filters import case_category_values, case_priority_values, filter_column_in
         from services.sql_query_helpers import filter_column_eq
 
-        query = filter_column_eq(query, TestCase.category, category)
-        query = filter_column_eq(query, TestCase.priority, priority)
+        query = filter_column_in(query, TestCase.category, case_category_values(category))
+        query = filter_column_in(query, TestCase.priority, case_priority_values(priority))
         query = filter_column_eq(query, TestCase.status, status)
         if search:
             query = query.filter(
-                TestCase.title.contains(search) |
-                TestCase.description.contains(search) |
-                TestCase.case_id.contains(search) |
-                TestCase.display_id.contains(search)
+                TestCase.title.contains(search, autoescape=True) |
+                TestCase.description.contains(search, autoescape=True) |
+                TestCase.case_id.contains(search, autoescape=True) |
+                TestCase.display_id.contains(search, autoescape=True)
             )
 
         # 排序和分页
@@ -402,9 +615,33 @@ def update_test_case(case_id):
         if not data:
             raise BadRequest("请求数据不能为空")
 
+        from services.record_conflict import MissingRevision, RecordConflict, ensure_unchanged
+
+        try:
+            ensure_unchanged(test_case, data.get('updated_time'))
+        except MissingRevision:
+            return jsonify({
+                'success': False,
+                'code': 'VALIDATION_FAILED',
+                'message': 'Request failed',
+                'message_key': 'common.conflict.revisionRequired',
+                'error': 'VALIDATION_FAILED',
+            }), 400
+        except RecordConflict:
+            return jsonify({
+                'success': False,
+                'code': 'CONFLICT',
+                'message': 'Request failed',
+                'message_key': 'common.conflict.stale',
+                'error': 'CONFLICT',
+            }), 409
+
         # 更新字段
         if 'title' in data:
-            test_case.title = data['title']
+            title = str(data.get('title') or '').strip()
+            if not title:
+                raise BadRequest("用例标题不能为空")
+            test_case.title = title
         if 'description' in data:
             test_case.description = data['description']
         if 'precondition' in data:
@@ -414,7 +651,7 @@ def update_test_case(case_id):
         if 'expected_result' in data:
             test_case.expected_result = _json_text(data['expected_result'])
         if 'priority' in data:
-            test_case.priority = data['priority']
+            test_case.priority = normalize_priority(data['priority'], test_case.priority or 'P2')
         if 'category' in data:
             test_case.category = data['category']
         if 'tags' in data:
@@ -442,6 +679,7 @@ def update_test_case(case_id):
             'error': 'bad_request'
         }), 400
     except Exception as e:
+        db.session.rollback()
         current_app.logger.error(f"更新测试用例失败: {e}")
         return jsonify({
             'success': False,
@@ -584,9 +822,22 @@ def generate_cases_from_analysis():
                 'success': False,
                 'message': '分析结果中没有需求信息'
             }), 400
+        case_count_per_req = clamp_cases_per_requirement(
+            data.get('case_count_per_req', data.get('case_count', 3)),
+            3
+        )
+        max_case_num = int(getattr(config_settings, 'MAX_CASE_NUM', 50))
+        if len(requirements) * case_count_per_req > max_case_num:
+            return jsonify({
+                'success': False,
+                'message': f'批量生成用例数({len(requirements) * case_count_per_req})超过最大限制({max_case_num})',
+                'error': 'validation_failed',
+                'error_code': 'validation_failed',
+                'retryable': False
+            }), 400
 
-        # 为每个需求生成测试用例
-        all_cases = []
+        # 为每个需求生成测试用例，完成一条就提交一条
+        saved_cases = []
         failures = []
         for req in requirements:
             if not isinstance(req, dict):
@@ -595,7 +846,7 @@ def generate_cases_from_analysis():
             result = case_service.generate_cases(
                 requirement_text=req.get('content', ''),
                 use_rag=use_rag,
-                case_count=3,  # 每个需求生成3个用例
+                case_count=case_count_per_req,
                 category='functional',
                 output_language=output_language,
                 llm=getattr(current_app, 'llm_case_generation', None),  # type: ignore 使用用例生成专用LLM
@@ -603,7 +854,15 @@ def generate_cases_from_analysis():
             )
 
             if result.get('success') and result.get('cases'):
-                all_cases.extend(result['cases'])
+                try:
+                    saved_cases.extend(_persist_generated_cases(result['cases'], req.get('req_id')))
+                except Exception as save_error:
+                    current_app.logger.error(f"保存需求用例失败: {save_error}")
+                    failures.append({
+                        'req_id': req.get('req_id'),
+                        'title': req.get('title', ''),
+                        'message': '用例入库失败'
+                    })
             else:
                 failures.append({
                     'req_id': req.get('req_id'),
@@ -611,14 +870,7 @@ def generate_cases_from_analysis():
                     'message': result.get('message', '生成失败') if isinstance(result, dict) else '生成失败'
                 })
 
-        saved_cases = []
-        for case_data in all_cases:
-            test_case = _new_test_case(case_data, case_data.get('requirement_id'))
-            db.session.add(test_case)
-            saved_cases.append(test_case.to_dict())
-
         if not saved_cases:
-            db.session.rollback()
             return jsonify({
                 'success': False,
                 'message': '未能生成测试用例',
@@ -628,7 +880,6 @@ def generate_cases_from_analysis():
                 'failed_count': len(failures)
             }), 502
 
-        db.session.commit()
         message = f'成功生成{len(saved_cases)}个测试用例'
         if failures:
             message = f'{message}，{len(failures)}个需求生成失败'

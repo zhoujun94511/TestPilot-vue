@@ -1,15 +1,11 @@
 export default {
   page: {
-    title: 'Knowledge Base',
-    subtitle: 'Upload, search, maintain, and rebuild the RAG knowledge base'
+    title: 'Knowledge Base'
   },
   tabs: {
     upload: 'Knowledge Upload',
     files: 'Knowledge File Management',
     search: 'Knowledge Search'
-  },
-  toolbar: {
-    filesLead: 'Maintain vector files; select rows to delete in bulk or rebuild the index when needed.'
   },
   banner: {
     vectorDisabledTitle: 'Vector store is disabled',
@@ -22,7 +18,6 @@ export default {
   },
   actions: {
     upload: 'Upload File',
-    refresh: 'Refresh',
     rebuild: 'Rebuild Index',
     search: 'Search',
     delete: 'Delete',
@@ -39,7 +34,6 @@ export default {
   },
   filters: {
     title: 'Filter & Search',
-    subtitle: 'Filter knowledge files by keyword, category, and status',
     keywordLabel: 'Search Keyword',
     keywordPlaceholder: 'Search',
     categoryLabel: 'Category',
@@ -59,7 +53,6 @@ export default {
     descriptionPlaceholder: 'Add a short note for this file',
     submit: 'Start Upload',
     empty: 'Please select file(s) first',
-    dragHint: 'Select multiple files at once. The system will parse and ingest them automatically.',
     progress: 'Upload Progress',
     filesSelected: '{count} files selected'
   },
@@ -97,7 +90,6 @@ export default {
     title: 'File List',
     empty: 'No knowledge files yet',
     loading: 'Loading file list...',
-    selectAll: 'Select All',
     columns: {
       name: 'Name',
       category: 'Category',

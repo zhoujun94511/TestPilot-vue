@@ -1,4 +1,4 @@
-import http, { download, get } from './http';
+import http, { LONG_TASK_TIMEOUT_MS, download, get } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -98,15 +98,9 @@ export interface RecentActivityRecord {
 
 export interface RecentActivitiesResponse {
   activities: RecentActivityRecord[];
+  counts?: Record<string, number>;
+  periodDays?: number;
   raw?: Record<string, unknown>;
-}
-
-export interface DashboardSummary {
-  overview: OverviewStats | null;
-  health: HealthStatus | null;
-  system: SystemStatus | null;
-  activities: RecentActivitiesResponse | null;
-  errors: Partial<Record<'overview' | 'health' | 'system' | 'activities' | 'network', string>>;
 }
 
 export interface PerformanceStatsResponse {
@@ -166,9 +160,11 @@ export interface ExportStatsParams {
 
 export interface BatchExportConfig {
   export_cases?: boolean;
+  all_cases?: boolean;
   cases?: object[];
   case_formats?: Array<'excel' | 'csv' | 'json'>;
   export_requirements?: boolean;
+  all_requirements?: boolean;
   requirements?: object[];
   export_chat?: boolean;
   chat_history?: object[];
@@ -259,7 +255,13 @@ function normalizeRecentActivities(payload: unknown): RecentActivitiesResponse {
       };
     });
 
-  return { activities, raw: normalized };
+  const countsRaw = isRecord(normalized.counts) ? normalized.counts : undefined;
+  const counts = countsRaw
+    ? Object.fromEntries(Object.entries(countsRaw).map(([key, value]) => [key, Number(value || 0)]))
+    : undefined;
+  const periodDays = normalized.period_days != null ? Number(normalized.period_days) : undefined;
+
+  return { activities, counts, periodDays, raw: normalized };
 }
 
 function extractOverviewPayload(payload: unknown): unknown {
@@ -275,15 +277,6 @@ function extractHealthPayload(payload: unknown): unknown {
 function extractSystemPayload(payload: unknown): unknown {
   if (!isRecord(payload)) return payload;
   return pickCompatField(payload, ['system', 'data'], payload);
-}
-
-function extractActivitiesPayload(payload: unknown): unknown {
-  if (!isRecord(payload)) return payload;
-  return pickCompatField(payload, ['activities', 'data'], payload);
-}
-
-function fallbackDashboardError(message: string): string {
-  return message;
 }
 
 export async function getOverviewStats(params: Record<string, unknown> = {}): Promise<OverviewStats> {
@@ -320,7 +313,7 @@ export async function getRecentActivities(params: Record<string, unknown> = {}):
       fallbackMessage: 'Failed to load recent activities'
     });
     const envelope = isRecord(payload) ? payload : isRecord(response) ? response : {};
-    return normalizeRecentActivities(extractActivitiesPayload(envelope));
+    return normalizeRecentActivities(envelope);
   } catch (error) {
     coreNormalizeError(error, 'Failed to load recent activities');
   }
@@ -479,7 +472,8 @@ export async function exportBatchZip(config: BatchExportConfig): Promise<Blob> {
     url: '/export/batch',
     method: 'POST',
     data: { config },
-    responseType: 'blob'
+    responseType: 'blob',
+    timeout: LONG_TASK_TIMEOUT_MS
   });
   return response.data as Blob;
 }
@@ -556,37 +550,4 @@ export async function getFeatureFlags(): Promise<AppFeatureFlagsResponse> {
   } catch (error) {
     coreNormalizeError(error, 'Failed to load feature flags');
   }
-}
-
-export async function loadDashboardSummary(): Promise<DashboardSummary> {
-  const settled = await Promise.allSettled([
-    getOverviewStats(),
-    getHealthStatus(),
-    getSystemStatus(),
-    getRecentActivities()
-  ]);
-
-  const [overviewResult, healthResult, systemResult, activitiesResult] = settled;
-
-  const errors: DashboardSummary['errors'] = {};
-
-  const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
-  if (overviewResult.status === 'rejected') errors.overview = fallbackDashboardError(overviewResult.reason instanceof Error ? overviewResult.reason.message : 'Failed to load dashboard overview');
-
-  const health = healthResult.status === 'fulfilled' ? healthResult.value : null;
-  if (healthResult.status === 'rejected') errors.health = fallbackDashboardError(healthResult.reason instanceof Error ? healthResult.reason.message : 'Failed to load system health');
-
-  const system = systemResult.status === 'fulfilled' ? systemResult.value : null;
-  if (systemResult.status === 'rejected') errors.system = fallbackDashboardError(systemResult.reason instanceof Error ? systemResult.reason.message : 'Failed to load system status');
-
-  const activities = activitiesResult.status === 'fulfilled' ? activitiesResult.value : null;
-  if (activitiesResult.status === 'rejected') errors.activities = fallbackDashboardError(activitiesResult.reason instanceof Error ? activitiesResult.reason.message : 'Failed to load recent activities');
-
-  return {
-    overview,
-    health,
-    system,
-    activities,
-    errors
-  };
 }

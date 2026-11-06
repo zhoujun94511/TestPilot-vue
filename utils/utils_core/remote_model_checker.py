@@ -242,7 +242,8 @@ class RemoteModelChecker:
             
             # 构建请求头
             headers = {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
             }
             
             # 构建测试请求
@@ -253,7 +254,7 @@ class RemoteModelChecker:
             
             # 发送请求
             response = requests.post(
-                f"{base_url}/models/{model}:generateContent?key={api_key}",
+                f"{base_url}/models/{model}:generateContent",
                 headers=headers,
                 json=test_payload,
                 timeout=self.timeout

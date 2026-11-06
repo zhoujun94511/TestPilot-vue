@@ -2,12 +2,21 @@
 测试用例ID生成服务
 使用时间戳 + 模块 + 序列号的策略生成唯一且可读的测试用例ID
 """
+import re
 import threading
 from datetime import datetime
 from typing import Dict, Optional
 from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
+
+_UNSAFE_ID_CHARS = re.compile(r'[\s/\\?#%&]+')
+
+
+def safe_case_id_segment(value: str, fallback: str = "DEFAULT") -> str:
+    """用例 id 会出现在 URL 路径里，斜杠、问号等字符会让详情接口匹配不到。"""
+    cleaned = _UNSAFE_ID_CHARS.sub('_', str(value or '')).strip('_')
+    return cleaned or fallback
 
 class CaseIdGenerator:
     """测试用例ID生成器"""
@@ -48,6 +57,8 @@ class CaseIdGenerator:
         milliseconds = now.microsecond // 1000
         timestamp_with_ms = f"{timestamp}{milliseconds:03d}"
         
+        # 模块名里的连字符会打乱 TC-MODULE-时间-序号 的解析
+        module = safe_case_id_segment(module).replace('-', '_')
         # 使用模块作为计数器键，确保同一模块的序列号连续递增
         counter_key = f"{module}"
         
@@ -189,15 +200,15 @@ def generate_case_id_from_data(case_data: dict) -> str:
     module = "DEFAULT"
     
     # 优先从module字段中获取
-    if 'module' in case_data:
-        module = case_data['module'].upper()
+    if case_data.get('module'):
+        module = str(case_data['module']).upper()
     
     # 其次从category中提取模块
-    elif 'category' in case_data:
-        module = case_data['category'].upper()
+    elif case_data.get('category'):
+        module = str(case_data['category']).upper()
     
     # 最后从title中提取模块
-    elif 'title' in case_data:
-        module = extract_module_from_title(case_data['title'])
+    elif case_data.get('title'):
+        module = extract_module_from_title(str(case_data['title']))
     
     return generate_case_id(module)

@@ -66,16 +66,31 @@ function formatCaseBlock(t: ComposerTranslation, item: Record<string, unknown>):
   return lines;
 }
 
+function translateKey(t: ComposerTranslation, path: string, params: Record<string, unknown> = {}): string {
+  const label = t(path, params);
+  return label === path ? '' : label;
+}
+
+/** 后端带 message_key 时按当前语言渲染，否则回退原文 */
+function localizedMessage(t: ComposerTranslation, key: unknown, params: unknown, fallback: unknown): string {
+  const code = String(key || '').trim();
+  const translated = code ? translateKey(t, `chat.toolMarkdown.msg.${code}`, asRecord(params) || {}) : '';
+  return translated || String(fallback || '').trim();
+}
+
+export function localizedToolMessage(t: ComposerTranslation, output: Record<string, unknown> | null): string {
+  if (!output) return '';
+  return localizedMessage(t, output.message_key, output.message_params, output.message);
+}
+
+function joinList(t: ComposerTranslation, items: string[]): string {
+  return items.join(t('chat.toolMarkdown.listSeparator'));
+}
+
 function scenarioLabels(t: ComposerTranslation, value: unknown): string {
   const keys = Array.isArray(value) ? value.map(String) : [];
   if (!keys.length) return t('chat.toolMarkdown.none');
-  return keys
-    .map((key) => {
-      const path = `chat.toolMarkdown.scenario.${key}`;
-      const label = t(path);
-      return label === path ? key : label;
-    })
-    .join('、');
+  return joinList(t, keys.map((key) => translateKey(t, `chat.toolMarkdown.scenario.${key}`) || key));
 }
 
 function formatSkeletonPreview(t: ComposerTranslation, output: Record<string, unknown>): string[] {
@@ -83,7 +98,7 @@ function formatSkeletonPreview(t: ComposerTranslation, output: Record<string, un
   const ruleCases = cases.filter((item) => item.source === 'rule');
   const llmCases = cases.filter((item) => item.source !== 'rule');
   const lines = [`**${t('chat.toolMarkdown.scenarios')}**: ${scenarioLabels(t, output.scenarios)}`];
-  const note = String(output.llm_note || '').trim();
+  const note = localizedMessage(t, output.llm_note_key, {}, output.llm_note);
   if (note) lines.push(`> ${note}`);
   lines.push('');
   lines.push(`### ${t('chat.toolMarkdown.ruleCases', { count: ruleCases.length })}`);
@@ -120,7 +135,9 @@ function formatCoverage(t: ComposerTranslation, output: Record<string, unknown>)
     lines.push('| --- | --- | --- | --- |');
     for (const row of criteria) {
       const state = row.covered ? t('chat.toolMarkdown.covered') : t('chat.toolMarkdown.gap');
-      const matched = row.covered ? `${cell(row.case_title)}（${cell(row.case_id)}）` : '-';
+      const matched = row.covered
+        ? t('chat.toolMarkdown.titleWithId', { title: cell(row.case_title), id: cell(row.case_id) })
+        : '-';
       lines.push(`| ${cell(row.criterion)} | ${state} | ${matched} | ${cell(row.score)} |`);
     }
   }
@@ -130,10 +147,12 @@ function formatCoverage(t: ComposerTranslation, output: Record<string, unknown>)
   if (!issues.length) lines.push(t('chat.toolMarkdown.none'));
   for (const item of issues) {
     const codes = Array.isArray(item.issues) ? item.issues.map(String) : [];
-    const labels = codes
-      .map((code) => (STRUCTURE_ISSUE_CODES.includes(code) ? t(`chat.toolMarkdown.issue.${code}`) : code))
-      .join('、');
-    lines.push(`- \`${toDisplayValue(item.case_id)}\` ${toDisplayValue(item.title)}：${labels}`);
+    const labels = joinList(
+      t,
+      codes.map((code) => (STRUCTURE_ISSUE_CODES.includes(code) ? t(`chat.toolMarkdown.issue.${code}`) : code))
+    );
+    const subject = `\`${toDisplayValue(item.case_id)}\` ${toDisplayValue(item.title)}`;
+    lines.push(`- ${t('chat.toolMarkdown.itemDetail', { item: subject, detail: labels })}`);
   }
   return lines;
 }
@@ -171,7 +190,10 @@ function formatTrace(t: ComposerTranslation, output: Record<string, unknown>): s
     ...traceSection(t, 'casesUnlinked', counts.cases_unlinked, records(output.cases_unlinked), caseLine),
     ...traceSection(t, 'requirementsWithCases', counts.requirements_with_cases,
       records(output.requirements_with_cases),
-      (item) => `${reqLine(item)}：${t('chat.toolMarkdown.trace.caseCount', { count: toDisplayValue(item.case_count) })}`)
+      (item) => t('chat.toolMarkdown.itemDetail', {
+        item: reqLine(item),
+        detail: t('chat.toolMarkdown.trace.caseCount', { count: toDisplayValue(item.case_count) })
+      }))
   ];
 }
 
@@ -199,7 +221,7 @@ export function formatActionResultContent(
 ): string {
   const cleanMessage = isGenericSuccessMessage(t, messageText) ? '' : String(messageText || '').trim();
   if (!toolResults) return cleanMessage || t('chat.state.emptyMessage');
-  const toolMessage = String(toolResults.message || '').trim();
+  const toolMessage = localizedToolMessage(t, toolResults);
   const parts: string[] = [];
   if (toolMessage) parts.push(`**${toolMessage}**`, '');
   else if (cleanMessage) parts.push(cleanMessage, '');

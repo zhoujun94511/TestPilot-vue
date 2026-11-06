@@ -88,7 +88,7 @@ except ImportError:
             from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgentOutputParser  # type: ignore
         except ImportError:
             from langchain.agents.output_parsers.openai_functions import OpenAIFunctionsAgentOutputParser  # type: ignore
-from utils.utils_performance_monitoring.token_monitor import record_llm_call, count_tokens
+from utils.utils_performance_monitoring.token_monitor import record_llm_call, count_tokens, ensure_session_budget
 
 
 logger = get_logger(__name__)
@@ -285,6 +285,24 @@ class TestAgent:
             ])
         return ""
 
+    def _invoke_with_timeout(self, full_query):
+        ensure_session_budget()
+        # 不能用 with：退出时会等线程跑完，超时就失去意义
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self.llm.invoke, full_query)
+        try:
+            response = future.result(timeout=TestAgent.TIMEOUT_SECONDS)
+            logger.info("✅ LLM 调用成功完成")
+            return response
+        except concurrent.futures.TimeoutError:
+            logger.error("⏰ LLM 调用超时")
+            raise TimeoutError("LLM 调用超时")
+        except Exception as e:
+            logger.error(f"❌ LLM 调用失败: {e}")
+            raise
+        finally:
+            executor.shutdown(wait=False)
+
     def reset_memery(self):
         self.memory.clear()
 
@@ -365,20 +383,7 @@ class TestAgent:
             logger.info("⏳ GPT-5 正在思考中，请耐心等待...")
             logger.info(" 提示：GPT-5 响应时间较长，请耐心等待...")
 
-            # 使用多线程安全的超时控制
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self.llm.invoke, full_query)
-                try:
-                    response = future.result(timeout=TestAgent.TIMEOUT_SECONDS)
-                    logger.info("✅ LLM 调用成功完成")
-                except concurrent.futures.TimeoutError:
-                    logger.error("⏰ LLM 调用超时")
-                    raise TimeoutError("LLM 调用超时")
-                except Exception as e:
-                    logger.error(f"❌ LLM 调用失败: {e}")
-                    logger.error(f"错误类型: {type(e)}")
-                    logger.error(f"错误详情: {str(e)}")
-                    raise
+            response = self._invoke_with_timeout(full_query)
 
             # 添加实际 Token 使用情况记录
             if hasattr(response, 'response_metadata'):
@@ -403,7 +408,14 @@ class TestAgent:
 
                     # 记录到 Token 监控器
                     if total_tokens > 0:
-                        record_llm_call(total_tokens, is_actual=True, source='case_generation')
+                        record_llm_call(
+                            actual_tokens={
+                                'prompt_tokens': input_tokens,
+                                'completion_tokens': output_tokens,
+                                'total_tokens': total_tokens,
+                            },
+                            source='case_generation',
+                        )
 
             # 解析响应
             response_text = getattr(response, 'content', str(response))
@@ -468,20 +480,7 @@ class TestAgent:
             logger.info("⏳ GPT-5 正在思考中，请耐心等待...")
             logger.info(" 提示：GPT-5 响应时间较长，请耐心等待...")
 
-            # 使用多线程安全的超时控制
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self.llm.invoke, full_query)
-                try:
-                    response = future.result(timeout=TestAgent.TIMEOUT_SECONDS)
-                    logger.info("✅ LLM 调用成功完成")
-                except concurrent.futures.TimeoutError:
-                    logger.error("⏰ LLM 调用超时")
-                    raise TimeoutError("LLM 调用超时")
-                except Exception as e:
-                    logger.error(f"❌ LLM 调用失败: {e}")
-                    logger.error(f"错误类型: {type(e)}")
-                    logger.error(f"错误详情: {str(e)}")
-                    raise
+            response = self._invoke_with_timeout(full_query)
 
             # 添加实际 Token 使用情况记录
             if hasattr(response, 'response_metadata'):
@@ -506,7 +505,14 @@ class TestAgent:
 
                     # 记录到 Token 监控器
                     if total_tokens > 0:
-                        record_llm_call(total_tokens, is_actual=True, source='case_generation')
+                        record_llm_call(
+                            actual_tokens={
+                                'prompt_tokens': input_tokens,
+                                'completion_tokens': output_tokens,
+                                'total_tokens': total_tokens,
+                            },
+                            source='case_generation',
+                        )
 
             response_text = getattr(response, 'content', str(response))
             parsed_response = safe_json_loads(response_text)

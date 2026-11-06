@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section :class="pageRootMarkedClass(pageMarkerDocuments)">
     <PageNoticeBanner
       :notice="pageBanner"
@@ -11,22 +11,33 @@
         <PagePanel
           class="mb-4"
           :title="t('documents.tabs.manage')"
-          :subtitle="t('documents.toolbar.manageLead')"
         >
           <template #actions>
             <div :class="pageToolbarStripClass">
               <TpButton variant="ghost" size="sm" :loading="listRefreshLoading" @click="handleRefresh">
                 {{ t('common.actions.refresh') }}
               </TpButton>
+              <select
+                v-model.number="caseCountPerRequirement"
+                :class="caseCountSelectClass"
+                :aria-label="t('cases.form.caseCountLabel')"
+                :disabled="generating"
+              >
+                <option v-for="count in CASE_COUNT_CHOICES" :key="count" :value="count">
+                  {{ t('cases.form.caseCountOption', { count }) }}
+                </option>
+              </select>
               <TpButton
                 variant="primary"
                 size="sm"
                 :loading="generating"
-                :disabled="generating || !canGenerateCases"
+                :disabled="!canGenerateCases"
+                :aria-label="generating ? generateButtonLabel : undefined"
                 @click="handleGenerateCases"
               >
-                {{ generating ? t('documents.actions.generating') : t('documents.actions.generateCases') }}
+                {{ t('documents.actions.generateCases') }}
               </TpButton>
+              <span v-if="generating" class="px-1 text-xs leading-none text-muted-foreground">{{ generateButtonLabel }}</span>
               <ToolbarOverflowMenu>
                 <DropdownMenuItem
                   v-if="!showAnalysisPanel && currentAnalysis"
@@ -35,7 +46,7 @@
                   {{ t('documents.analysis.showPanel') }}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  :disabled="exportingRequirements || !analysisRequirements.length"
+                  :disabled="exportingRequirements || selectedRequirementIds.length === 0"
                   @select="handleExportRequirements"
                 >
                   {{
@@ -48,7 +59,12 @@
             </div>
           </template>
 
-          <ToolbarBulkBar :count="selectedDocumentKeys.length" @clear="clearDocumentSelection">
+          <ToolbarBulkBar
+            :count="selectedDocumentKeys.length"
+            :select-all-count="documentSelectAllCount"
+            @clear="clearDocumentSelection"
+            @select-all="selectAllMatchingDocuments"
+          >
             <TpButton
               variant="ghost"
               size="sm"
@@ -119,8 +135,6 @@
             :selected-keys="selectedDocumentKeys"
             row-key="document_key"
             @update:selectedKeys="handleDocumentSelectionUpdate"
-            :managed-select-all="true"
-            @toggleAll="handleDocumentToggleAll"
             @rowClick="selectDocument"
           >
             <template #toolbar>
@@ -163,7 +177,12 @@
                 >
                   {{ t('documents.actions.analyzing') }}
                 </TpButton>
-                <TpButton variant="ai" size="sm" @click.stop="analyzeDocumentRow(row as DocumentRecord)">
+                <TpButton
+                  variant="ai"
+                  size="sm"
+                  :disabled="analyzeLoading"
+                  @click.stop="analyzeDocumentRow(row as DocumentRecord)"
+                >
                   {{ t('common.actions.analyze') }}
                 </TpButton>
                 <TpButton variant="secondary" size="sm" @click.stop="previewDocumentRow(row as DocumentRecord)">
@@ -173,6 +192,7 @@
                   v-if="canViewAnalysisResult(row as DocumentRecord)"
                   variant="secondary"
                   size="sm"
+                  :disabled="analyzeLoading"
                   @click.stop="reanalyzeDocumentRow(row as DocumentRecord)"
                 >
                   {{ t('documents.actions.reanalyze') }}
@@ -206,9 +226,26 @@
               <TpButton size="sm" variant="ghost" @click="showAnalysisPanel = false">
                 {{ t('documents.analysis.hidePanel') }}
               </TpButton>
-              <TpButton size="sm" :loading="generating" :disabled="generating || !analysisRequirements.length" @click="handleGenerateCases">
+              <select
+                v-model.number="caseCountPerRequirement"
+                :class="caseCountSelectClass"
+                :aria-label="t('cases.form.caseCountLabel')"
+                :disabled="generating"
+              >
+                <option v-for="count in CASE_COUNT_CHOICES" :key="count" :value="count">
+                  {{ t('cases.form.caseCountOption', { count }) }}
+                </option>
+              </select>
+              <TpButton
+                size="sm"
+                :loading="generating"
+                :disabled="!analysisRequirements.length"
+                :aria-label="generating ? generateButtonLabel : undefined"
+                @click="handleGenerateCases"
+              >
                 {{ t('documents.actions.generateCases') }}
               </TpButton>
+              <span v-if="generating" class="px-1 text-xs leading-none text-muted-foreground">{{ generateButtonLabel }}</span>
             </template>
 
           <BaseState
@@ -248,7 +285,6 @@
                     <div :class="nestedMetricBlockClass">
                       <div :class="kpiLabelClass">{{ card.label }}</div>
                       <div :class="kpiValueClass">{{ card.value }}</div>
-                      <div v-if="card.hint" :class="kpiHintClass">{{ card.hint }}</div>
                     </div>
                   </div>
                 </div>
@@ -376,7 +412,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import BaseState from '@/components/common/BaseState.vue';
@@ -400,6 +436,8 @@ import { documentStatusTagVariant } from '@/lib/enum-tag-ui';
 import { useListPageChange } from '@/composables/useListPageChange';
 import { usePaginatedList } from '@/composables/usePaginatedList';
 import { useTimedHighlight } from '@/composables/useTimedHighlight';
+import { CASE_COUNT_CHOICES, clampCaseCount } from '@/lib/case-count';
+import { toolbarCountSelectClass } from '@/lib/field-control';
 import { pageToolbarStripClass } from '@/lib/page-chrome-ui';
 import { captionTextClass } from '@/lib/page-typography';
 import { panelSubtitleClass, panelTitleClass } from '@/lib/panel-ui';
@@ -410,7 +448,6 @@ import {
   dataSubtitleDenseClass,
   dataTitleClass,
   inlineToggleLabelClass,
-  kpiHintClass,
   kpiLabelClass,
   kpiValueClass,
   nestedMetricBlockClass,
@@ -447,7 +484,6 @@ import {
   exportRequirementsExcel,
   getDocumentPreview,
   getDocumentRequirements,
-  generateCasesFromAnalysis,
   listDocuments,
   reanalyzeDocument,
   type DocumentAnalysisResult,
@@ -456,6 +492,7 @@ import {
   type DocumentPreviewResult,
   type DocumentRequirementRecord
 } from '@/api/documents';
+import { streamBatchGenerateCases } from '@/api/cases';
 
 interface SelectOption {
   value: DocumentAnalysisType;
@@ -471,6 +508,13 @@ const selectedDocumentKey = ref<string>('');
 const listRefreshLoading = ref(false);
 const analyzeLoading = ref(false);
 const generating = ref(false);
+const caseCountPerRequirement = ref(3);
+const caseCountSelectClass = toolbarCountSelectClass;
+const generateProgress = ref({ done: 0, total: 0, saved: 0 });
+const generateButtonLabel = computed(() => {
+  if (!generateProgress.value.total) return t('documents.actions.generating');
+  return t('documents.actions.generatingProgress', generateProgress.value);
+});
 const exportingRequirements = ref(false);
 const documentRowHighlight = useTimedHighlight(4200);
 const requirementRowHighlight = useTimedHighlight(4200);
@@ -680,26 +724,22 @@ const summaryCards = computed(() => {
     {
       key: 'requirements',
       label: t('documents.result.requirementsCount'),
-      value: summary?.requirements_count ?? requirements.length,
-      hint: t('documents.analysis.summaryTitle')
+      value: summary?.requirements_count ?? requirements.length
     },
     {
       key: 'test_points',
       label: t('documents.result.testPointsCount'),
-      value: summary?.test_points_count ?? countsByType.functional ?? countsByType.test_point ?? 0,
-      hint: t('documents.analysis.summaryTitle')
+      value: summary?.test_points_count ?? countsByType.functional ?? countsByType.test_point ?? 0
     },
     {
       key: 'business_rules',
       label: t('documents.result.businessRulesCount'),
-      value: summary?.business_rules_count ?? countsByType.business ?? countsByType.business_rule ?? 0,
-      hint: t('documents.analysis.summaryTitle')
+      value: summary?.business_rules_count ?? countsByType.business ?? countsByType.business_rule ?? 0
     },
     {
       key: 'total',
       label: t('documents.result.totalCount'),
-      value: summary?.total_count ?? requirements.length,
-      hint: t('common.status.empty')
+      value: summary?.total_count ?? requirements.length
     }
   ];
 });
@@ -801,7 +841,8 @@ async function openAnalysisForDocument(doc: DocumentRecord) {
         page: 1,
         per_page: 500,
         source_file: doc.filename || resolveDocumentLabel(doc),
-        search: filters.search.trim() || undefined,
+        exact_source: Boolean(doc.filename),
+        search: requirementSearchFor(doc),
         type: requirementApiTypeForFilter(filters.analysisType)
       });
       if (response.requirements.length > 0) {
@@ -834,6 +875,15 @@ function resolveDocumentKey(doc: DocumentRecord) {
 
 function resolveDocumentLabel(doc: DocumentRecord) {
   return doc.display_name || doc.original_filename || doc.file_name || doc.filename || t('documents.table.empty');
+}
+
+/** 文档是靠文件名命中搜索的，需求本身未必含这个词，这时不再用它过滤需求 */
+function requirementSearchFor(doc: DocumentRecord) {
+  const keyword = filters.search.trim();
+  if (!keyword) return undefined;
+  const lowered = keyword.toLowerCase();
+  const names = [doc.filename, doc.display_name, doc.original_filename, doc.file_name];
+  return names.some((name) => String(name || '').toLowerCase().includes(lowered)) ? undefined : keyword;
 }
 
 function resolveAnalyzePath(doc: DocumentRecord) {
@@ -929,7 +979,8 @@ async function syncAnalysisWithFilters(options?: { silent?: boolean }) {
       page: 1,
       per_page: 500,
       source_file: doc.filename || resolveDocumentLabel(doc),
-      search: filters.search.trim() || undefined,
+      exact_source: Boolean(doc.filename),
+      search: requirementSearchFor(doc),
       type: requirementApiTypeForFilter(filters.analysisType)
     });
     const key = resolveDocumentKey(doc);
@@ -978,7 +1029,7 @@ async function loadDocuments(page = filters.page, mode: ListFetchMode = 'page') 
   if (documents.value.length && !selectedDocumentKey.value) {
     selectedDocumentKey.value = resolveDocumentKey(documents.value[0]);
   } else if (selectedDocumentKey.value && !documents.value.some((doc) => resolveDocumentKey(doc) === selectedDocumentKey.value)) {
-    selectedDocumentKey.value = resolveDocumentKey(documents.value[0]);
+    selectedDocumentKey.value = documents.value.length ? resolveDocumentKey(documents.value[0]) : '';
   }
 }
 
@@ -1138,6 +1189,7 @@ async function handleRefresh() {
 async function handleSearch() {
   filters.search = filters.search.trim();
   filters.page = 1;
+  selectedDocumentKeys.value = [];
   const mode: ListFetchMode = documents.value.length > 0 ? 'page' : 'filter';
   await loadDocuments(1, mode);
   await syncAnalysisWithFilters({ silent: true });
@@ -1156,11 +1208,14 @@ function clearDocumentSelection() {
   selectedDocumentKeys.value = [];
 }
 
-async function handleDocumentToggleAll(checked: boolean) {
-  if (!checked) {
-    selectedDocumentKeys.value = [];
-    return;
-  }
+const documentSelectAllCount = computed(() => {
+  const total = Number(pagination.value.total || 0);
+  const pageSelected = documents.value.length > 0
+    && documents.value.every((doc) => selectedDocumentKeys.value.includes(resolveDocumentKey(doc)));
+  return pageSelected && total > selectedDocumentKeys.value.length ? total : 0;
+});
+
+async function selectAllMatchingDocuments() {
   const allDocs = await fetchAllFilteredDocuments();
   selectedDocumentKeys.value = allDocs.map((doc) => resolveDocumentKey(doc));
   const nextMap = { ...selectedDocumentRecordMap.value };
@@ -1193,11 +1248,22 @@ async function previewDocumentRow(doc: DocumentRecord) {
   await loadPreviewByDocument(doc);
 }
 
+function beginDocumentAnalysis() {
+  if (analyzeLoading.value) {
+    showNotice('info', t('documents.message.analyzeInProgress'));
+    return false;
+  }
+  analyzeLoading.value = true;
+  requirementEditVisible.value = false;
+  editingRequirement.value = null;
+  return true;
+}
+
 async function reanalyzeDocumentRow(doc: DocumentRecord) {
+  if (!beginDocumentAnalysis()) return;
   selectedDocumentKey.value = resolveDocumentKey(doc);
   showAnalysisPanel.value = true;
   analysisError.value = '';
-  analyzeLoading.value = true;
   try {
     const result = await reanalyzeDocument(resolveReanalyzeId(doc), {
       analysis_type: filters.analysisType
@@ -1256,7 +1322,7 @@ async function handleDeleteSingleDocument(doc: DocumentRecord) {
 }
 
 async function handleDeleteSelectedDocuments() {
-  const rows = documents.value.filter((doc) => selectedDocumentKeys.value.includes(resolveDocumentKey(doc)));
+  const rows = selectedDocuments.value;
   if (!rows.length) {
     showNotice('warning', t('documents.message.noDocumentSelection'));
     return;
@@ -1278,29 +1344,19 @@ async function analyzeByDocument(doc: DocumentRecord) {
     return;
   }
 
+  if (!beginDocumentAnalysis()) return;
   analysisError.value = '';
   showAnalysisPanel.value = true;
-  analyzeLoading.value = true;
   try {
     const analysisType = filters.analysisType;
-    const analyzePath = resolveAnalyzePath(doc);
-    try {
-      const result = await analyzeDocument({
-        file_path: analyzePath,
-        analysis_type: analysisType
-      });
-      currentAnalysis.value = result;
-      currentAnalysisDocumentKey.value = resolveDocumentKey(doc);
-      showNotice('success', result.message || t('documents.message.analyzeSuccess'), { timeout: 8000 });
-      return;
-    } catch {
-      const fallbackResult = await reanalyzeDocument(resolveReanalyzeId(doc), {
-        analysis_type: analysisType
-      });
-      currentAnalysis.value = fallbackResult;
-      currentAnalysisDocumentKey.value = resolveDocumentKey(doc);
-      showNotice('success', fallbackResult.message || t('documents.message.analyzeSuccess'), { timeout: 8000 });
-    }
+    // 失败不自动换接口重试：模型报错、额度用尽或超时重试只会再花一次 Token
+    const result = await analyzeDocument({
+      file_path: resolveAnalyzePath(doc),
+      analysis_type: analysisType
+    });
+    currentAnalysis.value = result;
+    currentAnalysisDocumentKey.value = resolveDocumentKey(doc);
+    showNotice('success', result.message || t('documents.message.analyzeSuccess'), { timeout: 8000 });
   } catch (error) {
     analysisError.value = getUserFacingErrorMessage(error, t('documents.message.analyzeFailed'));
     showNotice('danger', analysisError.value);
@@ -1465,13 +1521,13 @@ async function handleGenerateCases() {
     }
     const requirementGroups = await Promise.all(
       selectedRows.map(async (doc) => {
-        const sourceFile = resolveDocumentLabel(doc);
-        if (!sourceFile || sourceFile === t('documents.table.empty')) return [];
+        if (!doc.filename) return [];
         try {
           const response = await getDocumentRequirements({
             page: 1,
             per_page: 200,
-            source_file: sourceFile
+            source_file: doc.filename,
+            exact_source: true
           });
           return response.requirements;
         } catch {
@@ -1499,7 +1555,8 @@ async function handleGenerateCases() {
         {
           count: sourceCount,
           reqCount: requirementsToGenerate.length,
-          caseCount: requirementsToGenerate.length * 3,
+          perReq: clampCaseCount(caseCountPerRequirement.value, 3),
+          caseCount: requirementsToGenerate.length * clampCaseCount(caseCountPerRequirement.value, 3),
           skippedCount: skippedDocumentCount
         }
       ),
@@ -1523,35 +1580,68 @@ async function handleGenerateCases() {
   });
 }
 
+let generateAbort: AbortController | null = null;
+onBeforeUnmount(() => generateAbort?.abort());
+
 async function executeGenerateCases(requirementsToGenerate: DocumentRequirementRecord[]) {
-  if (!requirementsToGenerate.length) return;
+  if (!requirementsToGenerate.length || generating.value) return;
 
   generating.value = true;
+  generateProgress.value = { done: 0, total: requirementsToGenerate.length, saved: 0 };
+  generateAbort = new AbortController();
+  const { signal } = generateAbort;
   try {
-    const response = await generateCasesFromAnalysis({
-      requirements: requirementsToGenerate
-    });
-    const count = response.total ?? response.cases?.length ?? requirementsToGenerate.length;
-    const failedCount = Number(response.failed_count || 0);
+    const response = await streamBatchGenerateCases(
+      { requirements: requirementsToGenerate, case_count_per_req: clampCaseCount(caseCountPerRequirement.value, 3) },
+      (event) => {
+        if (event.type === 'requirement_done' || event.type === 'requirement_failed' || event.type === 'start') {
+          generateProgress.value = {
+            done: event.type === 'start' ? 0 : event.index + 1,
+            total: event.total || requirementsToGenerate.length,
+            saved: event.savedCount
+          };
+        }
+      },
+      signal
+    );
+    if (signal.aborted) return;
+    const failedCount = Number(response.summary?.failed_count || 0);
+    if (!response.total_cases) {
+      showNotice('danger', response.message || t('documents.message.generateFailed'));
+      return;
+    }
     if (failedCount > 0) {
-      showNotice('warning', response.message || t('documents.message.generateFailed'));
+      showNotice('warning', response.message || t('documents.message.generatePartial', {
+        saved: response.total_cases,
+        failed: failedCount
+      }));
     } else {
-      showNotice('success', response.message || `${t('documents.message.generateSuccess')} (${count})`);
+      showNotice('success', response.message || t('documents.message.generateSuccess'));
     }
     await router.push({ name: 'cases-manage' });
   } catch (error) {
+    if (signal.aborted) return;
+    if (generateProgress.value.saved > 0) {
+      showNotice('warning', t('documents.message.generatePartial', {
+        saved: generateProgress.value.saved,
+        failed: Math.max(generateProgress.value.total - generateProgress.value.done, 1)
+      }));
+      await router.push({ name: 'cases-manage' });
+      return;
+    }
     showNotice('danger', getUserFacingErrorMessage(error, t('documents.message.generateFailed')));
   } finally {
     generating.value = false;
+    generateProgress.value = { done: 0, total: 0, saved: 0 };
   }
 }
 
 async function handleExportRequirements() {
-  if (!analysisRequirements.value.length || exportingRequirements.value) return;
+  if (!selectedRequirementIds.value.length || exportingRequirements.value) return;
   const selectedSet = new Set(selectedRequirementIds.value);
-  const reqIds = selectedSet.size
-    ? analysisRequirements.value.filter((item) => selectedSet.has(item.req_id)).map((item) => item.req_id)
-    : analysisRequirements.value.map((item) => item.req_id);
+  const reqIds = analysisRequirements.value
+    .filter((item) => selectedSet.has(item.req_id))
+    .map((item) => item.req_id);
   if (!reqIds.length) {
     showNotice('warning', t('documents.message.noRequirementSelection'));
     return;

@@ -1,18 +1,10 @@
 export default {
   page: {
-    title: 'Test Cases',
-    subtitle: 'Bring the core case workflow into Vue and validate list, filters, generation, batch actions, export, and stats'
+    title: 'Test Cases'
   },
   tabs: {
     generate: 'Case Generation',
     manage: 'Case Management'
-  },
-  generateMode: {
-    aria: 'Generation mode'
-  },
-  toolbar: {
-    manageLead: 'Review stats and the case list; export and templates live under More.',
-    exportMenu: 'Export & template'
   },
   actions: {
     generate: 'Generate Cases',
@@ -24,7 +16,6 @@ export default {
     exportJson: 'JSON',
     downloadTemplate: 'Download Template',
     templateDownloading: 'Downloading Template',
-    refresh: 'Refresh',
     generating: 'Generating',
     batchGenerating: 'Batch Generating',
     deleteSelected: 'Delete Selected',
@@ -36,20 +27,17 @@ export default {
   batch: {
     title: 'Batch Generation',
     requirementsPlaceholder: 'Login checks; refund flow',
-    requirementsHelper: 'For multiple items, split each requirement with ;',
-    processModeLabel: 'Process mode',
-    processModeHelper: 'Sequential: one by one; parallel: concurrent'
+    requirementsHelper: 'Separate requirements with ;'
   },
   state: {
     generatingTitle: 'Generating test cases',
-    generatingHint: 'The model is analyzing your requirement and saving cases. This often takes tens of seconds to a few minutes—please keep this page open.',
     batchGeneratingTitle: 'Batch generation in progress',
-    batchGeneratingHint: 'Cases are being generated per requirement (sequential or parallel). Duration depends on count and whether RAG is enabled.'
+    batchGeneratingHint: 'Generating one requirement at a time. Each finished requirement is saved immediately. Keep this page open.',
+    batchGeneratingProgress: '{done}/{total} requirements finished, {saved} cases saved.'
   },
   form: {
     requirementLabel: 'Requirement',
     requirementPlaceholder: 'e.g. Login must validate account state and show errors',
-    requirementHelper: 'Be specific on scope or acceptance; priority is inferred',
     caseCountLabel: 'Case Count',
     caseCountOption: '{count} items'
   },
@@ -64,7 +52,8 @@ export default {
     categoryLabel: 'Category',
     categoryAll: 'All categories',
     apply: 'Search',
-    selectedCount: '{count} selected'
+    selectedCount: '{count} selected',
+    selectedAll: 'All {count} selected'
   },
   table: {
     title: 'Case list',
@@ -114,8 +103,6 @@ export default {
     draft: 'Draft',
     active: 'Active',
     deprecated: 'Deprecated',
-    totalHint: 'From the case list',
-    statusHint: 'Grouped by status',
     priorityDistribution: 'Priority Distribution',
     categoryDistribution: 'Category Distribution',
     emptyDistribution: 'No distribution data yet'
@@ -124,7 +111,7 @@ export default {
     generateTitle: 'Confirm case generation',
     generateMessage: 'Generate {count} test cases from the current requirement?',
     batchGenerateTitle: 'Confirm batch generation',
-    batchGenerateMessage: 'Process {count} requirements with {mode} mode?',
+    batchGenerateMessage: 'Generate {count} requirements one by one? Each finished requirement is saved immediately.',
     regenerateTitle: 'Confirm regeneration',
     regenerateMessage: 'Regenerate test cases based on "{title}"?',
     deleteTitle: 'Confirm deleting test case',
@@ -138,6 +125,7 @@ export default {
     generateSuccess: '{count} test cases generated',
     generateFailed: 'Failed to generate test cases',
     batchGenerateSuccess: 'Batch generation finished, {count} test cases created',
+    batchGeneratePartial: '{saved} cases were saved. {failed} requirements failed. Saved cases are kept.',
     batchGenerateFailed: 'Failed to batch generate test cases',
     generateSynced: 'Synced to Case Management for filtering and export',
     batchGenerateSynced: 'Batch results synced to Case Management for filtering and export',

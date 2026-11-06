@@ -8,8 +8,7 @@
     <KnowledgeVectorDisabledState v-if="vectorDisabled" />
     <PagePanel
       v-else
-      :title="t('knowledge.upload.title')"
-      :subtitle="t('knowledge.upload.dragHint')"
+      :title="t('knowledge.upload.title')"
     >
       <template #actions>
         <TpTag v-if="selectedFiles.length" variant="neutral">

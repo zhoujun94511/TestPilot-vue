@@ -37,6 +37,7 @@ vector_store/
 
 # Local env (do not commit secrets)
 .env
+.secret_key
 frontend/.env.development.local
 
 # FastEmbed / HuggingFace caches (large, auto-downloadable)

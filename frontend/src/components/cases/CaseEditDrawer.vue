@@ -239,7 +239,8 @@ async function handleSubmit() {
     priority: form.priority,
     status: form.status,
     category: form.category.trim(),
-    tags: tagsToArray(form.tagsText)
+    tags: tagsToArray(form.tagsText),
+    updated_time: activeRecord.value?.updated_time ?? null
   };
 
   try {

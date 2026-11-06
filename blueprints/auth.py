@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, request, session
+from flask import Blueprint, current_app, request, session
 from sqlalchemy.exc import IntegrityError
 
 from models.models import db
@@ -207,8 +207,13 @@ def login():
         ip_address=ip,
     )
     token = create_session(user['id'])
+    # 登录前的会话 id 可能是别人塞进来的，登录后换一个新的
+    session.clear()
     session['session_token'] = token
     session.permanent = True
+    regenerate = getattr(current_app.session_interface, 'regenerate', None)
+    if callable(regenerate):
+        regenerate(session)
     return api_success({'user': user})
 
 
@@ -571,11 +576,11 @@ def list_auth_audit_logs_route():
 
     page = request.args.get('page', type=int)
     if page is not None:
-        per_page = request.args.get('per_page', 20, type=int)
+        per_page = min(max(1, request.args.get('per_page', 20, type=int) or 20), 100)
         return api_success(list_auth_audit_logs_page(page=page, per_page=per_page))
 
-    limit = request.args.get('limit', 100, type=int)
-    offset = request.args.get('offset', 0, type=int)
+    limit = min(max(1, request.args.get('limit', 100, type=int) or 100), 500)
+    offset = max(0, request.args.get('offset', 0, type=int) or 0)
     return api_success({'logs': list_auth_audit_logs(limit=limit, offset=offset)})
 
 
@@ -585,6 +590,20 @@ def change_password():
     blocked = _admin_disabled()
     if blocked:
         return blocked
+    from services.request_rate_limit import sliding_window_allow
+
+    actor = current_user()
+    if not sliding_window_allow(
+        f"change-password:{actor.get('id') if actor else _client_ip_key()}",
+        max_calls=_LOGIN_RATE_MAX,
+        window_seconds=_LOGIN_RATE_WINDOW_SECONDS,
+    ):
+        return api_error(
+            'TOO_MANY_REQUESTS',
+            message='操作过于频繁，请稍后再试',
+            message_key='auth.message.loginRateLimited',
+            status=429,
+        )
     body = _body()
     try:
         user_admin.change_own_password(
@@ -594,6 +613,13 @@ def change_password():
     except ValueError as exc:
         if str(exc) == 'bad_old_password':
             return api_error('UNAUTHORIZED', message='原密码错误', status=401)
+        if str(exc) == 'same_password':
+            return api_error(
+                'VALIDATION_FAILED',
+                message='新密码不能与原密码相同',
+                message_key='auth.message.samePassword',
+                status=400,
+            )
         return api_error('VALIDATION_FAILED', message_key='auth.message.weakCredentials', status=400)
     from flask import session
 

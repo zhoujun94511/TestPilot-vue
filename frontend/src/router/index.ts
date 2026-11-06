@@ -52,8 +52,7 @@ const routes = [
         name: 'dashboard',
         component: DashboardView,
         meta: {
-          titleKey: 'dashboard.page.title',
-          subtitleKey: 'dashboard.page.subtitle'
+          titleKey: 'dashboard.page.title'
         }
       },
       {
@@ -66,7 +65,6 @@ const routes = [
         component: ConfigCenterView,
         meta: {
           titleKey: 'config.page.title',
-          subtitleKey: 'config.page.subtitle',
           roles: ['super_admin']
         }
       },
@@ -76,7 +74,6 @@ const routes = [
         component: UsersAdminView,
         meta: {
           titleKey: 'admin.users.page.title',
-          subtitleKey: 'admin.users.page.subtitle',
           roles: ['super_admin', 'admin']
         }
       },
@@ -93,8 +90,7 @@ const routes = [
             name: 'knowledge-upload',
             component: KnowledgeUploadView,
             meta: {
-              titleKey: 'knowledge.page.title',
-              subtitleKey: 'knowledge.page.subtitle'
+              titleKey: 'knowledge.page.title'
             }
           },
           {
@@ -102,8 +98,7 @@ const routes = [
             name: 'knowledge',
             component: KnowledgeView,
             meta: {
-              titleKey: 'knowledge.page.title',
-              subtitleKey: 'knowledge.page.subtitle'
+              titleKey: 'knowledge.page.title'
             }
           },
           {
@@ -111,8 +106,7 @@ const routes = [
             name: 'knowledge-search',
             component: KnowledgeSearchView,
             meta: {
-              titleKey: 'knowledge.page.title',
-              subtitleKey: 'knowledge.page.subtitle'
+              titleKey: 'knowledge.page.title'
             }
           }
         ]
@@ -130,8 +124,7 @@ const routes = [
             name: 'documents-upload',
             component: DocumentsUploadView,
             meta: {
-              titleKey: 'documents.page.title',
-              subtitleKey: 'documents.page.subtitle'
+              titleKey: 'documents.page.title'
             }
           },
           {
@@ -139,8 +132,7 @@ const routes = [
             name: 'documents',
             component: DocumentsView,
             meta: {
-              titleKey: 'documents.page.title',
-              subtitleKey: 'documents.page.subtitle'
+              titleKey: 'documents.page.title'
             }
           },
           {
@@ -148,8 +140,7 @@ const routes = [
             name: 'documents-history',
             component: DocumentsHistoryView,
             meta: {
-              titleKey: 'documents.history.title',
-              subtitleKey: 'documents.history.subtitle'
+              titleKey: 'documents.history.title'
             }
           }
         ]
@@ -159,8 +150,7 @@ const routes = [
         name: 'chat',
         component: ChatView,
         meta: {
-          titleKey: 'chat.page.title',
-          subtitleKey: 'chat.page.subtitle'
+          titleKey: 'chat.page.title'
         }
       },
       {
@@ -168,8 +158,7 @@ const routes = [
         name: 'experimental-tools',
         component: () => import('@/views/ExperimentalToolsView.vue'),
         meta: {
-          titleKey: 'experimentalToolsPage.page.title',
-          subtitleKey: 'experimentalToolsPage.page.subtitle'
+          titleKey: 'experimentalToolsPage.page.title'
         }
       },
       {
@@ -186,8 +175,7 @@ const routes = [
             component: CasesView,
             props: { mode: 'generate' },
             meta: {
-              titleKey: 'cases.page.title',
-              subtitleKey: 'cases.page.subtitle'
+              titleKey: 'cases.page.title'
             }
           },
           {
@@ -196,8 +184,7 @@ const routes = [
             component: CasesView,
             props: { mode: 'manage' },
             meta: {
-              titleKey: 'cases.page.title',
-              subtitleKey: 'cases.page.subtitle'
+              titleKey: 'cases.page.title'
             }
           }
         ]
@@ -224,7 +211,11 @@ export function updateDocumentTitle(route: RouteLocationNormalizedLoaded) {
 router.beforeEach(async (to) => {
   const authStore = useAuthStore(pinia);
   if (!authStore.bootstrapped) {
-    await authStore.bootstrap();
+    try {
+      await authStore.bootstrap();
+    } catch {
+      // 后端暂时不可用：按需要登录处理，未登录时落到登录页，下次导航再重试
+    }
   }
 
   if (to.name === 'login') {

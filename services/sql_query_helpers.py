@@ -34,8 +34,22 @@ def filter_like_contains(query: Query, column: Any, text: str) -> Query:
     needle = str(text or '').strip()
     if not needle:
         return query
-    clause = cast(ColumnElement[bool], column.like(f'%{needle}%'))
+    escaped = needle.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    clause = cast(ColumnElement[bool], column.like(f'%{escaped}%', escape='\\'))
     return query.filter(clause)
+
+
+def path_name_matches(column: Any, file_name: str) -> Any:
+    """路径列的文件名部分等于 file_name；不能用 contains，a.txt 会匹配到 ba.txt。"""
+    from sqlalchemy import or_
+
+    name = str(file_name or '').strip()
+    escaped = name.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return or_(
+        column == name,
+        column.like(f'%/{escaped}', escape='\\'),
+        column.like(f'%\\\\{escaped}', escape='\\'),
+    )
 
 
 def filter_expression(query: Query, expression: Any) -> Query:

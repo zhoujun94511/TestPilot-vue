@@ -8,7 +8,7 @@ import json
 import time
 from uuid import uuid4
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Generator, Optional
 
 # 添加项目根目录到Python路径
@@ -16,7 +16,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import and_
 from models.models import ChatHistory
 from utils.utils_performance_monitoring.performance_monitor import get_performance_monitor
 from utils.utils_ai_models.smart_quick_reply_generator import SmartQuickReplyGenerator
@@ -30,6 +30,12 @@ from services.rag_threshold_utils import (
     search_documents_above_threshold,
 )
 from services.sql_query_helpers import filter_column_eq
+from utils.utils_performance_monitoring.token_monitor import (
+    count_tokens,
+    ensure_session_budget,
+    track_session_usage,
+    usage_from_message,
+)
 
 logger = get_logger(__name__)
 
@@ -137,7 +143,7 @@ class ChatService:
             db_session.rollback()
             return {
                 'success': False,
-                'message': f'创建聊天会话失败: {str(e)}'
+                'message': '创建聊天会话失败'
             }
 
     def send_message(self, db_session: Session, session_id: str, message: str,
@@ -184,14 +190,15 @@ class ChatService:
             if self.llm.__class__.__name__ == 'ChatGoogleGenerativeAI':
                 llm_settings = self._adapt_settings_for_gemini(llm_settings)
 
+            ensure_session_budget()
             response = self.llm.invoke(
                 messages,
                 **llm_settings
             )
 
             ai_response = response.content if hasattr(response, 'content') else str(response)
-            tokens_used = self._extract_tokens_used(response, ai_response)
             model_name = self._resolve_model_name(user_settings, response)
+            tokens_used = self._track_usage(messages, ai_response, usage_from_message(response), model_name)
 
             # 幻觉检测（如果启用）
             hallucination_result = None
@@ -292,6 +299,7 @@ class ChatService:
                 'success': False,
                 'message': normalized.get('message', '发送消息失败'),
                 'error_code': normalized.get('error_code'),
+                'status_code': normalized.get('status_code', 500),
                 'retryable': bool(normalized.get('retryable', False))
             }
 
@@ -305,9 +313,15 @@ class ChatService:
             use_knowledge: bool = False,
             user_id: Optional[str] = None,
             context_messages: Optional[List[Dict[str, Any]]] = None,  # ✅ 修改类型注解
+            usage_sink: Optional[Dict[str, Any]] = None,
     ) -> Generator[str, None, None]:
+        """发送聊天消息（流式响应）。usage_sink 用于客户端中途断开时把已产生的用量交还调用方。"""
         from config.settings import settings as config_settings
-        """发送聊天消息（流式响应）"""
+        sink = usage_sink if usage_sink is not None else {}
+        messages: List[Dict[str, str]] = []
+        full_response = ""
+        stream_usage: Dict[str, int] = {}
+        llm_called = False
         try:
             _ = user_id
             _ = db_session
@@ -342,10 +356,15 @@ class ChatService:
                 llm_settings["stream"] = True
 
             # 调用 LLM（流式）
-            full_response = ""
+            ensure_session_budget()
             if hasattr(self.llm, "stream"):
                 try:
+                    llm_called = True
                     for chunk in self.llm.stream(messages, **llm_settings):
+                        chunk_usage = usage_from_message(chunk)
+                        if chunk_usage:
+                            for key in ('prompt_tokens', 'completion_tokens'):
+                                stream_usage[key] = stream_usage.get(key, 0) + int(chunk_usage.get(key) or 0)
                         if hasattr(chunk, "content") and chunk.content:
                             # ✅ 确保内容编码正确
                             content = chunk.content
@@ -377,6 +396,7 @@ class ChatService:
                     if "temperature" in llm_settings:
                         stream_params["temperature"] = llm_settings["temperature"]
                     
+                    llm_called = True
                     for chunk in self.llm.chat.completions.create(**stream_params):
                         delta = chunk.choices[0].delta.get("content", "")
                         if delta:
@@ -459,7 +479,7 @@ class ChatService:
                     logger.warning(f"幻觉检测失败: {e}")
 
             # 结束事件 - 返回完整响应供外部保存
-            tokens_used = self._estimate_tokens(full_response)
+            tokens_used = self._settle_stream_usage(sink, messages, full_response, stream_usage, model_name)
             end_data = {
                 "suggestions": suggestions,
                 "full_response": full_response,  # ✅ 返回完整响应供外部保存
@@ -491,6 +511,36 @@ class ChatService:
                 "retryable": bool(normalized.get("retryable", False)),
                 "status_code": normalized.get("status_code", 500)
             })
+        finally:
+            if llm_called:
+                self._settle_stream_usage(
+                    sink, messages, full_response, stream_usage, self._resolve_model_name(user_settings)
+                )
+
+    @staticmethod
+    def _track_usage(messages: List[Dict[str, str]], output_text: str,
+                     usage: Optional[Dict[str, int]], model_name: Optional[str]) -> int:
+        """计入会话额度并返回本次总 token；模型没给 usage 时按 tiktoken 计输入和输出。"""
+        if usage and int(usage.get('total_tokens') or 0) > 0:
+            input_tokens = int(usage.get('prompt_tokens') or 0)
+            output_tokens = int(usage.get('completion_tokens') or 0)
+        else:
+            input_tokens = count_tokens('\n'.join(str(m.get('content') or '') for m in messages), model_name)
+            output_tokens = count_tokens(output_text or '', model_name)
+        track_session_usage(input_tokens, output_tokens, model_name)
+        return input_tokens + output_tokens
+
+    def _settle_stream_usage(self, sink: Dict[str, Any], messages: List[Dict[str, str]], output_text: str,
+                             stream_usage: Dict[str, int], model_name: Optional[str]) -> int:
+        """一次流式调用只记一次账。"""
+        if 'tokens_used' in sink:
+            return int(sink['tokens_used'])
+        usage = None
+        if stream_usage:
+            usage = {**stream_usage, 'total_tokens': sum(stream_usage.values())}
+        sink['tokens_used'] = self._track_usage(messages, output_text, usage, model_name)
+        sink['model_name'] = model_name
+        return int(sink['tokens_used'])
 
     @staticmethod
     def _create_stream_event(event_type: str, data: Dict[str, Any]) -> str:
@@ -774,15 +824,6 @@ class ChatService:
     def _prepare_llm_settings(self, user_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return build_llm_call_settings(self.llm, user_settings)
 
-    @staticmethod
-    def _estimate_tokens(text: str) -> int:
-        """粗略 token 估算（用于流式场景兜底）"""
-        content = (text or '').strip()
-        if not content:
-            return 0
-        # 英文约 4 chars/token，中文通常更稠密，取保守估算避免长期为 0
-        return max(1, int(len(content) / 4))
-
     def _resolve_model_name(self, user_settings: Optional[Dict[str, Any]] = None, response: Any = None) -> str:
         """优先从响应元数据解析模型名，其次回退到 LLM 实例与用户设置。"""
         try:
@@ -813,36 +854,6 @@ class ChatService:
             return str(user_settings.get('model'))
         return 'unknown'
 
-    def _extract_tokens_used(self, response: Any, generated_text: str) -> int:
-        """尽量读取模型真实 token 用量；缺失时做估算兜底。"""
-        try:
-            usage_metadata = getattr(response, 'usage_metadata', None)
-            if isinstance(usage_metadata, dict):
-                total = usage_metadata.get('total_tokens')
-                if total is not None:
-                    return max(0, int(total))
-                output = usage_metadata.get('output_tokens') or usage_metadata.get('completion_tokens')
-                if output is not None:
-                    return max(0, int(output))
-        except (AttributeError, TypeError, ValueError):
-            pass
-
-        try:
-            response_metadata = getattr(response, 'response_metadata', None)
-            if isinstance(response_metadata, dict):
-                token_usage = response_metadata.get('token_usage')
-                if isinstance(token_usage, dict):
-                    total = token_usage.get('total_tokens')
-                    if total is not None:
-                        return max(0, int(total))
-                    completion = token_usage.get('completion_tokens')
-                    if completion is not None:
-                        return max(0, int(completion))
-        except (AttributeError, TypeError, ValueError):
-            pass
-
-        return self._estimate_tokens(generated_text)
-    
     @staticmethod
     def _adapt_settings_for_gemini(llm_settings: Dict[str, Any],
                                    include_stream: bool = False) -> Dict[str, Any]:
@@ -1061,8 +1072,8 @@ class ChatService:
                     search_conditions = []
                     for keyword in keywords:
                         if len(keyword) > 1:  # 忽略单字符
-                            search_conditions.append(TestCase.title.contains(keyword))
-                            search_conditions.append(TestCase.description.contains(keyword))
+                            search_conditions.append(TestCase.title.contains(keyword, autoescape=True))
+                            search_conditions.append(TestCase.description.contains(keyword, autoescape=True))
                     
                     if search_conditions:
                         from services.stats_scope import scoped_cases_query
@@ -1099,8 +1110,8 @@ class ChatService:
                     search_conditions = []
                     for keyword in keywords:
                         if len(keyword) > 1:
-                            search_conditions.append(Requirement.title.contains(keyword))
-                            search_conditions.append(Requirement.content.contains(keyword))
+                            search_conditions.append(Requirement.title.contains(keyword, autoescape=True))
+                            search_conditions.append(Requirement.content.contains(keyword, autoescape=True))
                     
                     if search_conditions:
                         from services.stats_scope import scoped_requirements_query
@@ -1142,79 +1153,6 @@ class ChatService:
             logger.error(f"获取知识库上下文失败: {str(e)}", exc_info=True)
             return None
 
-    def get_chat_sessions(self, db_session: Session, user_id: Optional[str] = None,
-                          limit: int = 50) -> Dict[str, Any]:
-        """获取聊天会话列表"""
-        try:
-            query = db_session.query(
-                ChatHistory.session_id,
-                func.min(ChatHistory.created_time).label('created_time'),
-                func.max(ChatHistory.created_time).label('updated_time'),
-                func.count(ChatHistory.id).label('message_count')
-            ).filter(
-                ChatHistory.role != 'system'# type: ignore
-            )
-
-            if user_id is not None:
-                query = query.filter(ChatHistory.user_id == user_id)
-
-            sessions_data = query.group_by(
-                ChatHistory.session_id
-            ).order_by(
-                func.max(ChatHistory.created_time).desc()
-            ).limit(limit).all()
-
-            sessions = []
-            for session_data in sessions_data:
-                # 获取会话的第一条用户消息作为标题
-                first_message = db_session.query(ChatHistory).filter(
-                    and_(
-                        ChatHistory.session_id == session_data.session_id,
-                        ChatHistory.role == 'user'
-                    )
-                ).order_by(ChatHistory.created_time).first()
-
-                last_message = db_session.query(ChatHistory).filter(
-                    and_(
-                        ChatHistory.session_id == session_data.session_id,
-                        ChatHistory.role.in_(['user', 'assistant'])
-                    )
-                ).order_by(ChatHistory.created_time.desc()).first()
-
-                title = self._generate_session_title(first_message.content if first_message else "新会话")
-
-                sessions.append({
-                    'id': session_data.session_id,
-                    'title': title,
-                    'created_time': session_data.created_time.isoformat(),
-                    'updated_time': session_data.updated_time.isoformat(),
-                    'message_count': session_data.message_count,
-                    'last_message': last_message.content[:100] + "..." if last_message and len(
-                        last_message.content) > 100 else (last_message.content if last_message else "")
-                })
-
-            return {
-                'success': True,
-                'sessions': sessions
-            }
-
-        except Exception as e:
-            logger.error(f"获取聊天会话列表失败: {str(e)}")
-            return {
-                'success': False,
-                'message': f'获取会话列表失败: {str(e)}'
-            }
-
-    @staticmethod
-    def _generate_session_title(first_message: str) -> str:
-        """生成会话标题"""
-        if len(first_message) <= 30:
-            return first_message
-
-        # 截取前30个字符并添加省略号
-        return first_message[:30] + "..."
-
-
     @staticmethod
     def clear_chat_history(db_session: Session, session_id: str,
                            user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -1245,107 +1183,7 @@ class ChatService:
             db_session.rollback()
             return {
                 'success': False,
-                'message': f'清空聊天历史失败: {str(e)}'
-            }
-
-    @staticmethod
-    def update_chat_session(db_session: Session, session_id: str,
-                            update_data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
-        """更新聊天会话信息
-        
-        支持更新会话元数据，如：
-        - title: 会话标题
-        - tags: 会话标签
-        - is_deleted: 软删除标记
-        
-        Args:
-            db_session: 数据库会话
-            session_id: 会话ID
-            update_data: 要更新的数据字典
-            user_id: 用户ID（可选，用于权限验证）
-            
-        Returns:
-            更新结果字典
-        """
-        try:
-            from models.models import ChatSession
-            
-            logger.info(f"更新聊天会话: {session_id}, 数据: {update_data}")
-            
-            # 查找或创建会话记录
-            chat_session = db_session.query(ChatSession).filter(
-                ChatSession.session_id == str(session_id)  # type: ignore
-            ).first()
-            
-            # 如果会话不存在，创建新记录
-            if not chat_session:
-                # 获取会话的第一条消息作为默认标题
-                first_message = db_session.query(ChatHistory).filter(
-                    and_(
-                        ChatHistory.session_id == session_id,
-                        ChatHistory.role == 'user'
-                    )
-                ).order_by(ChatHistory.created_time).first()
-                
-                default_title = first_message.content[:30] + "..." if (
-                    first_message and len(first_message.content) > 30
-                ) else (first_message.content if first_message else "新会话")
-                
-                chat_session = ChatSession(
-                    session_id=session_id,
-                    title=update_data.get('title', default_title),
-                    user_id=user_id,
-                    created_time=datetime.now(timezone.utc),
-                    updated_time=datetime.now(timezone.utc),
-                    is_deleted=False
-                )
-                db_session.add(chat_session)
-                logger.info(f"创建新会话记录: {session_id}")
-            
-            # 权限验证（如果指定了user_id）
-            if user_id is not None and chat_session.user_id != user_id:
-                logger.warning(f"用户 {user_id} 无权更新会话 {session_id}")
-                return {
-                    'success': False,
-                    'message': '无权更新此会话'
-                }
-            
-            # 更新允许的字段
-            updated_fields = []
-            
-            if 'title' in update_data:
-                chat_session.title = update_data['title']
-                updated_fields.append('title')
-            
-            if 'is_deleted' in update_data:
-                chat_session.is_deleted = bool(update_data['is_deleted'])
-                updated_fields.append('is_deleted')
-            
-            # 更新时间戳
-            chat_session.updated_time = datetime.now(timezone.utc)
-            
-            # 提交更改
-            db_session.commit()
-            
-            logger.info(f"会话更新成功: {session_id}, 更新字段: {', '.join(updated_fields)}")
-            
-            return {
-                'success': True,
-                'session_id': session_id,
-                'updated_fields': updated_fields,
-                'updated_data': {
-                    'title': chat_session.title,
-                    'is_deleted': chat_session.is_deleted,
-                    'updated_time': chat_session.updated_time.isoformat()
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"更新聊天会话失败: {str(e)}", exc_info=True)
-            db_session.rollback()
-            return {
-                'success': False,
-                'message': f'更新聊天会话失败: {str(e)}'
+                'message': '清空聊天历史失败'
             }
 
     @staticmethod
@@ -1398,7 +1236,7 @@ class ChatService:
             logger.error(f"获取聊天建议失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'获取聊天建议失败: {str(e)}'
+                'message': '获取聊天建议失败'
             }
 
     @staticmethod
@@ -1482,179 +1320,5 @@ class ChatService:
             logger.error(f"获取聊天模板失败: {str(e)}")
             return {
                 'success': False,
-                'message': f'获取聊天模板失败: {str(e)}'
+                'message': '获取聊天模板失败'
             }
-
-    @staticmethod
-    def export_chat_history(db_session: Session, session_id: str,
-                            export_format: str = 'json', user_id: Optional[str] = None) -> Dict[str, Any]:
-        """导出聊天历史"""
-        try:
-            # 获取聊天历史
-            query = db_session.query(ChatHistory).filter(
-                and_(
-                    ChatHistory.session_id == session_id,
-                    ChatHistory.role.in_(['user', 'assistant'])
-                )
-            )
-
-            if user_id is not None:
-                query = query.filter(ChatHistory.user_id == user_id)# type: ignore
-
-            messages = query.order_by(ChatHistory.created_time).all()
-
-            if not messages:
-                return {
-                    'success': False,
-                    'message': '没有找到聊天记录'
-                }
-
-            # 根据格式导出
-            if export_format.lower() == 'json':
-                export_data = {
-                    'session_id': session_id,
-                    'export_time': datetime.now(timezone.utc).isoformat(),
-                    'message_count': len(messages),
-                    'messages': [
-                        {
-                            'role': msg.role,
-                            'content': msg.content,
-                            'timestamp': msg.created_time.isoformat()
-                        }
-                        for msg in messages
-                    ]
-                }
-
-                return {
-                    'success': True,
-                    'data': export_data,
-                    'format': 'json'
-                }
-
-            elif export_format.lower() == 'txt':
-                # 生成文本格式
-                lines = [
-                    f"聊天记录导出 - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
-                    f"会话ID: {session_id}",
-                    f"消息数量: {len(messages)}",
-                    "=" * 50,
-                    ""
-                ]
-
-                for msg in messages:
-                    role_name = "用户" if msg.role == "user" else "助手"
-                    timestamp = msg.created_time.strftime('%Y-%m-%d %H:%M:%S')
-                    lines.extend([
-                        f"[{timestamp}] {role_name}:",
-                        msg.content,
-                        ""
-                    ])
-
-                export_text = "\n".join(lines)
-
-                return {
-                    'success': True,
-                    'data': export_text,
-                    'format': 'txt'
-                }
-
-            else:
-                return {
-                    'success': False,
-                    'message': f'不支持的导出格式: {export_format}'
-                }
-
-        except Exception as e:
-            logger.error(f"导出聊天历史失败: {str(e)}")
-            return {
-                'success': False,
-                'message': f'导出聊天历史失败: {str(e)}'
-            }
-
-    @staticmethod
-    def get_chat_statistics(db_session: Session, days: int = 30) -> Dict[str, Any]:
-        """获取聊天统计信息"""
-        try:
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-
-            # 总会话数
-            total_sessions = db_session.query(
-                func.count(func.distinct(ChatHistory.session_id))
-            ).scalar() or 0
-
-            # 总消息数
-            total_messages = db_session.query(ChatHistory).filter(
-                ChatHistory.role.in_(['user', 'assistant'])
-            ).count()
-
-            # 最近活动
-            recent_sessions = db_session.query(
-                func.count(func.distinct(ChatHistory.session_id))
-            ).filter(
-                ChatHistory.created_time >= cutoff_date
-            ).scalar() or 0
-
-            recent_messages = db_session.query(ChatHistory).filter(
-                and_(
-                    ChatHistory.created_time >= cutoff_date,
-                    ChatHistory.role.in_(['user', 'assistant'])
-                )
-            ).count()
-
-            # 平均会话长度
-            avg_session_length = db_session.query(
-                func.avg(func.count(ChatHistory.id))
-            ).select_from(
-                db_session.query(ChatHistory.session_id).filter(
-                    ChatHistory.role.in_(['user', 'assistant'])
-                ).group_by(ChatHistory.session_id).subquery()
-            ).scalar() or 0
-
-            return {
-                'success': True,
-                'statistics': {
-                    'total_sessions': total_sessions,
-                    'total_messages': total_messages,
-                    'recent_sessions': recent_sessions,
-                    'recent_messages': recent_messages,
-                    'avg_session_length': round(float(avg_session_length), 2),
-                    'period_days': days
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"获取聊天统计失败: {str(e)}")
-            return {
-                'success': False,
-                'message': f'获取聊天统计失败: {str(e)}'
-            }
-
-
-def delete_chat_session(db_session: Session, session_id: str,
-                        user_id: Optional[str] = None) -> Dict[str, Any]:
-    """删除聊天会话"""
-    try:
-        query = db_session.query(ChatHistory).filter(
-            ChatHistory.session_id == session_id# type: ignore
-        )
-
-        if user_id is not None:
-            query = query.filter(ChatHistory.user_id == user_id)
-
-        deleted_count = query.delete()
-        db_session.commit()
-
-        logger.info(f"删除聊天会话成功: {session_id}, 删除消息数: {deleted_count}")
-
-        return {
-            'success': True,
-            'deleted_messages': deleted_count
-        }
-
-    except Exception as e:
-        logger.error(f"删除聊天会话失败: {str(e)}")
-        db_session.rollback()
-        return {
-            'success': False,
-            'message': f'删除聊天会话失败: {str(e)}'
-        }

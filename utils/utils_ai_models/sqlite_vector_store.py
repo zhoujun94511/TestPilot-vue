@@ -638,6 +638,46 @@ class SQLiteVectorStore:
             finally:
                 conn.close()
     
+    @staticmethod
+    def _scope_chunk_ids(conn: sqlite3.Connection, flt: Any) -> Optional[set]:
+        """把 Chroma 风格的 file_id / dept_id 过滤条件换成允许的 chunk_id 集合；无过滤返回 None。"""
+        if not isinstance(flt, dict) or not flt:
+            return None
+        clauses = []
+        params: List[int] = []
+        for field in ('file_id', 'dept_id'):
+            cond = flt.get(field)
+            if cond is None:
+                continue
+            if isinstance(cond, dict) and '$in' in cond:
+                raw_values = cond['$in'] if isinstance(cond['$in'], (list, tuple)) else [cond['$in']]
+            elif isinstance(cond, dict) and '$eq' in cond:
+                raw_values = [cond['$eq']]
+            elif isinstance(cond, (int, str)) and not isinstance(cond, bool):
+                raw_values = [cond]
+            else:
+                continue
+            values = []
+            for item in raw_values:
+                if isinstance(item, bool) or not isinstance(item, (int, str)):
+                    continue
+                try:
+                    values.append(int(item))
+                except ValueError:
+                    continue
+            if not values:
+                return set()
+            clauses.append(
+                f"CAST(json_extract(metadata, '$.{field}') AS INTEGER) IN ({','.join('?' * len(values))})"
+            )
+            params.extend(values)
+        if not clauses:
+            return None
+        rows = conn.execute(
+            f"SELECT id FROM chunks WHERE {' AND '.join(clauses)}", params
+        ).fetchall()
+        return {row['id'] for row in rows}
+
     def similarity_search(self, query: str, k: int = 4, **kwargs) -> List[Document]:  # noqa: ARG002
         """
         相似度搜索（不带分数）
@@ -672,12 +712,13 @@ class SQLiteVectorStore:
             (Document, similarity_score) 元组列表
             similarity_score ∈ [0, 1]，越大越相似
         """
-        _ = kwargs  # 保留参数以保持接口兼容性
+        query_embedding = self.embedding_function.embed_query(query)
         with self._lock:
             conn = self._get_connection()
             try:
-                # 生成查询向量
-                query_embedding = self.embedding_function.embed_query(query)
+                scope_ids = self._scope_chunk_ids(conn, kwargs.get('filter'))
+                if scope_ids is not None and not scope_ids:
+                    return []
                 
                 # 混合检索流程：FTS5 → sqlite-vec
                 # 第一阶段：FTS5 召回候选 chunk_ids（如果启用混合检索）
@@ -762,7 +803,13 @@ class SQLiteVectorStore:
                                 f"   错误: {fts_error}"
                             )
                         candidate_chunk_ids = None
-                
+
+                if scope_ids is not None:
+                    if candidate_chunk_ids is not None:
+                        candidate_chunk_ids = [i for i in candidate_chunk_ids if i in scope_ids]
+                    if not candidate_chunk_ids:
+                        candidate_chunk_ids = list(scope_ids)
+
                 # 第二阶段：sqlite-vec 向量检索（对候选集或全量）
                 # 尝试使用 sqlite-vec 索引搜索（如果可用）
                 if self._vec_index_available:
@@ -946,6 +993,8 @@ class SQLiteVectorStore:
                 similarities: List[Tuple[float, Document]] = []
                 
                 for row in all_embeddings:
+                    if scope_ids is not None and row['chunk_id'] not in scope_ids:
+                        continue
                     embedding_buffer = row['embedding']
                     content = row['content']
                     metadata_json = row['metadata']

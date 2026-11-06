@@ -12,6 +12,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+from services.case_count import clamp_cases_per_requirement
 from utils.utils_core.common_utils import generate_id
 from utils.utils_performance_monitoring.performance_monitor import get_performance_monitor
 from utils.utils_core.logger import get_logger
@@ -25,11 +26,28 @@ from utils.utils_ai_quality.faithfulness_checker import (
     join_source_text,
     judge_sentences,
 )
-from utils.utils_core.api_error_handler import build_model_error_result
+from utils.utils_core.api_error_handler import build_model_error_result, normalize_provider_error
 from utils.utils_core import error_codes as ec
+from utils.utils_business_logic.case_id_generator import safe_case_id_segment
+from utils.utils_performance_monitoring.token_monitor import (
+    ensure_session_budget,
+    record_message_usage,
+    track_session_usage,
+)
+from utils.utils_performance_monitoring.token_session import TokenSessionLimitExceeded
 from config.settings import settings
 
 logger = get_logger(__name__)
+
+_NON_RETRYABLE_STATUS = {400, 401, 402, 403, 404, 422}
+
+
+def is_retryable_model_error(error: Exception) -> bool:
+    """鉴权、余额、参数类错误重试也不会成功，只会多花钱。"""
+    if isinstance(error, TokenSessionLimitExceeded):
+        return False
+    normalized = normalize_provider_error(getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'), error)
+    return int(normalized.get('status_code') or 500) not in _NON_RETRYABLE_STATUS
 
 
 class CaseService:
@@ -132,6 +150,7 @@ class CaseService:
             生成结果字典
         """
         try:
+            case_count = clamp_cases_per_requirement(case_count, 5)
             if not llm:
                 return {
                     'success': False,
@@ -282,7 +301,7 @@ class CaseService:
                 output_language=output_language
             )
 
-            if not generation_result or not isinstance(generation_result, list):
+            if not isinstance(generation_result, list):
                 return {
                     'success': False,
                     'message': '用例生成失败，返回结果格式错误',
@@ -304,11 +323,12 @@ class CaseService:
                     base_timestamp = int(time.time() * 1000)  # 基础时间戳
                     
                     # 生成显示ID（简洁格式）
-                    if case_data.get('case_id'):
-                        display_id = case_data.get('case_id')  # 使用AI提供的ID
+                    if case_data.get('display_id') or case_data.get('case_id'):
+                        display_id = str(case_data.get('display_id') or case_data.get('case_id'))
                     else:
                         # 生成新的显示ID
                         display_id = f"TC-{generate_id(case_data.get('title', f'测试用例_{i + 1}'))}-{i + 1:02d}"
+                    display_id = safe_case_id_segment(display_id)
                     
                     # 生成内部ID（带时间戳，确保数据库唯一性）
                     internal_id = f"{display_id}-{base_timestamp + i}"
@@ -348,6 +368,16 @@ class CaseService:
             self.performance_monitor.stop_monitoring()
             performance_stats = self.performance_monitor.get_performance_stats()
 
+            if not processed_cases_final:
+                return {
+                    'success': False,
+                    'message': '没有生成可用的测试用例，请补充需求描述后重试',
+                    'error': ec.EMPTY_CONTENT,
+                    'error_code': ec.EMPTY_CONTENT,
+                    'status_code': 422,
+                    'retryable': True,
+                }
+
             result = {
                 'success': True,
                 'message': f'成功生成{len(processed_cases_final)}个测试用例',
@@ -372,8 +402,7 @@ class CaseService:
             return build_model_error_result(
                 getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'),
                 e,
-                fallback_message='测试用例生成失败',
-                include_raw_error=True
+                fallback_message='测试用例生成失败'
             )
 
     def _detect_hallucination_in_cases(self, cases: List[Dict[str, Any]], 
@@ -483,7 +512,7 @@ class CaseService:
                     'total_cases': len(cases),
                     'problematic_cases': 0,
                     'quality_score': 1.0,
-                    'error': str(e)
+                    'error': 'internal_error'
                 }
             }
 
@@ -588,21 +617,18 @@ class CaseService:
             max_retries = 3
             response = None
             for attempt in range(max_retries):
+                ensure_session_budget()
                 try:
                     response = llm.invoke(prompt)
                     break
                 except Exception as e:
-                    if attempt == max_retries - 1:
-                        logger.error(f"LLM调用失败，已达到最大重试次数: {e}")
-                        return self._generate_fallback_cases(requirement_text, case_count, output_language)
-                    else:
-                        logger.warning(f"LLM调用失败，重试 {attempt + 1}/{max_retries}: {e}")
-                        time.sleep(2 ** attempt)  # 指数退避
-
-            # 检查response是否成功获取
-            if response is None:
-                logger.warning("LLM调用失败，返回备选用例")
-                return self._generate_fallback_cases(requirement_text, case_count, output_language)
+                    track_session_usage()
+                    if attempt == max_retries - 1 or not is_retryable_model_error(e):
+                        logger.error(f"LLM调用失败: {e}")
+                        raise
+                    logger.warning(f"LLM调用失败，重试 {attempt + 1}/{max_retries}: {e}")
+                    time.sleep(2 ** attempt)  # 指数退避
+            record_message_usage(response, source='case_generation')
 
             # 解析LLM响应
             if hasattr(response, 'content'):
@@ -631,6 +657,9 @@ class CaseService:
             except (json.JSONDecodeError, AttributeError):
                 # JSON解析失败，使用文本解析
                 cases = self._parse_text_cases(content, case_count)
+            if not isinstance(cases, list):
+                cases = []
+            cases = [item for item in cases if isinstance(item, dict)][:case_count]
 
             # 标准化用例数据 - 完全按照prompt格式处理
             base_timestamp = int(time.time() * 1000)  # 基础时间戳
@@ -638,14 +667,15 @@ class CaseService:
             for i, case_data in enumerate(cases):
                 try:
                     # 生成唯一用例ID（双重ID系统：内部ID + 显示ID）
-                    module = case_data.get('module', 'DEFAULT')
+                    module = str(case_data.get('module') or 'DEFAULT')
                     
                     # 生成显示ID（简洁格式）
                     if case_data.get('case_id'):
-                        display_id = case_data.get('case_id')  # 使用AI提供的ID
+                        display_id = str(case_data.get('case_id'))  # 使用AI提供的ID
                     else:
                         # 生成新的显示ID
                         display_id = f"TC-{module}-{i + 1:02d}"
+                    display_id = safe_case_id_segment(display_id)
                     
                     # 生成内部ID（带时间戳，确保数据库唯一性）
                     internal_id = f"{display_id}-{base_timestamp + i}"
@@ -671,12 +701,13 @@ class CaseService:
                     logger.error(f"处理用例数据失败: {e}")
                     continue
 
+            if not processed_cases:
+                raise ValueError('模型返回的内容里没有可用的测试用例')
             return processed_cases
 
         except Exception as e:
             logger.error(f"生成用例失败: {e}")
-            # 返回基础用例作为备选
-            return self._generate_fallback_cases(requirement_text, case_count, output_language)
+            raise
 
     @staticmethod
     def _infer_target_language(text: str) -> str:
@@ -718,7 +749,9 @@ JSON:
 {raw_content}
 """
         try:
+            ensure_session_budget()
             rewritten = llm.invoke(rewrite_prompt)
+            record_message_usage(rewritten, source='case_generation')
             rewritten_text = rewritten.content if hasattr(rewritten, 'content') else str(rewritten)
 
             # 兼容模型返回 markdown code block 或包裹文本
@@ -763,22 +796,9 @@ JSON:
     @staticmethod
     def _normalize_priority(priority):
         """标准化优先级格式 - 使用P0-P4格式"""
-        if isinstance(priority, str):
-            # 如果已经是P格式，直接返回
-            if priority.startswith('P') and len(priority) == 2:
-                return priority
-            # 转换其他格式到P格式
-            elif priority.lower() in ['high', 'h', 'critical']:
-                return 'P0'
-            elif priority.lower() in ['medium', 'm', 'normal']:
-                return 'P1'
-            elif priority.lower() in ['low', 'l']:
-                return 'P2'
-            elif priority.lower() in ['very_low', 'vl']:
-                return 'P3'
-            elif priority.lower() in ['lowest', 'minimal']:
-                return 'P4'
-        return 'P1'  # 默认优先级
+        from services.case_field_filters import normalize_priority
+
+        return normalize_priority(priority)
     
     @staticmethod
     def _generate_unique_case_id(display_id: str, index: int, base_timestamp: int) -> str:
@@ -1252,36 +1272,6 @@ JSON:
 
         return deduplicated
 
-    @staticmethod
-    def _generate_fallback_cases(requirement_text: str, case_count: int, output_language: str | None = None) -> List[Dict[str, Any]]:
-        """生成备选用例（当LLM调用失败时）"""
-        cases = []
-        is_en = output_language == 'en'
-        for i in range(case_count):
-            cases.append({
-                'title': (
-                    f'Test case based on requirement "{requirement_text[:50]}..."_{i + 1}'
-                    if is_en else f'基于需求"{requirement_text[:50]}..."的测试用例_{i + 1}'
-                ),
-                'precondition': 'System is running, test data is prepared' if is_en else '系统正常运行，相关数据已准备',
-                'steps': [
-                    'Step 1: Prepare test environment' if is_en else '步骤1：准备测试环境',
-                    'Step 2: Execute core functional testing' if is_en else '步骤2：执行核心功能测试',
-                    'Step 3: Verify results' if is_en else '步骤3：验证结果'
-                ],
-                'expected_result': [
-                    'Environment setup succeeds' if is_en else '环境准备成功',
-                    'Feature works as expected' if is_en else '功能正常运行',
-                    'Result matches expectation' if is_en else '结果符合预期'
-                ],
-                'priority': 'P1',
-                'category': 'functional',
-                'test_method': 'Equivalence Partitioning' if is_en else '等价类划分法',
-                'module': 'DEFAULT',
-                'tags': ['requirement-test', 'functional-validation'] if is_en else ['需求测试', '功能验证']
-            })
-        return cases
-
     def batch_generate_cases(
             self,
             requirements: List[Union[str, Dict[str, Any]]],
@@ -1308,6 +1298,7 @@ JSON:
             批量生成结果
         """
         try:
+            case_count_per_req = clamp_cases_per_requirement(case_count_per_req, 3)
             if not requirements:
                 return {
                     'success': False,
@@ -1403,8 +1394,7 @@ JSON:
             return build_model_error_result(
                 getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'),
                 e,
-                fallback_message='批量生成失败',
-                include_raw_error=True
+                fallback_message='批量生成失败'
             )
 
     def _get_streaming_processor(self):
@@ -1500,7 +1490,7 @@ JSON:
                     results.append({
                         'requirement_id': req_id,
                         'success': False,
-                        'message': f'处理失败: {str(e)}',
+                        'message': '处理失败',
                         'cases': []
                     })
             else:
@@ -1523,6 +1513,8 @@ JSON:
                             total_cases += len(req_result['cases'])
                         results.append(req_result)
                         
+                except TokenSessionLimitExceeded:
+                    raise
                 except Exception as e:
                     logger.error(f"批量处理需求失败: {e}，降级为逐个生成")
                     # 批量失败时，降级为逐个生成
@@ -1569,7 +1561,7 @@ JSON:
                             results.append({
                                 'requirement_id': req_id,
                                 'success': False,
-                                'message': f'生成失败: {str(single_err)}',
+                                'message': '生成失败',
                                 'cases': []
                             })
 
@@ -1616,7 +1608,7 @@ JSON:
                 req_text = req
             else:
                 req_text = req.get('content') or req.get('text', '')
-                req_id = req.get('id', req_id)
+                req_id = str(req.get('id') or req.get('req_id') or req_id)
             
             if not req_text:
                 continue
@@ -1660,13 +1652,15 @@ JSON:
         logger.info(f"  ├─ 本批{req_count}个需求，每个需求{case_count_per_req}个用例，预期生成{total_expected_cases}个用例")
         
         # 调用LLM
+        ensure_session_budget()
         try:
-            response = llm.invoke(prompt)
+            try:
+                response = llm.invoke(prompt)
+            except Exception:
+                track_session_usage()
+                raise
+            record_message_usage(response, source='case_generation')
             response_text = response.content if hasattr(response, 'content') else str(response)
-            
-            # 解析JSON响应
-            import json
-            import re
             
             # 提取JSON部分 - 使用栈匹配找到完整的JSON对象
             def extract_json(text):
@@ -1755,12 +1749,12 @@ JSON:
             logger.info(f"LLM返回了{total_returned_cases}个用例")
             
             for case in response_data.get('cases', []):
-                req_id = case.get('requirement_id', '')
-                if req_id not in cases_by_req:
-                    cases_by_req[req_id] = []
-                # 移除requirement_id字段（不需要保存到用例中）
-                case.pop('requirement_id', None)
-                cases_by_req[req_id].append(case)
+                if not isinstance(case, dict):
+                    continue
+                req_id = str(case.pop('requirement_id', '') or '')
+                bucket = cases_by_req.setdefault(req_id, [])
+                if len(bucket) < case_count_per_req:
+                    bucket.append(case)
             
             # 记录每个需求的用例数量
             for req_id, cases in cases_by_req.items():
@@ -1792,15 +1786,19 @@ JSON:
                 'success_count': len([r for r in results if r['success']])
             }
             
+        except TokenSessionLimitExceeded:
+            raise
         except Exception as e:
             logger.error(f"批量生成用例失败: {e}")
-            # 返回失败结果
+            message = build_model_error_result(
+                getattr(settings, 'DEFAULT_COMPANY', 'OPENAI'), e, fallback_message='批量生成失败'
+            )['message']
             results = []
             for req_id in req_id_mapping.keys():
                 results.append({
                     'requirement_id': req_id,
                     'success': False,
-                    'message': f'批量生成失败: {str(e)}',
+                    'message': message,
                     'cases': []
                 })
             return {
@@ -1856,12 +1854,13 @@ JSON:
                         success_count += 1
                         total_cases += result['case_count']
                         
-                except Exception as e:
+                except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+                    logger.error(f"并行处理需求失败: {exc}")
                     req_id = future_to_req[future]
                     results.append({
                         'requirement_id': req_id,
                         'success': False,
-                        'message': f'并行处理失败: {str(e)}',
+                        'message': '并行处理失败',
                         'cases': [],
                         'case_count': 0
                     })
@@ -1899,11 +1898,12 @@ JSON:
                 'case_count': len(result.get('cases', []))
             }
             
-        except Exception as e:
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            logger.error(f"处理需求失败: {exc}")
             return {
                 'requirement_id': req_id,
                 'success': False,
-                'message': f'处理需求失败: {str(e)}',
+                'message': '处理需求失败',
                 'cases': [],
                 'case_count': 0
             }
@@ -2004,11 +2004,12 @@ JSON:
 
             return validation_results
 
-        except Exception as e:
+        except (TypeError, KeyError, ValueError, AttributeError) as exc:
+            logger.warning(f"验证过程出错: {exc}")
             return {
                 'valid_cases': cases,
                 'invalid_cases': [],
-                'warnings': [f"验证过程出错: {str(e)}"],
+                'warnings': ["验证过程出错"],
                 'statistics': {
                     'total': len(cases),
                     'valid': len(cases),

@@ -25,6 +25,15 @@ from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
 
+AI_PROVIDER_NAMES = ('OPENAI', 'DEEPSEEK', 'OLLAMA', 'GEMINI', 'QWEN', 'ANTHROPIC')
+AI_PROVIDER_KEY_ROWS = (
+    ('OPENAI_API_KEY', 'OpenAI API密钥'),
+    ('DEEPSEEK_API_KEY', 'DeepSeek API密钥'),
+    ('GEMINI_API_KEY', 'Gemini API密钥'),
+    ('QWEN_API_KEY', 'Qwen API密钥'),
+    ('ANTHROPIC_API_KEY', 'Anthropic API密钥'),
+)
+
 
 def clear_old_data():
     """清空旧的配置中心数据"""
@@ -56,6 +65,20 @@ def init_config_center_tables():
     except Exception as e:
         logger.error(f"创建配置中心数据表失败: {e}")
         return False
+
+
+def _env_flag(name: str, default: str = 'true') -> str:
+    return 'true' if os.getenv(name, default).strip().lower() in ('true', '1', 'yes', 'on') else 'false'
+
+
+def _feature_flag_rows():
+    """功能开关按 .env 的当前取值写入，避免配置中心覆盖已生效的设置。"""
+    return [
+        {'key': 'ENABLE_VECTOR_STORE', 'value': _env_flag('ENABLE_VECTOR_STORE'), 'value_type': 'bool',
+         'category': 'knowledge', 'description': '启用知识库向量存储', 'is_sensitive': False},
+        {'key': 'ENABLE_EXPERIMENTAL_ACTIONS', 'value': _env_flag('ENABLE_EXPERIMENTAL_ACTIONS'), 'value_type': 'bool',
+         'category': 'performance', 'description': '启用实验工具', 'is_sensitive': False},
+    ]
 
 
 def seed_default_configs():
@@ -121,8 +144,6 @@ def seed_default_configs():
                  'category': 'ai_model', 'description': 'Anthropic模型名称', 'is_sensitive': False},
                 {'key': 'TR_ANTHROPIC_MAX_TOKENS', 'value': '8000', 'value_type': 'int',
                  'category': 'ai_model', 'description': 'Anthropic 用例生成单次最大词元数', 'is_sensitive': False},
-                {'key': 'ENABLE_ANTHROPIC', 'value': 'false', 'value_type': 'bool',
-                 'category': 'ai_model', 'description': '是否启用 Claude 服务商', 'is_sensitive': False},
                 {'key': 'MAX_TOKENS', 'value': '4000', 'value_type': 'int',
                  'category': 'ai_model', 'description': '聊天、快捷回复与 Ollama 单次最大词元数', 'is_sensitive': False},
 
@@ -153,8 +174,7 @@ def seed_default_configs():
                  'category': 'performance', 'description': '启用并行处理', 'is_sensitive': False},
                 {'key': 'ENABLE_STREAMING', 'value': 'true', 'value_type': 'bool',
                  'category': 'performance', 'description': '启用流式处理', 'is_sensitive': False},
-                {'key': 'ENABLE_PARALLEL_PROCESSING', 'value': 'true', 'value_type': 'bool',
-                 'category': 'performance', 'description': '启用并行处理', 'is_sensitive': False},
+                *_feature_flag_rows(),
 
                 # 知识库检索配置
                 {'key': 'RAG_TOP_K', 'value': '5', 'value_type': 'int',
@@ -178,6 +198,23 @@ def seed_default_configs():
                 for item in default_configs:
                     if item['key'] == 'DEFAULT_COMPANY':
                         item['value'] = env_company
+
+            existing_default = ConfigItem.query.filter_by(key='DEFAULT_COMPANY').first()
+            chosen_company = str(existing_default.value or '').strip().upper() if existing_default else ''
+            if chosen_company not in AI_PROVIDER_NAMES:
+                chosen_company = next(
+                    (str(item['value'] or '').strip().upper() for item in default_configs if item['key'] == 'DEFAULT_COMPANY'),
+                    'OPENAI',
+                )
+            for provider_name in AI_PROVIDER_NAMES:
+                default_configs.append({
+                    'key': f'ENABLE_{provider_name}',
+                    'value': 'true' if provider_name == chosen_company else 'false',
+                    'value_type': 'bool',
+                    'category': 'ai_model',
+                    'description': f'是否启用 {provider_name}',
+                    'is_sensitive': False,
+                })
 
             # 插入默认配置
             retired_models = {
@@ -239,6 +276,53 @@ def seed_default_configs():
 
     except Exception as e:
         logger.error(f"初始化默认配置失败: {e}")
+        return False
+
+
+def ensure_ai_provider_rows():
+    """只补缺失的服务商密钥、启用开关和功能开关。不恢复用户删除的其他配置，也不覆盖已有值。"""
+    try:
+        default_row = ConfigItem.query.filter_by(key='DEFAULT_COMPANY').first()
+        chosen = str(default_row.value or '').strip().upper() if default_row else ''
+        if chosen not in AI_PROVIDER_NAMES:
+            chosen = os.getenv('DEFAULT_COMPANY', 'OPENAI').strip().upper()
+        if chosen not in AI_PROVIDER_NAMES:
+            chosen = 'OPENAI'
+        for row in _feature_flag_rows():
+            if ConfigItem.query.filter_by(key=row['key']).first():
+                continue
+            db.session.add(ConfigItem(**row))
+            logger.info('补齐缺失配置: %s', row['key'])
+        for key, description in AI_PROVIDER_KEY_ROWS:
+            if ConfigItem.query.filter_by(key=key).first():
+                continue
+            db.session.add(ConfigItem(
+                key=key,
+                value='',
+                value_type='string',
+                category='ai_model',
+                description=description,
+                is_sensitive=True,
+            ))
+            logger.info('补齐缺失配置: %s', key)
+        for provider_name in AI_PROVIDER_NAMES:
+            key = f'ENABLE_{provider_name}'
+            if ConfigItem.query.filter_by(key=key).first():
+                continue
+            db.session.add(ConfigItem(
+                key=key,
+                value='true' if provider_name == chosen else 'false',
+                value_type='bool',
+                category='ai_model',
+                description=f'是否启用 {provider_name}',
+                is_sensitive=False,
+            ))
+            logger.info('补齐缺失配置: %s', key)
+        db.session.commit()
+        return True
+    except Exception as e:
+        db.session.rollback()
+        logger.warning('补齐 AI 服务商配置失败: %s', e)
         return False
 
 

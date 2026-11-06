@@ -13,7 +13,7 @@ def test_null_dept_record_matches_default_department_only(monkeypatch):
     from services.data_scope import can_access_record, set_g_user_for_tests
 
     monkeypatch.setattr(settings, 'AUTH_REQUIRE_AUTH', True)
-    monkeypatch.setattr(auth_migrations, 'get_default_department_id', lambda: 1)
+    monkeypatch.setattr(auth_migrations, 'find_default_department_id', lambda: 1)
 
     app = Flask(__name__)
     record = SimpleNamespace(dept_id=None)

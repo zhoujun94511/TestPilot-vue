@@ -41,6 +41,7 @@
       :model-value="Boolean(modelValue)"
       mode="field"
       :switch-id="switchId"
+      :disabled="disabled"
       :label="Boolean(modelValue) ? t('config.form.enabled') : t('config.form.disabled')"
       @update:model-value="onBoolean"
       @blur="emit('blur')"
@@ -116,6 +117,7 @@ const props = defineProps<{
   required?: boolean;
   options?: ConfigOption[];
   switchKey?: string;
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{

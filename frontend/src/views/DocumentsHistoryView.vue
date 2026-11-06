@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section :class="pageRootMarkedClass(pageMarkerDocumentsHistory)">
     <PageNoticeBanner
       :notice="pageBanner"
@@ -7,7 +7,6 @@
 
     <PagePanel
       :title="t('documents.tabs.history')"
-      :subtitle="t('documents.toolbar.historyLead')"
     >
       <template #actions>
         <div :class="pageToolbarStripClass">
@@ -17,22 +16,36 @@
           <TpButton variant="ghost" size="sm" :loading="historyRefreshLoading" @click="handleHistoryRefresh">
             {{ t('common.actions.refresh') }}
           </TpButton>
+          <select
+            v-model.number="caseCountPerRequirement"
+            :class="caseCountSelectClass"
+            :aria-label="t('cases.form.caseCountLabel')"
+            :disabled="generating"
+          >
+            <option v-for="count in CASE_COUNT_CHOICES" :key="count" :value="count">
+              {{ t('cases.form.caseCountOption', { count }) }}
+            </option>
+          </select>
           <TpButton
             variant="primary"
             size="sm"
             :loading="generating"
-            :disabled="generating || (!historyRequirements.length && !selectedRequirementIds.length)"
+            :disabled="!historyRequirements.length && !selectedRequirementIds.length"
+            :aria-label="generating ? historyGenerateLabel : undefined"
             @click="handleGenerateCases"
           >
-            {{ generating ? t('documents.actions.generating') : t('documents.actions.generateCases') }}
+            {{ t('documents.actions.generateCases') }}
           </TpButton>
+          <span v-if="generating" class="px-1 text-xs leading-none text-muted-foreground">{{ historyGenerateLabel }}</span>
         </div>
       </template>
 
       <ToolbarBulkBar
         :count="selectedRequirementIds.length"
         :count-label="t('documents.history.selectedRequirementsCount', { count: selectedRequirementIds.length })"
+        :select-all-count="requirementSelectAllCount"
         @clear="clearRequirementSelection"
+        @select-all="selectAllMatchingRequirements"
       >
         <TpButton variant="danger" size="sm" :disabled="!selectedRequirementIds.length" @click="handleDeleteSelectedRequirements">
           {{ t('documents.actions.deleteRequirements') }}
@@ -91,11 +104,9 @@
         :retry-text="t('common.actions.retry')"
         :selectable="true"
         @retry="() => loadHistoryRequirements(historyRequirementsPagination.page || 1, 'initial')"
-        :managed-select-all="true"
         :selected-keys="selectedRequirementIds"
         row-key="req_id"
         @update:selectedKeys="handleSelectionUpdate"
-        @toggleAll="handleRequirementToggleAll"
       >
         <template #toolbar>
           <TableToolbar :title="t('documents.history.title')" :pagination="historyRequirementsPagination" />
@@ -151,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import BaseTable, { type BaseTableColumn } from '@/components/common/BaseTable.vue';
@@ -172,16 +183,18 @@ import { useListPageChange } from '@/composables/useListPageChange';
 import { usePaginatedList } from '@/composables/usePaginatedList';
 import type { ListFetchMode } from '@/lib/list-fetch-mode';
 import ToolbarBulkBar from '@/components/common/ToolbarBulkBar.vue';
+import { CASE_COUNT_CHOICES, clampCaseCount } from '@/lib/case-count';
+import { toolbarCountSelectClass } from '@/lib/field-control';
 import { pageToolbarStripClass } from '@/lib/page-chrome-ui';
 import { pageMarkerDocumentsHistory, pageRootMarkedClass } from '@/lib/page-layout-ui';
 import TpButton from '@/components/ui/base/TpButton.vue';
 import { usePageNotifier } from '@/composables/usePageNotifier';
 import {
   deleteRequirement,
-  generateCasesFromAnalysis,
   getDocumentRequirements,
   type DocumentRequirementRecord
 } from '@/api/documents';
+import { streamBatchGenerateCases } from '@/api/cases';
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
 import { publicFileLabel } from '@/lib/public-file-label';
 
@@ -217,6 +230,13 @@ const historyPriorityOptions = computed<SelectOption[]>(() => [
 const historyRequirements = ref<DocumentRequirementRecord[]>([]);
 const historyRefreshLoading = ref(false);
 const generating = ref(false);
+const caseCountPerRequirement = ref(3);
+const caseCountSelectClass = toolbarCountSelectClass;
+const generateProgress = ref({ done: 0, total: 0, saved: 0 });
+const historyGenerateLabel = computed(() => {
+  if (!generateProgress.value.total) return t('documents.actions.generating');
+  return t('documents.actions.generatingProgress', generateProgress.value);
+});
 const selectedRequirementIds = ref<Array<string | number>>([]);
 const selectedRequirementMap = ref<Record<string, DocumentRequirementRecord>>({});
 const historyRequirementsPagination = ref({
@@ -298,11 +318,14 @@ function clearRequirementSelection() {
   selectedRequirementIds.value = [];
 }
 
-async function handleRequirementToggleAll(checked: boolean) {
-  if (!checked) {
-    selectedRequirementIds.value = [];
-    return;
-  }
+const requirementSelectAllCount = computed(() => {
+  const total = Number(historyRequirementsPagination.value.total || 0);
+  const pageSelected = historyRequirements.value.length > 0
+    && historyRequirements.value.every((item) => selectedRequirementIds.value.map(String).includes(String(item.req_id)));
+  return pageSelected && total > selectedRequirementIds.value.length ? total : 0;
+});
+
+async function selectAllMatchingRequirements() {
   const allRequirements = await fetchAllFilteredRequirements();
   selectedRequirementIds.value = allRequirements.map((item) => String(item.req_id));
   const nextMap = { ...selectedRequirementMap.value };
@@ -366,7 +389,9 @@ function handleHistoryRefresh() {
 }
 
 async function handleFilterChange() {
-  await loadHistoryRequirements(1, 'filter');
+  selectedRequirementIds.value = [];
+  const mode: ListFetchMode = historyRequirements.value.length > 0 ? 'page' : 'filter';
+  await loadHistoryRequirements(1, mode);
 }
 
 const { changePage } = useListPageChange(historyRequirementsPagination, (page, mode) =>
@@ -430,7 +455,8 @@ async function handleGenerateCases() {
       message: t('documents.confirm.batchGenerateByRequirementsMessage', {
         count: requirementsToGenerate.length,
         reqCount: requirementsToGenerate.length,
-        caseCount: requirementsToGenerate.length * 3,
+        perReq: clampCaseCount(caseCountPerRequirement.value, 3),
+        caseCount: requirementsToGenerate.length * clampCaseCount(caseCountPerRequirement.value, 3),
         skippedCount: 0
       }),
       confirmText: t('common.actions.confirm'),
@@ -445,22 +471,56 @@ async function handleGenerateCases() {
   await executeGenerateCases(requirementsToGenerate);
 }
 
+let generateAbort: AbortController | null = null;
+onBeforeUnmount(() => generateAbort?.abort());
+
 async function executeGenerateCases(requirementsToGenerate: DocumentRequirementRecord[]) {
+  if (!requirementsToGenerate.length || generating.value) return;
   generating.value = true;
+  generateProgress.value = { done: 0, total: requirementsToGenerate.length, saved: 0 };
+  generateAbort = new AbortController();
+  const { signal } = generateAbort;
   try {
-    const response = await generateCasesFromAnalysis({
-      requirements: requirementsToGenerate
-    });
-    const failedCount = Number(response.failed_count || 0);
+    const response = await streamBatchGenerateCases(
+      { requirements: requirementsToGenerate, case_count_per_req: clampCaseCount(caseCountPerRequirement.value, 3) },
+      (event) => {
+        if (event.type === 'start' || event.type === 'requirement_done' || event.type === 'requirement_failed') {
+          generateProgress.value = {
+            done: event.type === 'start' ? 0 : event.index + 1,
+            total: event.total || requirementsToGenerate.length,
+            saved: event.savedCount
+          };
+        }
+      },
+      signal
+    );
+    if (signal.aborted) return;
+    const failedCount = Number(response.summary?.failed_count || 0);
+    if (!response.total_cases) {
+      showNotice('danger', response.message || t('documents.message.generateFailed'));
+      return;
+    }
     showNotice(
       failedCount > 0 ? 'warning' : 'success',
-      response.message || t('documents.message.generateSuccess')
+      response.message || (failedCount > 0
+        ? t('documents.message.generatePartial', { saved: response.total_cases, failed: failedCount })
+        : t('documents.message.generateSuccess'))
     );
     await router.push({ name: 'cases-manage' });
   } catch (error) {
+    if (signal.aborted) return;
+    if (generateProgress.value.saved > 0) {
+      showNotice('warning', t('documents.message.generatePartial', {
+        saved: generateProgress.value.saved,
+        failed: Math.max(generateProgress.value.total - generateProgress.value.done, 1)
+      }));
+      await router.push({ name: 'cases-manage' });
+      return;
+    }
     showNotice('danger', getUserFacingErrorMessage(error, t('documents.message.generateFailed')));
   } finally {
     generating.value = false;
+    generateProgress.value = { done: 0, total: 0, saved: 0 };
   }
 }
 

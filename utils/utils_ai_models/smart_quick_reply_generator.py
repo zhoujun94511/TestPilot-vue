@@ -4,7 +4,7 @@
 """
 
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from utils.utils_core.logger import get_logger
 from utils.utils_ai_models.get_llm import get_llm_instance
@@ -423,7 +423,11 @@ AI回复：
 请直接返回建议列表，每行一个建议，不要添加编号或其他格式：
 """
             
+            from utils.utils_performance_monitoring.token_monitor import ensure_session_budget, record_message_usage
+
+            ensure_session_budget()
             response = self.llm.invoke(prompt)
+            record_message_usage(response, source='chat')
             suggestions_text = response.content if hasattr(response, 'content') else str(response)
             
             # 解析AI生成的建议
@@ -778,14 +782,18 @@ AI回复：
         
         self.logger.debug(f"更新用户{user_id}偏好: {user_prefs}")
     
-    def get_suggestion_statistics(self) -> Dict[str, Any]:
-        """获取建议统计信息"""
-        total_users = len(self.user_preferences)
-        total_clicks = sum(len(prefs.get('clicked_suggestions', [])) 
-                          for prefs in self.user_preferences.values())
-        
+    def get_suggestion_statistics(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """获取建议统计信息；传 user_id 时只统计该用户。"""
+        if user_id is None:
+            scoped = list(self.user_preferences.values())
+        else:
+            own = self.user_preferences.get(str(user_id))
+            scoped = [own] if own else []
+        total_users = len(scoped)
+        total_clicks = sum(len(prefs.get('clicked_suggestions', [])) for prefs in scoped)
+
         category_stats = {}
-        for prefs in self.user_preferences.values():
+        for prefs in scoped:
             for category in prefs.get('preferred_categories', []):
                 category_stats[category] = category_stats.get(category, 0) + 1
         

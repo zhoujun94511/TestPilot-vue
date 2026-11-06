@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Query
 
-from models.models import ChatSession, RagFileRecord, Requirement, TestCase
+from models.models import ChatHistory, ChatSession, RagFileRecord, Requirement, TestCase
 from services.auth_service import auth_required, current_user
-from services.data_scope import apply_data_scope
+from services.data_scope import apply_chat_stats_scope, apply_data_scope
 from services.data_scope import scoped_chat_history_query as _scoped_chat_history_query
 
 
@@ -29,10 +29,21 @@ def scoped_requirements_query() -> Query:
 
 
 def scoped_chat_sessions_query() -> Query:
-    return apply_data_scope(
+    """会话计数：管理员按本部门算，只给数字，不含正文。"""
+    return apply_chat_stats_scope(
         ChatSession.query.filter(ChatSession.is_deleted.is_(False)),
         ChatSession,
-        'chat',
+    )
+
+
+def scoped_chat_message_stats_query() -> Query:
+    """消息计数（总览、用量趋势、导出里的数量）：口径同会话计数，不含正文。"""
+    sessions = apply_chat_stats_scope(
+        ChatSession.query.filter(ChatSession.is_deleted.is_(False)),
+        ChatSession,
+    )
+    return ChatHistory.query.filter(
+        ChatHistory.session_id.in_(sessions.with_entities(ChatSession.session_id))
     )
 
 

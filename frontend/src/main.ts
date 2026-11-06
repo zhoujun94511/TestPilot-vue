@@ -3,7 +3,7 @@ import { watch } from 'vue';
 import App from './App.vue';
 import router, { updateDocumentTitle } from './router';
 import i18n from './i18n';
-import { onUnauthorized } from './api/http';
+import { onPasswordChangeRequired, onUnauthorized } from './api/http';
 import { pinia, useAppStore, useAuthStore } from './stores';
 import './styles/main.css';
 
@@ -26,6 +26,8 @@ onUnauthorized(() => {
     query: { redirect: current.fullPath, expired: '1' }
   });
 });
+
+onPasswordChangeRequired(() => authStore.markPasswordChangeRequired());
 
 function applyTheme(theme: 'light' | 'dark') {
   document.documentElement.dataset.theme = theme;

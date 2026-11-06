@@ -22,16 +22,26 @@ from utils.utils_ai_models.get_llm import get_llm
 from utils.utils_core.api_error_handler import check_api_key_configuration, get_service_name
 from utils.utils_core.api_error_handler import build_internal_error_result
 from config.settings import settings as config_settings
-from services.auth_service import stamp_ownership
+from services.auth_service import auth_required, current_user, stamp_ownership
 from services.chat_access import session_access_error as _session_access_error
 from services.data_scope import apply_data_scope
 from services.chat_mode_guard import is_chat_action_mode, reject_chat_action_mode_response
+from utils.utils_performance_monitoring.token_monitor import ensure_session_budget
+from utils.utils_performance_monitoring.token_session import TokenSessionLimitExceeded
+from services.chat_session_title import (
+    LIST_TITLE_SCAN_MESSAGES,
+    MAX_TITLE_LENGTH,
+    PLACEHOLDER_TITLE,
+    TITLE_SOURCE_MANUAL,
+    ensure_session_title,
+    resolve_list_title,
+)
 
 # 创建蓝图
 chat_bp = Blueprint('chat', __name__)
 
 
-def _get_or_create_chat_session(session_id: str, title: str):
+def _get_or_create_chat_session(session_id: str):
     chat_session = ChatSession.query.filter_by(session_id=session_id).first()
     if chat_session:
         denied = _session_access_error(chat_session)
@@ -40,7 +50,7 @@ def _get_or_create_chat_session(session_id: str, title: str):
         return chat_session, None
     chat_session = ChatSession(
         session_id=session_id,
-        title=title or '新会话',
+        title=PLACEHOLDER_TITLE,
         created_time=datetime.now(timezone.utc),
         updated_time=datetime.now(timezone.utc),
         is_deleted=False,
@@ -55,15 +65,36 @@ chat_service = ChatService()
 
 
 def _merge_generation_settings(data):
-    """顶层参数优先，其次读取前端放在 settings 里的 temperature / max_tokens。"""
+    """顶层参数优先，其次读取前端放在 settings 里的 temperature / max_tokens。
+    max_tokens 不能超过服务端 MAX_TOKENS，否则单次请求就能绕开额度；取值非法时用缺省值。"""
     payload = data if isinstance(data, dict) else {}
     nested = payload.get('settings') if isinstance(payload.get('settings'), dict) else {}
-    temperature = payload.get('temperature', nested.get('temperature', 0.7))
-    max_tokens = payload.get('max_tokens', nested.get('max_tokens', getattr(config_settings, 'MAX_TOKENS', 4000)))
+    try:
+        ceiling = max(1, int(getattr(config_settings, 'MAX_TOKENS', 4000)))
+    except (TypeError, ValueError):
+        ceiling = 4000
+    temperature = payload.get('temperature', nested.get('temperature', DEFAULT_TEMPERATURE))
+    max_tokens = payload.get('max_tokens', nested.get('max_tokens', ceiling))
     merged = dict(nested)
-    merged['temperature'] = temperature
-    merged['max_tokens'] = max_tokens
+    merged['temperature'] = _clamp_number(temperature, float, DEFAULT_TEMPERATURE, 0.0, MAX_TEMPERATURE)
+    merged['max_tokens'] = _clamp_number(max_tokens, int, ceiling, 1, ceiling)
     return merged
+
+
+DEFAULT_TEMPERATURE = 0.7
+MAX_TEMPERATURE = 2.0
+
+
+def _clamp_number(value, cast, default, low, high):
+    if isinstance(value, bool):
+        return default
+    try:
+        number = cast(float(value)) if cast is int else cast(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if number != number:
+        return default
+    return min(max(number, low), high)
 
 
 def get_session_id():
@@ -76,6 +107,45 @@ def get_flask_app():
     if has_app_context():
         return current_app
     raise RuntimeError("No Flask application context available")
+
+
+def _llm_unavailable(session_id: str, message: str, details: str):
+    return jsonify({
+        'success': False,
+        'message': message,
+        'error': 'llm_not_initialized',
+        'details': details,
+        'session_id': session_id,
+    }), 503
+
+
+def _prepare_chat_llm(session_id: str):
+    """在写入任何消息前确认模型可用且额度未用尽；配置中心切换模型后跟随新实例。"""
+    flask_app = get_flask_app()
+    llm = getattr(flask_app, 'llm', None)
+    if llm is None:
+        company = str(getattr(config_settings, 'DEFAULT_COMPANY', 'OPENAI') or 'OPENAI').upper()
+        key_ok, key_message = check_api_key_configuration(company)
+        if not key_ok:
+            provider_name = get_service_name(company.lower())
+            return _llm_unavailable(session_id, f'{provider_name} 配置异常：{key_message}', 'api_key_invalid_or_missing')
+        try:
+            llm = get_llm(company, use_case='chat')
+            flask_app.llm = llm
+        except Exception as init_error:
+            current_app.logger.error(f"聊天LLM延迟初始化失败: {init_error}")
+            llm = None
+    if llm is None:
+        return _llm_unavailable(
+            session_id,
+            '聊天模型尚未初始化，请检查配置中心中的模型服务商与 API Key 后重试',
+            'llm_not_initialized',
+        )
+    vector_db = getattr(flask_app, 'vector_db', None)
+    if chat_service.llm is not llm or chat_service.vector_db is not vector_db:
+        chat_service.initialize(llm, vector_db)
+    ensure_session_budget()
+    return None
 
 
 @chat_bp.route('/message', methods=['POST'])
@@ -105,12 +175,14 @@ def send_message():
             use_rag = False
             use_knowledge = False
 
-        session_title = user_message[:50] + '...' if len(user_message) > 50 else user_message
-        if not session_title.strip():
-            session_title = '新会话'
-        chat_session, denied = _get_or_create_chat_session(session_id, session_title)
+        chat_session, denied = _get_or_create_chat_session(session_id)
         if denied:
             return denied
+
+        unavailable = _prepare_chat_llm(session_id)
+        if unavailable:
+            db.session.rollback()
+            return unavailable
 
         user_msg = ChatHistory(
             session_id=session_id,
@@ -120,40 +192,8 @@ def send_message():
             created_time=datetime.now(timezone.utc)
         )
         db.session.add(user_msg)
-
-        if chat_session:
-            chat_session.updated_time = datetime.now(timezone.utc)
-
+        chat_session.updated_time = datetime.now(timezone.utc)
         db.session.commit()
-
-        if not hasattr(chat_service, 'llm') or chat_service.llm is None:
-            flask_app = get_flask_app()
-            llm = getattr(flask_app, 'llm', None)
-            vector_db = getattr(flask_app, 'vector_db', None)
-
-            init_error_message = ''
-            if llm is None:
-                try:
-                    llm = get_llm(config_settings.DEFAULT_COMPANY, use_case='chat')
-                    flask_app.llm = llm
-                except Exception as init_error:
-                    current_app.logger.error(f"聊天LLM延迟初始化失败: {init_error}")
-                    init_error_message = str(init_error)
-                    llm = None
-
-            if llm is None:
-                message = '聊天模型尚未初始化，请检查配置中心中的模型服务商与 API Key 后重试'
-                if init_error_message:
-                    message = f'{message}（{init_error_message}）'
-                return jsonify({
-                    'success': False,
-                    'message': message,
-                    'error': 'llm_not_initialized',
-                    'details': 'llm_not_initialized',
-                    'session_id': session_id
-                }), 503
-
-            chat_service.initialize(llm, vector_db)
 
         # 构建设置参数。temperature / max_tokens 允许放在 settings 对象里。
         settings = _merge_generation_settings(data)
@@ -191,8 +231,10 @@ def send_message():
             return jsonify({
                 'success': False,
                 'message': result.get('message', '消息发送失败'),
-                'error': result.get('error')
-            }), 500
+                'error': result.get('error_code'),
+                'error_code': result.get('error_code'),
+                'retryable': result.get('retryable', False),
+            }), int(result.get('status_code') or 500)
 
     except BadRequest as e:
         return jsonify({
@@ -200,6 +242,8 @@ def send_message():
             'message': str(e),
             'error': 'bad_request'
         }), 400
+    except TokenSessionLimitExceeded:
+        raise
     except Exception as e:
         current_app.logger.error(f"发送聊天消息失败: {e}")
         error_payload = build_internal_error_result(message='发送消息失败')
@@ -212,39 +256,11 @@ def send_message():
         }), error_payload['status_code']
 
 
-@chat_bp.route('/stream', methods=['GET', 'POST'])
+@chat_bp.route('/stream', methods=['POST'])
 def send_stream_message():
-    """发送流式聊天消息 (SSE)"""
+    """发送流式聊天消息 (SSE)。只接受 POST，避免消息正文进入 URL 和访问日志。"""
     try:
-        # 解析输入参数
-        if request.method == 'GET':
-            try:
-                query_temperature = float(request.args.get('temperature', 0.7))
-            except (TypeError, ValueError):
-                query_temperature = 0.7
-            data: dict[str, Any] = {
-                'message': request.args.get('message', ''),
-                'session_id': request.args.get('session_id'),
-                'mode': request.args.get('mode', 'chat'),
-                'type': request.args.get('type', 'chat'),
-                'use_rag': request.args.get('use_rag', 'false').lower() == 'true',
-                'use_context': request.args.get('use_context', 'false').lower() == 'true',
-                'use_knowledge': request.args.get('use_knowledge', 'false').lower() == 'true',
-                'use_smart_reply': request.args.get('use_smart_reply', 'false').lower() == 'true',
-                'auto_suggest': request.args.get('auto_suggest', 'true').lower() == 'true',
-                'temperature': query_temperature
-            }
-            try:
-                settings = json.loads(request.args.get('settings', '{}'))
-                if not isinstance(settings, dict):
-                    settings = {}
-            except Exception as e:
-                current_app.logger.warning(f"解析settings参数失败: {e}")
-                settings = {}
-            data['settings'] = settings
-        else:
-            data = request.get_json() or {}
-            settings = data.get('settings', {}) if isinstance(data.get('settings'), dict) else {}
+        data = request.get_json() or {}
 
         user_message = data.get('message', '').strip()
         if not user_message:
@@ -267,58 +283,14 @@ def send_stream_message():
             "auto_suggest": bool(data.get("auto_suggest", True))
         })
 
-        # 在生成器外部初始化服务并保存用户消息
-        if not hasattr(chat_service, 'llm') or chat_service.llm is None:
-            llm = getattr(current_app, 'llm', None)
-            vector_db = getattr(current_app, 'vector_db', None)
-            init_error_message = ""
-            if llm is None:
-                current_company = str(getattr(config_settings, 'DEFAULT_COMPANY', 'OPENAI') or 'OPENAI').upper()
-                key_ok, key_message = check_api_key_configuration(current_company)
-                if not key_ok:
-                    provider_name = get_service_name(current_company.lower())
-                    return jsonify({
-                        "success": False,
-                        "message": f"{provider_name} 配置异常：{key_message}",
-                        "error": "llm_not_initialized",
-                        "details": "api_key_invalid_or_missing",
-                        "session_id": session_id
-                    }), 503
-                try:
-                    llm = get_llm(current_company, use_case='chat')
-                    current_app.llm = llm
-                except Exception as init_error:
-                    current_app.logger.error(f"流式聊天LLM延迟初始化失败: {init_error}")
-                    init_error_message = str(init_error)
-                    llm = None
-
-            if llm is None:
-                message = "聊天模型尚未初始化，请检查配置中心中的模型服务商与 API Key 后重试"
-                if init_error_message:
-                    message = f"{message}（{init_error_message}）"
-                return jsonify({
-                    "success": False,
-                    "message": message,
-                    "error": "llm_not_initialized",
-                    "details": "llm_not_initialized",
-                    "session_id": session_id
-                }), 503
-            chat_service.initialize(llm, vector_db)
-
-        # 在生成器外部保存用户消息
-        # 双保险：若会话不存在则创建；若会话被软删除则自动恢复
-        session_title = user_message[:50] + '...' if len(user_message) > 50 else user_message
-        if not session_title.strip():
-            session_title = '新会话'
-        chat_session, denied = _get_or_create_chat_session(session_id, session_title)
+        chat_session, denied = _get_or_create_chat_session(session_id)
         if denied:
             return denied
-        if chat_session.is_deleted:
-            # 软删除会话被再次使用时恢复
-            chat_session.is_deleted = False
-            if not (chat_session.title or '').strip():
-                chat_session.title = user_message[:50] + '...' if len(user_message) > 50 else (user_message or '新会话')
-            chat_session.updated_time = datetime.now(timezone.utc)
+
+        unavailable = _prepare_chat_llm(session_id)
+        if unavailable:
+            db.session.rollback()
+            return unavailable
 
         # 在生成器外部保存用户消息
         user_msg = ChatHistory(
@@ -329,11 +301,7 @@ def send_stream_message():
             created_time=datetime.now(timezone.utc)
         )
         db.session.add(user_msg)
-        
-        # 更新会话的最后更新时间
-        if chat_session:
-            chat_session.updated_time = datetime.now(timezone.utc)
-        
+        chat_session.updated_time = datetime.now(timezone.utc)
         db.session.commit()
 
         # 在用户消息保存后获取上下文 - 转换为字典避免会话绑定问题
@@ -365,9 +333,38 @@ def send_stream_message():
         ai_tokens_used = 0
         ai_model_name = "unknown"
 
+        def save_ai_reply():
+            if not ai_response_content.strip():
+                return
+            try:
+                ai_message = ChatHistory(
+                    session_id=session_id,
+                    role="assistant",
+                    content=ai_response_content,
+                    message_type=message_type,
+                    created_time=datetime.now(timezone.utc),
+                    tokens_used=ai_tokens_used,
+                    model_name=ai_model_name
+                )
+                db.session.add(ai_message)
+                db.session.commit()
+                try:
+                    from services.llm_usage_service import log_chat_assistant_usage
+
+                    log_chat_assistant_usage(ai_message)
+                except Exception as log_error:
+                    current_app.logger.warning(f"Chat Token 落库失败: {log_error}")
+                current_app.logger.info(f"AI消息已保存: session_id={session_id}")
+            except Exception as save_error:
+                current_app.logger.error(f"保存AI消息失败: {save_error}")
+                db.session.rollback()
+
         def generate_response():
             """生成器函数 - 仅负责流式输出"""
             nonlocal ai_response_content, ai_tokens_used, ai_model_name
+            failed = False
+            response_generator = None
+            usage_sink: dict[str, Any] = {}
 
             try:
                 # 传递已获取的上下文
@@ -378,10 +375,12 @@ def send_stream_message():
                     user_settings=settings,
                     use_context=use_context,
                     use_knowledge=use_knowledge,
-                    context_messages=context_messages
+                    context_messages=context_messages,
+                    usage_sink=usage_sink,
                 )
 
                 if response_generator is None:
+                    failed = True
                     yield "data: {\"type\": \"error\", \"message\": \"服务未返回生成器\"}\n\n"
                     return
 
@@ -396,36 +395,26 @@ def send_stream_message():
                             elif chunk_data.get("type") == "end":
                                 ai_tokens_used = int(chunk_data.get("tokens_used", 0) or 0)
                                 ai_model_name = str(chunk_data.get("model_name") or "unknown")
+                            elif chunk_data.get("type") == "error":
+                                failed = True
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass  # 忽略解析错误
                     yield stream_chunk
 
             except Exception as stream_error:
-                yield f"data: {json.dumps({'type': 'error', 'message': str(stream_error)}, ensure_ascii=False)}\n\n"
-
-            if ai_response_content.strip():
-                try:
-                    ai_message = ChatHistory(
-                        session_id=session_id,
-                        role="assistant",
-                        content=ai_response_content,
-                        message_type=message_type,
-                        created_time=datetime.now(timezone.utc),
-                        tokens_used=ai_tokens_used,
-                        model_name=ai_model_name
-                    )
-                    db.session.add(ai_message)
-                    db.session.commit()
-                    try:
-                        from services.llm_usage_service import log_chat_assistant_usage
-
-                        log_chat_assistant_usage(ai_message)
-                    except Exception as log_error:
-                        current_app.logger.warning(f"Chat Token 落库失败: {log_error}")
-                    current_app.logger.info(f"AI消息已保存: session_id={session_id}")
-                except Exception as save_error:
-                    current_app.logger.error(f"保存AI消息失败: {save_error}")
-                    db.session.rollback()
+                failed = True
+                current_app.logger.error(f"流式输出失败: {stream_error}")
+                payload = {'type': 'error', 'message': '模型调用失败', 'error_code': 'INTERNAL_SERVER_ERROR', 'retryable': True}
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            finally:
+                if response_generator is not None:
+                    response_generator.close()
+                if not ai_tokens_used:
+                    ai_tokens_used = int(usage_sink.get('tokens_used') or 0)
+                    ai_model_name = str(usage_sink.get('model_name') or ai_model_name)
+                # 用户中途停止时保存已输出的内容；模型报错时半截内容不作为正式回复
+                if not failed:
+                    save_ai_reply()
 
         return current_app.response_class(
             stream_with_context(generate_response()),
@@ -440,6 +429,8 @@ def send_stream_message():
 
     except BadRequest as e:
         return jsonify({"success": False, "message": str(e), "error": "bad_request"}), 400
+    except TokenSessionLimitExceeded:
+        raise
     except Exception as e:
         current_app.logger.error(f"流式聊天消息处理失败: {e}")
         error_payload = build_internal_error_result(message='流式聊天消息处理失败')
@@ -459,8 +450,9 @@ def get_chat_history():
     try:
         # 获取查询参数
         session_id = request.args.get('session_id') or get_session_id()
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
+        want_last_page = request.args.get('page') == 'last'
+        page = 1 if want_last_page else max(1, request.args.get('page', 1, type=int) or 1)
+        per_page = min(max(1, request.args.get('per_page', 20, type=int) or 20), 200)
         message_type = request.args.get('type')
 
         chat_session = ChatSession.query.filter_by(session_id=session_id).first()
@@ -474,8 +466,11 @@ def get_chat_history():
         if message_type:
             query = query.filter(ChatHistory.message_type == message_type)
 
-        # 排序和分页
-        query = query.order_by(ChatHistory.created_time.asc())
+        # 排序和分页；打开会话时取最后一页，才能看到最近的对话
+        query = query.order_by(ChatHistory.created_time.asc(), ChatHistory.id.asc())
+        if want_last_page:
+            total = query.order_by(None).count()
+            page = max(1, -(-total // per_page))
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
         # 转换为字典格式
@@ -600,9 +595,16 @@ def update_chat_session(session_id):
         if denied:
             return denied
 
-        # 更新会话信息
         if 'title' in data:
-            chat_session.title = data['title']
+            title = str(data.get('title') or '').strip()
+            if not title:
+                return jsonify({
+                    'success': False,
+                    'message': '会话名称不能为空',
+                    'error': 'bad_request'
+                }), 400
+            chat_session.title = title[:MAX_TITLE_LENGTH]
+            chat_session.title_source = TITLE_SOURCE_MANUAL
 
         chat_session.updated_time = datetime.now(timezone.utc)
         db.session.commit()
@@ -613,6 +615,7 @@ def update_chat_session(session_id):
             'session': {
                 'session_id': session_id,
                 'title': chat_session.title,
+                'title_source': chat_session.title_source,
                 'updated_time': chat_session.updated_time.isoformat()
             }
         })
@@ -625,6 +628,28 @@ def update_chat_session(session_id):
             'error': 'INTERNAL_SERVER_ERROR',
             'error_code': 'INTERNAL_SERVER_ERROR',
             'retryable': False
+        }), 500
+
+
+@chat_bp.route('/session/<session_id>/title', methods=['POST'])
+def generate_chat_session_title(session_id):
+    """第一轮有效问答后生成会话标题；已定标题或还没有有效问答时原样返回。"""
+    try:
+        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
+        denied = _session_access_error(chat_session)
+        if denied:
+            return denied
+        llm = getattr(chat_service, 'llm', None) or getattr(current_app, 'llm', None)
+        return jsonify({'success': True, 'session': ensure_session_title(chat_session, llm)})
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"生成会话标题失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': '生成会话标题失败',
+            'error': 'INTERNAL_SERVER_ERROR',
+            'error_code': 'INTERNAL_SERVER_ERROR',
+            'retryable': True
         }), 500
 
 
@@ -683,7 +708,8 @@ def track_quick_reply_feedback():
 
         suggestion_text = data.get('suggestion_text', '').strip()
         was_clicked = data.get('was_clicked', False)
-        user_id = data.get('user_id', 'anonymous')
+        user = current_user()
+        user_id = str(user['id']) if user and user.get('id') is not None else 'anonymous'
         session_id = data.get('session_id', '')
 
         if not suggestion_text:
@@ -723,7 +749,11 @@ def get_quick_reply_stats():
     try:
         
         generator = SmartQuickReplyGenerator()
-        stats = generator.get_suggestion_statistics()
+        user = current_user()
+        scope_user = None
+        if auth_required() and not (user and user.get('role') == 'super_admin'):
+            scope_user = str(user['id']) if user and user.get('id') is not None else 'anonymous'
+        stats = generator.get_suggestion_statistics(scope_user)
 
         return jsonify({
             'success': True,
@@ -783,16 +813,8 @@ def handle_sessions():
     """处理聊天会话的获取和创建"""
     if request.method == 'GET':
         try:
-            page = request.args.get('page', 1, type=int)
-            per_page = request.args.get('per_page', 20, type=int)
-            
-            # 防止除零错误：确保 per_page 至少为 1
-            if per_page <= 0:
-                per_page = 20  # 使用默认值
-            
-            # 防止 page 为负数或0
-            if page < 1:
-                page = 1
+            page = max(1, request.args.get('page', 1, type=int) or 1)
+            per_page = min(max(1, request.args.get('per_page', 20, type=int) or 20), 200)
 
             # 基于会话表分页，避免在会话列表接口中全量扫描 ChatHistory
             base_query = apply_data_scope(
@@ -801,21 +823,13 @@ def handle_sessions():
                 'chat',
             ).order_by(ChatSession.updated_time.desc())
 
-            # 如果请求大数量（如1000），则返回所有会话
-            if per_page >= 1000:
-                sessions_data = base_query.all()
-                total_sessions = len(sessions_data)
-                page = 1
-                per_page = max(total_sessions, 1)
-                offset = 0
-            else:
-                offset = (page - 1) * per_page
-                sessions_data = base_query.offset(offset).limit(per_page).all()
-                total_sessions = base_query.count()
+            offset = (page - 1) * per_page
+            sessions_data = base_query.offset(offset).limit(per_page).all()
+            total_sessions = base_query.count()
 
             session_ids = [item.session_id for item in sessions_data]
             message_count_map = {}
-            first_message_map = {}
+            user_messages_map: dict[str, list[str]] = {}
 
             if session_ids:
                 # 批量获取当前页每个会话的消息数
@@ -827,30 +841,29 @@ def handle_sessions():
                 ).group_by(ChatHistory.session_id).all()
                 message_count_map = {row.session_id: int(row.message_count or 0) for row in count_rows}
 
-                # 批量获取当前页每个会话的首条消息内容（用于展示标题）
-                first_message_subquery = db.session.query(
-                    ChatHistory.session_id,
-                    func.min(ChatHistory.created_time).label('first_message_time')
-                ).filter(
-                    ChatHistory.session_id.in_(session_ids)
-                ).group_by(ChatHistory.session_id).subquery()
-
-                first_rows = db.session.query(
-                    ChatHistory.session_id,
-                    ChatHistory.content
-                ).join(
-                    first_message_subquery,
-                    and_(
-                        ChatHistory.session_id == first_message_subquery.c.session_id,
-                        ChatHistory.created_time == first_message_subquery.c.first_message_time
-                    )
-                ).all()
-                first_message_map = {row.session_id: row.content for row in first_rows if row.content}
+                # 标题未定的会话取前几条用户消息兜底
+                untitled_ids = [item.session_id for item in sessions_data if not item.title_source]
+                if untitled_ids:
+                    ranked = db.session.query(
+                        ChatHistory.session_id.label('session_id'),
+                        ChatHistory.content.label('content'),
+                        func.row_number().over(
+                            partition_by=ChatHistory.session_id,
+                            order_by=(ChatHistory.created_time.asc(), ChatHistory.id.asc())
+                        ).label('rn')
+                    ).filter(
+                        ChatHistory.session_id.in_(untitled_ids),
+                        ChatHistory.role == 'user'
+                    ).subquery()
+                    user_rows = db.session.query(ranked.c.session_id, ranked.c.content).filter(
+                        ranked.c.rn <= LIST_TITLE_SCAN_MESSAGES
+                    ).order_by(ranked.c.session_id, ranked.c.rn).all()
+                    for row in user_rows:
+                        user_messages_map.setdefault(row.session_id, []).append(row.content)
 
             session_list = []
             for chat_session in sessions_data:
-                title_raw = first_message_map.get(chat_session.session_id) or chat_session.title or '新会话'
-                title = (title_raw[:50] + '...') if len(title_raw) > 50 else title_raw
+                title = resolve_list_title(chat_session, user_messages_map.get(chat_session.session_id))
 
                 formatted_time = None
                 if chat_session.updated_time:
@@ -859,6 +872,7 @@ def handle_sessions():
                 session_list.append({
                     'session_id': chat_session.session_id,
                     'title': title,
+                    'title_source': chat_session.title_source,
                     'last_activity': formatted_time,
                     'message_count': message_count_map.get(chat_session.session_id, 0),
                     'total_tokens': 0  # 暂时设为0
@@ -900,10 +914,12 @@ def handle_sessions():
             session_id = str(uuid.uuid4())
             now = datetime.now(timezone.utc)
 
-            # 真实落库，避免前端拿到 session_id 但会话列表查询不到
+            # 调用方显式给了名称就按用户命名处理；否则等第一轮有效问答后自动生成
+            requested_title = str(data.get('title') or '').strip()
             chat_session = ChatSession(
                 session_id=session_id,
-                title=data.get('title', '新会话') or '新会话',
+                title=requested_title[:MAX_TITLE_LENGTH] or PLACEHOLDER_TITLE,
+                title_source=TITLE_SOURCE_MANUAL if requested_title else None,
                 created_time=now,
                 updated_time=now,
                 is_deleted=False
@@ -915,6 +931,7 @@ def handle_sessions():
             new_session = {
                 'session_id': session_id,
                 'title': chat_session.title,
+                'title_source': chat_session.title_source,
                 'created_time': now.isoformat(),
                 'message_count': 0,
                 'total_tokens': 0
@@ -1007,65 +1024,3 @@ def get_chat_config():
             'retryable': False
         }), 500
 
-
-@chat_bp.route('/save-ai-message', methods=['POST'])
-def save_ai_message():
-    """保存AI响应消息（在有应用上下文的环境中执行）"""
-    try:
-        print("=== 开始保存AI消息 ===")
-        data = request.get_json()
-        print(f"接收到的数据: {data}")
-
-        session_id = data.get('session_id')
-        content = data.get('content', '')
-        print(f"session_id: {session_id}, content_length: {len(content)}")
-
-        current_app.logger.info(f"保存AI消息: session_id={session_id}, content_length={len(content)}")
-
-        if not session_id or not content:
-            print("参数不完整")
-            current_app.logger.warning(f"参数不完整: session_id={session_id}, content_length={len(content)}")
-            return jsonify({'success': False, 'message': '参数不完整'}), 400
-
-        chat_session = ChatSession.query.filter_by(session_id=session_id).first()
-        denied = _session_access_error(chat_session)
-        if denied:
-            return denied
-
-        print("开始创建ChatHistory对象")
-        ai_msg = ChatHistory(
-            session_id=session_id,
-            role="assistant",
-            content=content,
-            message_type=data.get('message_type', 'chat'),
-            tokens_used=data.get('tokens_used', 0),
-            model_name=data.get('model_name', 'unknown'),
-            created_time=datetime.now(timezone.utc)
-        )
-        print("ChatHistory对象创建成功")
-
-        print("开始添加到数据库")
-        db.session.add(ai_msg)
-        
-        # 更新会话的最后更新时间
-        chat_session.updated_time = datetime.now(timezone.utc)
-
-        print("开始提交事务")
-        db.session.commit()
-        try:
-            from services.llm_usage_service import log_chat_assistant_usage
-
-            log_chat_assistant_usage(ai_msg)
-        except Exception as log_error:
-            current_app.logger.warning(f"Chat Token 落库失败: {log_error}")
-        print("事务提交成功")
-
-        current_app.logger.info(f"AI消息保存成功: message_id={ai_msg.id}")
-        print(f"=== AI消息保存成功: message_id={ai_msg.id} ===")
-        return jsonify({'success': True, 'message_id': ai_msg.id})
-
-    except Exception as e:
-        print(f"=== 保存AI消息失败: {e} ===")
-        current_app.logger.error(f"保存AI消息失败: {e}")
-        db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500

@@ -43,23 +43,58 @@ def read_document_meta(document_path: Path) -> Dict[str, Any]:
 
 
 def stamp_document_ownership(document_path: Path | str) -> Dict[str, Any]:
-    """上传时写入 dept_id / owner_user_id（开启认证且已登录）。"""
+    """上传时写入 project_id / dept_id / owner_user_id（开启认证且已登录）。部门跟项目走。
+    和删除项目共用一把锁：写之前再确认项目还在，避免写到刚删掉的项目上。"""
     from services.auth_service import auth_required, current_user
+    from services.project_service import project_content_lock
 
     path = Path(document_path)
-    patch: Dict[str, Any] = {}
-    if auth_required():
-        user = current_user()
-        if user:
-            dept_id = user.get('dept_id')
-            user_id = user.get('id')
-            if dept_id is not None:
-                patch['dept_id'] = int(dept_id)
-            if user_id is not None:
-                patch['owner_user_id'] = int(user_id)
-    if not patch:
+    if not auth_required():
         return read_document_meta(path)
-    return write_document_meta(path, patch)
+    user = current_user()
+    if not user:
+        return read_document_meta(path)
+    with project_content_lock():
+        project = _upload_project(user)
+        if project is not None and _project_row_exists(int(project.id)):
+            dept_id = project.dept_id
+            project_id = int(project.id)
+        else:
+            project_id = None
+            dept_id = user.get('dept_id')
+        patch: Dict[str, Any] = {}
+        user_id = user.get('id')
+        if project_id is not None:
+            patch['project_id'] = project_id
+        if dept_id is not None:
+            patch['dept_id'] = int(dept_id)
+        if user_id is not None:
+            patch['owner_user_id'] = int(user_id)
+        if not patch:
+            return read_document_meta(path)
+        return write_document_meta(path, patch)
+
+
+def _project_row_exists(project_id: int) -> bool:
+    from models.auth_models import Project
+    from models.models import db
+
+    return db.session.get(Project, project_id) is not None
+
+
+def _upload_project(user: Dict[str, Any]):
+    from models.auth_models import Project
+    from models.models import db
+    from services.project_service import ensure_default_project, resolve_current_project_id
+
+    project_id = resolve_current_project_id()
+    if project_id is not None:
+        project = db.session.get(Project, project_id)
+        if project is not None:
+            return project
+    if user.get('dept_id') is not None:
+        return ensure_default_project(int(user['dept_id']))
+    return None
 
 
 def write_document_meta(document_path: Path, patch: Dict[str, Any]) -> Dict[str, Any]:

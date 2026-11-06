@@ -10,7 +10,7 @@ from services.data_scope import can_access_record
 
 
 def session_access_error(chat_session):
-    if chat_session is None:
+    if chat_session is None or getattr(chat_session, 'is_deleted', False):
         return jsonify({'success': False, 'message': '会话不存在'}), 404
     if not can_access_record(chat_session, 'chat'):
         return jsonify({

@@ -1,4 +1,4 @@
-import { get, post } from '@/api/http';
+import { get, LONG_TASK_TIMEOUT_MS, post } from '@/api/http';
 import {
   normalizeError as coreNormalizeError,
   normalizeResponse as coreNormalizeResponse,
@@ -93,7 +93,7 @@ export async function executeExperimentalAction(body: ExperimentalExecutePayload
       tool_name: body.tool_name,
       args: body.args ?? {},
       metadata: body.metadata ?? {}
-    });
+    }, { timeout: LONG_TASK_TIMEOUT_MS });
     const payload = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to execute experimental action'
     });

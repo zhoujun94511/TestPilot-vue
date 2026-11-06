@@ -35,6 +35,7 @@ export default {
     modelSelection: '模型选择',
     saveHint: '',
     noApiKeyNeeded: '该服务商使用默认设置，无需填写 API Key。',
+    keySavedHint: '密钥已保存。填写新值会替换，清空后保存会删除。',
     providerLabels: {
       ollamaLocal: 'Ollama（本地）'
     },
@@ -106,6 +107,8 @@ export default {
     MAX_WORKERS: '最大工作线程',
     ENABLE_PARALLEL_PROCESSING: '启用并行处理',
     ENABLE_STREAMING: '启用流式处理',
+    ENABLE_EXPERIMENTAL_ACTIONS: '启用实验工具',
+    ENABLE_VECTOR_STORE: '启用知识库向量存储',
     RAG_TOP_K: 'RAG 检索结果数量',
     RAG_SCORE_THRESHOLD: 'RAG 相似度阈值',
     MAX_MEMORY_MB: '最大内存使用量（MB）'

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/python
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 """Config center API routes."""
 
@@ -39,6 +39,16 @@ def _config_center_auth():
             status=403,
         )
     return None
+
+
+def _operator() -> str:
+    """审计里的操作人取登录用户；只有关闭认证时才接受 X-Operator 请求头。"""
+    from services.auth_service import auth_required, current_user
+
+    if auth_required():
+        user = current_user() or {}
+        return str(user.get('username') or user.get('id') or 'unknown')
+    return (request.headers.get('X-Operator') or 'admin').strip()[:64] or 'admin'
 
 
 def _is_english_locale() -> bool:
@@ -99,103 +109,65 @@ def _config_error(code, message_key, message, status=400, message_params=None, d
     )
 
 
-def _effective_api_key(config_dict, present_keys, key):
-    """提交掩码或未提交时，用库里的原密钥做格式校验。"""
-    if key not in present_keys:
-        stored = config_center_service.get_config_value(key) or ''
-        return str(stored).strip()
-    submitted = str(config_dict.get(key) or '').strip()
-    if submitted == SENSITIVE_VALUE_MASK:
-        stored = config_center_service.get_config_value(key) or ''
-        return str(stored).strip()
-    return submitted
+_PROVIDER_ENABLE_KEYS = {
+    'OPENAI': 'ENABLE_OPENAI',
+    'DEEPSEEK': 'ENABLE_DEEPSEEK',
+    'OLLAMA': 'ENABLE_OLLAMA',
+    'GEMINI': 'ENABLE_GEMINI',
+    'QWEN': 'ENABLE_QWEN',
+    'ANTHROPIC': 'ENABLE_ANTHROPIC',
+}
 
 
-def validate_ai_model_configs(configs):
-    """Validate required AI model config values."""
-    config_dict = {config['key']: config.get('value', '') for config in configs}
-    present_keys = set(config_dict)
-    provider = str(config_dict.get('DEFAULT_COMPANY', '')).upper()
-    if 'DEFAULT_COMPANY' not in present_keys:
-        provider = str(config_center_service.get_config_value('DEFAULT_COMPANY') or provider).upper()
+def _bool_text(enabled: bool) -> str:
+    return 'true' if enabled else 'false'
 
-    if provider == 'OPENAI':
-        openai_key = _effective_api_key(config_dict, present_keys, 'OPENAI_API_KEY')
-        if not openai_key:
-            return _t(
-                'OpenAI API key is required. Please provide a valid API key or switch to another AI provider.',
-                'OpenAI API key is required. Please provide a valid API key or switch to another AI provider.'
-            )
-        if not openai_key.startswith('sk-'):
-            return _t(
-                'OpenAI API key format is invalid. It should start with "sk-".',
-                'OpenAI API key format is invalid. It should start with "sk-".'
-            )
 
-    elif provider == 'DEEPSEEK':
-        deepseek_key = _effective_api_key(config_dict, present_keys, 'DEEPSEEK_API_KEY')
-        if not deepseek_key:
-            return _t(
-                'DeepSeek API key is required. Please provide a valid API key or switch to another AI provider.',
-                'DeepSeek API key is required. Please provide a valid API key or switch to another AI provider.'
-            )
-        import re
-        if not re.match(r'^sk-[0-9a-f]{32}$', deepseek_key):
-            return _t(
-                'DeepSeek API key format is invalid. It should be "sk-" plus 32 lowercase hex characters.',
-                'DeepSeek API key format is invalid. It should be "sk-" plus 32 lowercase hex characters.'
-            )
+def enforce_single_active_provider(configs):
+    """保存时只打开默认提供商的开关，其余关掉。密钥项保持原样。"""
+    present = {}
+    for config in configs:
+        if isinstance(config, dict) and config.get('key'):
+            present[str(config['key'])] = config
+    if 'DEFAULT_COMPANY' in present:
+        company = str(present['DEFAULT_COMPANY'].get('value') or '').strip().upper()
+    else:
+        company = str(config_center_service.get_config_value('DEFAULT_COMPANY') or '').strip().upper()
+    if company not in _PROVIDER_ENABLE_KEYS:
+        return
+    for provider_name, enable_key in _PROVIDER_ENABLE_KEYS.items():
+        enabled = provider_name == company
+        if enable_key in present:
+            present[enable_key]['value'] = _bool_text(enabled)
+            present[enable_key]['value_type'] = 'bool'
+            continue
+        stored = config_center_service.get_config_value(enable_key)
+        stored_enabled = str(stored).strip().lower() in ('true', '1', 'yes', 'on')
+        if stored is not None and stored_enabled == enabled:
+            continue
+        configs.append({
+            'key': enable_key,
+            'value': _bool_text(enabled),
+            'value_type': 'bool',
+            'category': 'ai_model',
+            'is_sensitive': False,
+        })
 
-    elif provider == 'OLLAMA':
-        ollama_model = config_dict.get('OLLAMA_MODEL', '').strip()
-        if not ollama_model:
-            return _t(
-                'Ollama model name is required. Please provide a valid model name or switch to another AI provider.',
-                'Ollama model name is required. Please provide a valid model name or switch to another AI provider.'
-            )
 
-    elif provider == 'GEMINI':
-        gemini_key = _effective_api_key(config_dict, present_keys, 'GEMINI_API_KEY')
-        if not gemini_key:
-            return _t(
-                'Gemini API key is required. Please provide a valid API key or switch to another AI provider.',
-                'Gemini API key is required. Please provide a valid API key or switch to another AI provider.'
-            )
-        import re
-        if not re.match(r'^AIza[A-Za-z0-9_-]{35}$', gemini_key):
-            return _t(
-                'Gemini API key format is invalid. It should start with "AIza".',
-                'Gemini API key format is invalid. It should start with "AIza".'
-            )
+def validate_ai_model_configs(configs) -> None:
+    """空密钥和占位符可以保存。多家开关同时打开时，收成默认提供商这一家。"""
+    from utils.utils_core.api_error_handler import is_placeholder_secret
 
-    elif provider == 'QWEN':
-        qwen_key = _effective_api_key(config_dict, present_keys, 'QWEN_API_KEY')
-        if not qwen_key:
-            return _t(
-                'Qwen API key is required. Please provide a valid API key or switch to another AI provider.',
-                'Qwen API key is required. Please provide a valid API key or switch to another AI provider.'
-            )
-        if not qwen_key.startswith('sk-'):
-            return _t(
-                'Qwen API key format is invalid. It should start with "sk-".',
-                'Qwen API key format is invalid. It should start with "sk-".'
-            )
-
-    elif provider == 'ANTHROPIC':
-        anthropic_key = _effective_api_key(config_dict, present_keys, 'ANTHROPIC_API_KEY')
-        if not anthropic_key:
-            return _t(
-                'Anthropic API key is required. Please provide a valid API key or switch to another AI provider.',
-                'Anthropic API key is required. Please provide a valid API key or switch to another AI provider.'
-            )
-        import re
-        if not re.match(r'^sk-ant-[A-Za-z0-9_\-]{20,}$', anthropic_key):
-            return _t(
-                'Anthropic API key format is invalid. It should start with "sk-ant-".',
-                'Anthropic API key format is invalid. It should start with "sk-ant-".'
-            )
-
-    return None
+    for config in configs:
+        key = str(config.get('key') or '')
+        if not key.endswith('_API_KEY'):
+            continue
+        raw = config.get('value')
+        if raw == SENSITIVE_VALUE_MASK:
+            continue
+        if is_placeholder_secret(raw):
+            config['value'] = ''
+    enforce_single_active_provider(configs)
 
 
 def _reload_ai_runtime():
@@ -221,22 +193,8 @@ def _reload_ai_runtime():
         except Exception as llm_error:
             logger.error('Failed to refresh LLM instances: %s', llm_error)
 
-        try:
-            if settings.DEFAULT_COMPANY != 'OLLAMA':
-                from utils.utils_core.remote_model_checker import model_checker
-
-                current_app.config['MODEL_STATUS'] = model_checker.get_model_status_summary(settings.DEFAULT_COMPANY)
-            else:
-                current_app.config['MODEL_STATUS'] = {
-                    'company': 'ollama',
-                    'service_name': 'Ollama',
-                    'is_available': True,
-                    'message': 'Ollama local model',
-                    'details': {'note': 'Local model, no remote check required'},
-                    'timestamp': None
-                }
-        except Exception as status_error:
-            logger.warning('Failed to refresh model status cache: %s', status_error)
+        # 远程探测可能阻塞十秒，保存时只作废缓存，由 /api/model-status 下次请求时重新检查
+        current_app.config.pop('MODEL_STATUS', None)
 
     except Exception as reload_error:
         logger.warning('Failed to reload config center runtime: %s', reload_error)
@@ -250,8 +208,24 @@ def _reload_runtime_flags():
 
         settings.load_from_config_center()
         refresh_token_monitor_session_limits()
+        _sync_vector_store_runtime(settings)
     except Exception as reload_error:
         logger.warning('Failed to reload runtime flags: %s', reload_error)
+
+
+def _sync_vector_store_runtime(settings):
+    """ENABLE_VECTOR_STORE 在运行中打开时补建向量库，否则要重启才生效。"""
+    if not getattr(settings, 'ENABLE_VECTOR_STORE', True):
+        return
+    if getattr(current_app, 'vector_db', None) is not None:
+        return
+    from utils.utils_ai_models.embeddings import create_vector_db
+
+    try:
+        current_app.vector_db = create_vector_db()
+        logger.info('ENABLE_VECTOR_STORE turned on, vector store created')
+    except Exception as exc:
+        logger.error('Failed to create vector store after enabling: %s', exc)
 
 
 _AI_RUNTIME_KEYS = {
@@ -346,8 +320,7 @@ def get_configs_by_category(category):
             code='CONFIG_CATEGORY_FETCH_FAILED',
             message_key='configCenter.message.categoryFetchFailed',
             message='Failed to load configuration items',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -365,15 +338,7 @@ def update_configs_by_category(category):
             )
 
         if category == 'ai_model':
-            validation_error = validate_ai_model_configs(data['configs'])
-            if validation_error:
-                return _config_error(
-                    code='CONFIG_UPDATE_VALIDATION_FAILED',
-                    message_key='configCenter.message.validationFailed',
-                    message='Configuration validation failed',
-                    status=400,
-                    details=validation_error
-                )
+            validate_ai_model_configs(data['configs'])
 
         updated_count = 0
         failed_configs = []
@@ -387,7 +352,7 @@ def update_configs_by_category(category):
                     category=category,
                     description=config_data.get('description'),
                     is_sensitive=config_data.get('is_sensitive', False),
-                    operator=request.headers.get('X-Operator', 'admin')
+                    operator=_operator()
                 )
 
                 if success:
@@ -422,8 +387,7 @@ def update_configs_by_category(category):
             code='CONFIG_BATCH_UPDATE_FAILED',
             message_key='configCenter.message.batchUpdateFailed',
             message='Failed to update configuration items',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -444,8 +408,7 @@ def get_config_item(key):
             code='CONFIG_ITEM_FETCH_FAILED',
             message_key='configCenter.message.itemFetchFailed',
             message='Failed to load configuration item',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -469,11 +432,12 @@ def update_config_item(key):
             category=data.get('category', 'general'),
             description=data.get('description'),
             is_sensitive=data.get('is_sensitive', False),
-            operator=request.headers.get('X-Operator', 'admin')
+            operator=_operator()
         )
 
         if success:
-            _reload_after_config_change([key], data.get('category'))
+            stored = config_center_service.get_public_config_item(key)
+            _reload_after_config_change([key], stored.get('category'))
             return _config_success(
                 code='CONFIG_ITEM_UPDATE_SUCCESS',
                 message_key='configCenter.message.itemUpdateSuccess',
@@ -493,8 +457,7 @@ def update_config_item(key):
             code='CONFIG_ITEM_UPDATE_FAILED',
             message_key='configCenter.message.itemUpdateFailed',
             message='Failed to update configuration item',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -504,7 +467,7 @@ def delete_config_item(key):
     try:
         success, message = config_center_service.delete_config(
             key=key,
-            operator=request.headers.get('X-Operator', 'admin')
+            operator=_operator()
         )
 
         if success:
@@ -528,8 +491,7 @@ def delete_config_item(key):
             code='CONFIG_ITEM_DELETE_FAILED',
             message_key='configCenter.message.itemDeleteFailed',
             message='Failed to delete configuration item',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -538,7 +500,7 @@ def export_configs():
     """Export all configs."""
     try:
         format_type = request.args.get('format', 'json')
-        success, content, filename = config_center_service.export_configs(format_type)
+        success, content, filename = config_center_service.export_configs(format_type, operator=_operator())
 
         if success:
             return _config_success(
@@ -564,8 +526,7 @@ def export_configs():
             code='CONFIG_EXPORT_FAILED',
             message_key='config.message.exportFailed',
             message='Failed to export configuration',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -607,7 +568,7 @@ def import_configs():
         success, message, imported_count = config_center_service.import_configs(
             content=content,
             format_type=format_type,
-            operator=request.headers.get('X-Operator', 'admin')
+            operator=_operator()
         )
 
         if success:
@@ -632,8 +593,7 @@ def import_configs():
             code='CONFIG_IMPORT_FAILED',
             message_key='config.message.importFailed',
             message='Failed to import configuration',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -641,8 +601,8 @@ def import_configs():
 def get_audit_logs():
     """Get config audit logs."""
     try:
-        limit = int(request.args.get('limit', 100))
-        offset = int(request.args.get('offset', 0))
+        limit = min(max(1, request.args.get('limit', 100, type=int) or 100), 500)
+        offset = max(0, request.args.get('offset', 0, type=int) or 0)
         logs = config_center_service.get_audit_logs(limit=limit, offset=offset)
         return _config_success(
             data=logs,
@@ -656,8 +616,7 @@ def get_audit_logs():
             code='CONFIG_AUDIT_LOGS_FAILED',
             message_key='configCenter.message.auditLogsFailed',
             message='Failed to load audit logs',
-            status=500,
-            details=str(e)
+            status=500
         )
 
 
@@ -690,6 +649,5 @@ def validate_config(key):
             code='CONFIG_VALIDATE_FAILED',
             message_key='configCenter.message.validationFailed',
             message='Failed to validate configuration',
-            status=500,
-            details=str(e)
+            status=500
         )

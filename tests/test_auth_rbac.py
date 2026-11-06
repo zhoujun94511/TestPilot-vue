@@ -25,6 +25,9 @@ def auth_app(tmp_path, monkeypatch):
     from blueprints.config_center import config_center_bp
     from models.models import db
     from services.auth_gate import install_auth_gate
+    from services.request_rate_limit import reset_rate_limits
+
+    reset_rate_limits()
     from services.auth_migrations import get_default_department_id, run_auth_migrations
     from services.auth_service import create_user
 
@@ -81,6 +84,99 @@ def test_login_and_check_auth(auth_app):
     assert ok.status_code == 200
 
 
+def test_overlapping_logins_keep_one_session(auth_app):
+    import threading
+
+    from models.auth_models import User, UserSession
+    from models.models import db
+    from services.auth_service import create_session
+
+    with auth_app.app_context():
+        user_id = User.query.filter_by(username='admin').one().id
+
+    barrier = threading.Barrier(2)
+    errors = []
+
+    def enter():
+        try:
+            with auth_app.app_context():
+                barrier.wait(timeout=5)
+                create_session(user_id)
+                db.session.remove()
+        except Exception as exc:  # 后到的事务可能撞上数据库锁，重试一次
+            errors.append(exc)
+            with auth_app.app_context():
+                create_session(user_id)
+                db.session.remove()
+
+    threads = [threading.Thread(target=enter) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    with auth_app.app_context():
+        assert UserSession.query.filter_by(user_id=user_id).count() == 1
+
+
+def test_second_login_revokes_the_other_session(auth_app):
+    body = {'username': 'admin', 'password': 'TestPilot@2026'}
+    first = auth_app.test_client()
+    second = auth_app.test_client()
+
+    assert first.post('/api/auth/login', json=body).status_code == 200
+    assert first.get('/api/cases/list').status_code == 200
+
+    assert second.post('/api/auth/login', json=body).status_code == 200
+    assert second.get('/api/cases/list').status_code == 200
+    assert first.get('/api/cases/list').status_code == 401
+    still = first.get('/api/auth/check-auth').get_json()
+    assert still.get('data', {}).get('authenticated') is False
+
+
+def test_forced_password_change_accepts_new_password_twice(auth_app):
+    from models.auth_models import User
+    from models.models import db
+
+    client = auth_app.test_client()
+    login = client.post(
+        '/api/auth/login',
+        json={'username': 'admin', 'password': 'TestPilot@2026'},
+    )
+    assert login.status_code == 200
+    with auth_app.app_context():
+        user = User.query.filter_by(username='admin').first()
+        user.must_change_password = True
+        db.session.commit()
+
+    missing_old = client.post(
+        '/api/auth/change-password',
+        json={'new_password': 'FreshKey@2026'},
+    )
+    assert missing_old.status_code == 200
+
+    relogin = client.post(
+        '/api/auth/login',
+        json={'username': 'admin', 'password': 'FreshKey@2026'},
+    )
+    assert relogin.status_code == 200
+    assert relogin.get_json().get('data', {}).get('user', {}).get('must_change_password') is False
+
+
+def test_voluntary_password_change_still_checks_current_password(auth_app):
+    client = auth_app.test_client()
+    login = client.post(
+        '/api/auth/login',
+        json={'username': 'dept_admin', 'password': 'DeptAdmin@2026'},
+    )
+    assert login.status_code == 200
+    rejected = client.post(
+        '/api/auth/change-password',
+        json={'new_password': 'FreshKey@2026'},
+    )
+    assert rejected.status_code == 401
+
+
 def test_config_center_forbidden_for_non_super(auth_app):
     client = auth_app.test_client()
     login = client.post(
@@ -110,6 +206,23 @@ def test_admin_reset_password_rejects_short(auth_app):
 
     bad = client.put(f'/api/auth/users/{user_id}', json={'password': 'short'})
     assert bad.status_code == 400
+
+
+def test_admin_reset_password_forces_change(auth_app):
+    from models.auth_models import User
+
+    with auth_app.app_context():
+        user_id = User.query.filter_by(username='dept_admin').first().id
+
+    client = auth_app.test_client()
+    assert client.post(
+        '/api/auth/login',
+        json={'username': 'admin', 'password': 'TestPilot@2026'},
+    ).status_code == 200
+    resp = client.put(f'/api/auth/users/{user_id}', json={'password': 'NewPass@2026x'})
+    assert resp.status_code == 200
+    with auth_app.app_context():
+        assert User.query.get(user_id).must_change_password is True
 
 
 def test_super_admin_can_unlock_user(auth_app):

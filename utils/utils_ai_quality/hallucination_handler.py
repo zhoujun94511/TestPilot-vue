@@ -206,7 +206,11 @@ class HallucinationHandler:
             regenerate_prompt = self._build_regenerate_prompt(content, detection_result, context, regenerate_count)
             
             # 调用LLM重新生成
+            from utils.utils_performance_monitoring.token_monitor import ensure_session_budget, record_message_usage
+
+            ensure_session_budget()
             response = llm.invoke([{"role": "user", "content": regenerate_prompt}])
+            record_message_usage(response, source='case_generation')
             new_content = response.content if hasattr(response, 'content') else str(response)
             
             # 检查重新生成的内容是否为空或过短

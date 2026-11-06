@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 from sqlalchemy import func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from werkzeug.exceptions import BadRequest
 from utils.utils_core.logger import get_logger
 from services.stats_service import StatsService
@@ -13,6 +13,11 @@ import services.stats_scope as stats_scope
 
 # 创建蓝图
 stats_bp = Blueprint('stats', __name__)
+
+
+def _utc_now():
+    # 库里存的是不带时区的 UTC 时间，统计窗口起点必须用同一基准
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 # 初始化服务
 stats_service = StatsService()
@@ -27,7 +32,7 @@ def get_overview_stats():
     try:
         # 获取时间范围参数
         days = request.args.get('days', 7, type=int)
-        end_date = datetime.now()
+        end_date = _utc_now()
         start_date = end_date - timedelta(days=days)
 
         cases_q = stats_scope.scoped_cases_query()
@@ -42,7 +47,7 @@ def get_overview_stats():
 
         recent_cases = cases_q.filter(TestCase.created_time >= start_date).count()
         recent_requirements = req_q.filter(Requirement.created_time >= start_date).count()
-        recent_chats = stats_scope.scoped_chat_history_query().filter(
+        recent_chats = stats_scope.scoped_chat_message_stats_query().filter(
             ChatHistory.created_time >= start_date
         ).count()
 
@@ -98,14 +103,14 @@ def get_performance_stats():
     """获取性能统计"""
     try:
         # 获取时间范围参数
-        hours = request.args.get('hours', 24, type=int)
+        hours = min(max(request.args.get('hours', 24, type=int) or 24, 1), 24 * 31)
         if not stats_scope.platform_metrics_visible():
             return jsonify({
                 'success': True,
                 'performance': stats_scope.empty_performance_stats(hours),
             })
 
-        end_time = datetime.now()
+        end_time = _utc_now()
         start_time = end_time - timedelta(hours=hours)
 
         # 从性能指标表获取数据
@@ -164,13 +169,13 @@ def get_usage_stats():
     """获取使用统计"""
     try:
         # 获取时间范围参数
-        days = request.args.get('days', 30, type=int)
-        end_date = datetime.now()
+        days = min(max(request.args.get('days', 30, type=int) or 30, 1), 365)
+        end_date = _utc_now()
         start_date = end_date - timedelta(days=days)
 
         cases_q = stats_scope.scoped_cases_query().filter(TestCase.created_time >= start_date)
         req_q = stats_scope.scoped_requirements_query().filter(Requirement.created_time >= start_date)
-        chat_q = stats_scope.scoped_chat_history_query().filter(ChatHistory.created_time >= start_date)
+        chat_q = stats_scope.scoped_chat_message_stats_query().filter(ChatHistory.created_time >= start_date)
 
         case_ids = cases_q.with_entities(TestCase.id).subquery()
         req_ids = req_q.with_entities(Requirement.id).subquery()
@@ -258,7 +263,7 @@ def get_token_stats():
     try:
         from services.llm_usage_service import build_global_token_stats
 
-        days = request.args.get('days', 7, type=int)
+        days = min(max(request.args.get('days', 7, type=int) or 7, 1), 365)
         return jsonify({
             'success': True,
             'tokens': build_global_token_stats(days),
@@ -287,7 +292,7 @@ def get_log_stats():
                 'logs': stats_scope.empty_log_stats(hours),
             })
 
-        end_time = datetime.now()
+        end_time = _utc_now()
         start_time = end_time - timedelta(hours=hours)
 
         # 按日志级别统计
@@ -382,7 +387,7 @@ def export_stats():
                     'message_key': 'common.errors.http403',
                 }), 403
 
-            end_time = datetime.now()
+            end_time = _utc_now()
             start_time = end_time - timedelta(days=days)
 
             metrics = PerformanceMetric.query.filter(
@@ -398,7 +403,7 @@ def export_stats():
             }
         elif export_type == 'usage':
             # 获取使用数据
-            end_date = datetime.now()
+            end_date = _utc_now()
             start_date = end_date - timedelta(days=days)
 
             recent_cases = stats_scope.scoped_cases_query().filter(
@@ -407,7 +412,7 @@ def export_stats():
             recent_requirements = stats_scope.scoped_requirements_query().filter(
                 Requirement.created_time >= start_date
             ).count()
-            recent_chats = stats_scope.scoped_chat_history_query().filter(
+            recent_chats = stats_scope.scoped_chat_message_stats_query().filter(
                 ChatHistory.created_time >= start_date
             ).count()
 
@@ -837,89 +842,82 @@ def get_network_info_api():
         logger.error(f"获取网络信息失败: {str(e)}")
         return jsonify({
             'success': False,
-            'message': f'获取网络信息失败: {str(e)}'
+            'message': '获取网络信息失败'
         }), 500
+
+
+_ACTIVITY_PREVIEW_LIMIT = 5
+
+
+def _recent_activity_slice(
+    query,
+    model,
+    start_date,
+    subject_attr: str,
+    activity_type: str,
+    icon: str,
+    color: str,
+    count_query=None,
+):
+    """条数用同一窗口的全量，列表只带最近几条，避免把截断后的 5 当成实际数量。
+    count_query 只用于计数（如聊天按部门算数），预览内容仍只来自 query（本人可见的正文）。"""
+    scoped = query.filter(model.created_time >= start_date)
+    counted = (count_query if count_query is not None else query).filter(model.created_time >= start_date)
+    count = counted.count()
+    preview = scoped.order_by(model.created_time.desc()).limit(_ACTIVITY_PREVIEW_LIMIT).all()
+    items = []
+    for row in preview:
+        subject = str(getattr(row, subject_attr, '') or '').strip()
+        items.append({
+            'type': activity_type,
+            'subject': subject,
+            'time': row.created_time,
+            'icon': icon,
+            'color': color,
+        })
+    return count, items
 
 
 @stats_bp.route('/recent-activities', methods=['GET'])
 def get_recent_activities():
-    """获取最近活动"""
+    """最近活动。窗口与高级指标的近 30 天用量一致，条数是实际数量。"""
     try:
         from models.models import TestCase, Requirement, ChatHistory, RagFileRecord
-        from datetime import datetime, timedelta
-        
-        # 获取最近7天的活动
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)
-        
+
+        days = request.args.get('days', 30, type=int) or 30
+        if days < 1 or days > 366:
+            days = 30
+        start_date = _utc_now() - timedelta(days=days)
+
+        counts = {}
         activities = []
-        
-        # 最近创建的测试用例
-        recent_cases = stats_scope.scoped_cases_query().filter(
-            TestCase.created_time >= start_date
-        ).order_by(TestCase.created_time.desc()).limit(5).all()
-        
-        for case in recent_cases:
-            title = (case.title or '').strip()
-            activities.append({
-                'type': 'case',
-                'subject': title,
-                'time': case.created_time,
-                'icon': 'fas fa-flask',
-                'color': 'text-primary'
-            })
-        
-        # 最近创建的需求文档
-        recent_requirements = stats_scope.scoped_requirements_query().filter(
-            Requirement.created_time >= start_date
-        ).order_by(Requirement.created_time.desc()).limit(5).all()
-        
-        for req in recent_requirements:
-            title = (req.title or '').strip()
-            activities.append({
-                'type': 'requirement',
-                'subject': title,
-                'time': req.created_time,
-                'icon': 'fas fa-file-alt',
-                'color': 'text-success'
-            })
-        
-        # 最近的知识库文件上传
-        recent_knowledge = stats_scope.scoped_knowledge_files_query().filter(
-            RagFileRecord.created_time >= start_date,
-        ).order_by(RagFileRecord.created_time.desc()).limit(3).all()
-        
-        for file in recent_knowledge:
-            name = (file.file_name or '').strip()
-            activities.append({
-                'type': 'knowledge',
-                'subject': name,
-                'time': file.created_time,
-                'icon': 'fas fa-brain',
-                'color': 'text-info'
-            })
-        
-        # 最近的聊天会话
-        recent_chats = stats_scope.scoped_chat_history_query().filter(
-            ChatHistory.created_time >= start_date
-        ).order_by(ChatHistory.created_time.desc()).limit(3).all()
-        
-        for chat in recent_chats:
-            content = (chat.content or '').strip()
-            activities.append({
-                'type': 'chat',
-                'subject': content,
-                'time': chat.created_time,
-                'icon': 'fas fa-comments',
-                'color': 'text-warning'
-            })
-        
-        # 按时间排序，取最近10条
-        activities.sort(key=lambda x: x['time'], reverse=True)
-        activities = activities[:10]
-        
+        slices = (
+            (stats_scope.scoped_cases_query(), None, TestCase, 'title', 'case', 'fas fa-flask', 'text-primary'),
+            (stats_scope.scoped_requirements_query(), None, Requirement, 'title', 'requirement', 'fas fa-file-alt', 'text-success'),
+            (stats_scope.scoped_knowledge_files_query(), None, RagFileRecord, 'file_name', 'knowledge', 'fas fa-brain', 'text-info'),
+            (
+                stats_scope.scoped_chat_history_query(),
+                stats_scope.scoped_chat_message_stats_query(),
+                ChatHistory,
+                'content',
+                'chat',
+                'fas fa-comments',
+                'text-warning',
+            ),
+        )
+        for query, count_query, model, subject_attr, activity_type, icon, color in slices:
+            count, items = _recent_activity_slice(
+                query, model, start_date, subject_attr, activity_type, icon, color, count_query=count_query
+            )
+            counts[activity_type] = count
+            activities.extend(items)
+
+        activities.sort(key=lambda item: item['time'] or datetime.min, reverse=True)
+
         return jsonify({
             'success': True,
+            'period_days': days,
+            'counts': counts,
             'activities': activities
         })
         
@@ -1150,10 +1148,18 @@ def get_system_status():
         }), 500
 
 
+_CPU_SAMPLER_PRIMED = False
+
+
 def _host_performance_snapshot(psutil):
     """主机 CPU / 内存 / 磁盘：(cpu%, 已用内存GB, 内存%, 总内存GB, 磁盘%, 状态)。"""
+    global _CPU_SAMPLER_PRIMED
     try:
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # 不阻塞请求：取距上次调用的平均值；进程内第一次只有很短的采样窗口
+        if not _CPU_SAMPLER_PRIMED:
+            psutil.cpu_percent(interval=0.1)
+            _CPU_SAMPLER_PRIMED = True
+        cpu_percent = psutil.cpu_percent(interval=None)
 
         memory = psutil.virtual_memory()
         memory_used_gb = round(memory.used / (1024**3), 2)

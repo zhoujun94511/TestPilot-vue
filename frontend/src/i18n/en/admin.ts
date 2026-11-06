@@ -4,8 +4,7 @@ export default {
   },
   users: {
     page: {
-      title: 'User management',
-      subtitle: 'Create and maintain accounts for your department or the whole platform'
+      title: 'User management'
     },
     tabs: {
       users: 'Accounts',
@@ -76,7 +75,10 @@ export default {
         user_created: 'User created',
         user_updated: 'User updated',
         user_deleted: 'User deleted',
-        account_unlocked: 'Manual unlock'
+        account_unlocked: 'Manual unlock',
+        project_created: 'Project created',
+        project_renamed: 'Project renamed',
+        project_deleted: 'Project deleted'
       }
     },
     dept: {
@@ -84,10 +86,8 @@ export default {
     },
     form: {
       createTitle: 'New account',
-      createHint:
-        "Fields marked * are required. Username: 3–64 chars (letters, digits, CJK, . _ - {'@'}). Password: 8–128 chars with a letter, digit, and symbol.",
+      createHint: 'Password: 8–128 chars with a letter, digit and symbol',
       deptCreateTitle: 'New department',
-      deptCreateHint: 'Use a short code identifier; changing codes later can break integrations.',
       username: 'Username',
       password: 'Initial password',
       email: 'Email',
@@ -99,7 +99,6 @@ export default {
     },
     hint: {
       authOff: 'AUTH_REQUIRE_AUTH is off; user management API is disabled',
-      adminScope: 'Admins can only manage regular users in their department',
       pendingApproval: 'Self-registered accounts start as inactive. Verify the person, then click Enable to let them sign in.'
     },
     delete: {

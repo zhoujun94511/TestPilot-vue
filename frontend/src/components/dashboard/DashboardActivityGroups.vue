@@ -24,9 +24,9 @@
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <span class="font-semibold text-[var(--tp-color-text-900)]">{{ group.label }}</span>
-            <TpTag variant="primary">{{ group.items.length }}</TpTag>
+            <TpTag variant="primary">{{ group.totalCount }}</TpTag>
           </div>
-          <div class="mt-0.5 text-xs text-[var(--tp-color-text-500)]">
+          <div v-if="groupSummary(group)" class="mt-0.5 text-xs text-[var(--tp-color-text-500)]">
             {{ groupSummary(group) }}
           </div>
         </div>
@@ -49,6 +49,14 @@
             {{ formatTime(item.time) }}
           </div>
         </li>
+        <li v-if="group.moreHref" :class="dashboardActivityGroupItemClass">
+          <RouterLink
+            :to="group.moreHref"
+            class="text-sm font-semibold text-[var(--tp-color-primary-700)] hover:underline"
+          >
+            {{ t('dashboard.activities.viewAll', { count: group.totalCount }) }}
+          </RouterLink>
+        </li>
       </ul>
     </section>
   </div>
@@ -56,6 +64,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { RouterLink } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import type { AppNavIcon } from '@/config/navigation';
 import { navIconForModulePath } from '@/lib/nav-icon';
@@ -76,6 +85,8 @@ import { formatRecentActivityMessage } from '@/lib/recent-activity-i18n';
 
 const props = defineProps<{
   activities: RecentActivityRecord[];
+  counts?: Record<string, number>;
+  periodDays?: number;
 }>();
 
 const { t, te, locale } = useI18n();
@@ -86,7 +97,9 @@ interface ActivityGroupView {
   label: string;
   navIcon: AppNavIcon | null;
   fallbackIcon: string;
+  totalCount: number;
   items: RecentActivityRecord[];
+  moreHref: string | null;
 }
 
 const TYPE_ORDER = ['case', 'requirement', 'knowledge', 'chat', 'other'] as const;
@@ -113,7 +126,9 @@ const groups = computed((): ActivityGroupView[] => {
       label: activityTypeLabel(type),
       navIcon: navIconForActivityType(type),
       fallbackIcon: String(sample?.icon || 'AI').slice(0, 2),
-      items
+      totalCount: Number(props.counts?.[type] ?? items.length),
+      items,
+      moreHref: activityMoreHref(type, Number(props.counts?.[type] ?? items.length), items.length)
     };
   });
 });
@@ -130,6 +145,15 @@ watch(
     expandedTypes.value = new Set();
   }
 );
+
+function activityMoreHref(type: string, total: number, shown: number): string | null {
+  if (total <= shown) return null;
+  if (type === 'case') return '/cases/manage';
+  if (type === 'requirement') return '/documents/history';
+  if (type === 'knowledge') return '/knowledge/files';
+  if (type === 'chat') return '/chat';
+  return null;
+}
 
 function navIconForActivityType(type: string): AppNavIcon | null {
   if (type === 'case') return navIconForModulePath('/cases');
@@ -174,13 +198,18 @@ function toggleGroup(type: string) {
 }
 
 function groupSummary(group: ActivityGroupView) {
-  if (isExpanded(group.type)) {
-    return t('dashboard.activities.groupExpandedHint');
-  }
+  if (isExpanded(group.type)) return '';
   const latest = group.items.find((item) => item.time) || group.items[0];
+  if (latest && (latest.subject || latest.message) && props.counts) {
+    return t('dashboard.activities.groupCountSummary', {
+      days: props.periodDays || 30,
+      count: group.totalCount,
+      latest: activityMessage(latest)
+    });
+  }
   if (latest && (latest.subject || latest.message)) {
     return activityMessage(latest);
   }
-  return t('dashboard.activities.groupCollapsedHint', { count: group.items.length });
+  return '';
 }
 </script>

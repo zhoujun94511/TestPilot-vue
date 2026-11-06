@@ -9,7 +9,6 @@
     <template v-else>
       <PagePanel
         :title="t('experimentalToolsPage.page.title')"
-        :subtitle="t('experimentalToolsPage.page.subtitle')"
       >
         <form class="grid gap-4" novalidate @submit.prevent="runTool">
           <div :class="grid12ItemsEndClass">
@@ -113,8 +112,12 @@
           </div>
 
           <div v-else class="flex justify-end">
-            <TpButton type="submit" :loading="toolRunning" :disabled="toolRunning">
-              {{ toolRunning ? t('chat.experimentalTools.running') : t('chat.experimentalTools.run') }}
+            <TpButton
+              type="submit"
+              :loading="toolRunning"
+              :aria-label="toolRunning ? t('chat.experimentalTools.running') : undefined"
+            >
+              {{ t('chat.experimentalTools.run') }}
             </TpButton>
           </div>
         </form>
@@ -184,6 +187,7 @@ import {
   createChatSession
 } from '@/api/chat';
 import { executeExperimentalAction, fetchExperimentalActionsHealth } from '@/api/experimentalActions';
+import { ApiError } from '@/api/http';
 import { getDocumentRequirements } from '@/api/documents';
 import { resolveExperimentalToolErrorMessage } from '@/composables/chat/chatSendErrors';
 import { usePendingExperimentalAction } from '@/composables/usePendingExperimentalAction';
@@ -192,6 +196,7 @@ import {
   EXPERIMENTAL_TOOL_DEFS,
   buildExperimentalToolArgs,
   defaultFieldValuesForTool,
+  EXPERIMENTAL_TOOLS_SESSION_STORAGE_KEY,
   getExperimentalToolDef,
   toolComposerContextFieldKeys,
   validateExperimentalToolForm,
@@ -216,7 +221,7 @@ import { tableBodyScrollClass, tableWrap } from '@/lib/table-ui';
 import { cn } from '@/lib/utils';
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
 
-const EXP_SESSION_KEY = 'testpilot_experimental_tools_session_id';
+const EXP_SESSION_KEY = EXPERIMENTAL_TOOLS_SESSION_STORAGE_KEY;
 const REQUIREMENT_OPTION_LIMIT = 200;
 const REQUIREMENT_TITLE_MAX = 40;
 /** 切换工具时沿用的长文本字段（需求描述 / 文档正文） */
@@ -239,18 +244,13 @@ const toolRunning = ref(false);
 const confirmLoading = ref(false);
 const toolsCatalog = ref<Record<string, string>>({});
 
-interface ToolTableResult {
-  kind: 'cases';
-  title: string;
-  emptyTitle: string;
-  rowKey: string;
-  rows: Record<string, unknown>[];
+interface ToolResultState {
+  toolId: string;
+  status: string;
+  output: Record<string, unknown> | null;
 }
 
-const resultTable = ref<ToolTableResult | null>(null);
-const resultText = ref('');
-const resultLink = ref<{ to: string; label: string } | null>(null);
-const coverageGaps = ref<{ requirementId: string; gaps: string[] } | null>(null);
+const toolResult = ref<ToolResultState | null>(null);
 
 const resultTextPaneClass = cn(tableWrap(), tableBodyScrollClass, 'p-4');
 const resultLinkClass =
@@ -276,7 +276,10 @@ interface RequirementOption {
   label: string;
 }
 
-const requirementList = ref<RequirementOption[]>([]);
+const requirementRows = ref<Array<{ reqId: string; title: string }>>([]);
+const requirementList = computed<RequirementOption[]>(() =>
+  requirementRows.value.map((row) => ({ value: row.reqId, label: requirementLabel(row.title, row.reqId) }))
+);
 const requirementsTotal = ref(0);
 const requirementsLoading = ref(false);
 const requirementsLoaded = ref(false);
@@ -311,7 +314,7 @@ function requirementPlaceholder(key: string) {
 function requirementLabel(title: string, reqId: string) {
   const text = title.trim() || reqId;
   const short = text.length > REQUIREMENT_TITLE_MAX ? `${text.slice(0, REQUIREMENT_TITLE_MAX)}…` : text;
-  return `${short}（${reqId}）`;
+  return t('chat.toolMarkdown.titleWithId', { title: short, id: reqId });
 }
 
 async function loadRequirementOptions() {
@@ -320,9 +323,9 @@ async function loadRequirementOptions() {
   requirementsFailed.value = false;
   try {
     const result = await getDocumentRequirements({ page: 1, per_page: REQUIREMENT_OPTION_LIMIT });
-    requirementList.value = result.requirements
+    requirementRows.value = result.requirements
       .filter((item) => item.req_id)
-      .map((item) => ({ value: item.req_id, label: requirementLabel(item.title || '', item.req_id) }));
+      .map((item) => ({ reqId: item.req_id, title: item.title || '' }));
     requirementsTotal.value = result.total;
     requirementsLoaded.value = true;
   } catch {
@@ -406,46 +409,67 @@ const confirmButtonLabel = computed(() =>
 );
 
 function clearResult() {
-  resultTable.value = null;
-  resultText.value = '';
-  resultLink.value = null;
-  coverageGaps.value = null;
+  toolResult.value = null;
 }
 
-function readCoverageGaps(toolId: string, output: Record<string, unknown> | null) {
-  if (toolId !== 'ac_coverage_review' || !output || output.success === false) return null;
+const STATUS_MESSAGE_KEYS: Record<string, string> = {
+  denied: 'chat.toolMarkdown.actionDenied',
+  failed: 'chat.toolMarkdown.actionFailed',
+  needs_confirmation: 'chat.toolMarkdown.previewReady',
+  cancelled: 'chat.toolMarkdown.actionCancelled',
+  confirmed: 'chat.toolMarkdown.actionConfirmed',
+  skipped: 'chat.experimentalTools.runSkipped'
+};
+
+const coverageGaps = computed(() => {
+  const state = toolResult.value;
+  const output = state?.output;
+  if (state?.toolId !== 'ac_coverage_review' || !output || output.success === false) return null;
   const gaps = Array.isArray(output.gaps) ? output.gaps.map(String).filter(Boolean) : [];
-  const requirement = asRecord(output.requirement);
-  const requirementId = String(requirement?.req_id || '').trim();
+  const requirementId = String(asRecord(output.requirement)?.req_id || '').trim();
   return gaps.length && requirementId ? { requirementId, gaps } : null;
-}
+});
 
-function showToolResult(toolId: string, message: string, output: Record<string, unknown> | null) {
-  coverageGaps.value = readCoverageGaps(toolId, output);
-  const table = extractExperimentalToolTable(toolId, output);
-  if (!table) {
-    resultTable.value = null;
-    resultLink.value = null;
-    resultText.value = formatActionResultContent(t, message, toolId, output);
-    return;
-  }
-  const hids = table.rows
-    .map((row) => String(row.case_id || '').trim())
-    .filter((id) => id && id !== '-')
-    .slice(0, 12)
-    .join(',');
-  resultLink.value = {
-    label: t('experimentalToolsPage.results.openCases'),
-    to: hids ? `/cases/manage?from=generate&hids=${encodeURIComponent(hids)}&at=action_chat` : '/cases/manage'
-  };
-  resultText.value = '';
-  resultTable.value = {
+const resultCaseTable = computed(() => {
+  const state = toolResult.value;
+  return state ? extractExperimentalToolTable(state.toolId, state.output) : null;
+});
+
+const resultTable = computed(() => {
+  const table = resultCaseTable.value;
+  if (!table) return null;
+  return {
     kind: table.kind,
     rows: table.rows,
     title: t('cases.table.title'),
     emptyTitle: t('cases.table.empty'),
     rowKey: 'case_id'
   };
+});
+
+const resultLink = computed(() => {
+  const table = resultCaseTable.value;
+  if (!table) return null;
+  const hids = table.rows
+    .map((row) => String(row.case_id || '').trim())
+    .filter((id) => id && id !== '-')
+    .slice(0, 12)
+    .join(',');
+  return {
+    label: t('experimentalToolsPage.results.openCases'),
+    to: hids ? `/cases/manage?from=generate&hids=${encodeURIComponent(hids)}&at=action_chat` : '/cases/manage'
+  };
+});
+
+const resultText = computed(() => {
+  const state = toolResult.value;
+  if (!state || resultCaseTable.value) return '';
+  const statusKey = STATUS_MESSAGE_KEYS[state.status];
+  return formatActionResultContent(t, statusKey ? t(statusKey) : '', state.toolId, state.output);
+});
+
+function showToolResult(toolId: string, status: string, output: Record<string, unknown> | null) {
+  toolResult.value = { toolId, status, output };
 }
 
 async function openSkeletonFromGaps() {
@@ -498,6 +522,7 @@ function longTextValue(values: Record<string, string | number | boolean>) {
 }
 
 watch(experimentalToolId, (next) => {
+  clearResult();
   const carried = longTextValue(toolFields.value);
   const values = defaultFieldValuesForTool(next);
   if (carried) {
@@ -535,7 +560,7 @@ async function runTool() {
   try {
     toolRunning.value = true;
     resetPendingAction();
-    const result = await executeExperimentalAction({
+    const execute = () => executeExperimentalAction({
       query: t('chat.experimentalTools.queryAudit', { tool: toolId }),
       session_id: sessionId.value,
       tool_name: toolId,
@@ -543,6 +568,18 @@ async function runTool() {
       require_confirmation: true,
       metadata: { send_source: 'experimental_tool_page' }
     });
+    let result;
+    try {
+      result = await execute();
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.errorCode !== 'session_unavailable') throw error;
+      // 本地记住的会话已删除或属于其他账号，换一个新会话重试一次
+      localStorage.removeItem(EXP_SESSION_KEY);
+      sessionId.value = '';
+      await ensureSession();
+      if (!sessionId.value) return;
+      result = await execute();
+    }
     const toolName = String(result.plan?.tool_name || toolId);
     if (result.status === 'needs_confirmation' && result.execution_id) {
       applyPendingFromSendResult({
@@ -551,10 +588,11 @@ async function runTool() {
         action_plan: (result.plan as Record<string, unknown> | null) ?? null,
         tool_results: result.tool_output ?? null
       });
-      showToolResult(toolName, result.message || '', (result.tool_output as Record<string, unknown> | null) ?? null);
+      showToolResult(toolName, result.status, (result.tool_output as Record<string, unknown> | null) ?? null);
       return;
     }
-    showToolResult(toolName, result.message || '', (result.tool_output as Record<string, unknown> | null) ?? null);
+    const resultStatus = result.status || (result.success ? 'done' : 'failed');
+    showToolResult(toolName, resultStatus, (result.tool_output as Record<string, unknown> | null) ?? null);
     if (result.status === 'skipped') {
       showNotice('warning', t('chat.experimentalTools.runSkipped'));
     } else if (result.success) {
@@ -584,11 +622,7 @@ async function confirmPending() {
     }
     const resp = await confirmExperimentalAction(pendingActionExecutionId.value, confirmMetadata);
     const toolName = String(pendingActionPlan.value?.tool_name || '');
-    showToolResult(
-      toolName,
-      String(resp.message || t('chat.toolMarkdown.actionConfirmed')),
-      asRecord(resp.tool_output)
-    );
+    showToolResult(toolName, resp.success === false ? 'failed' : 'confirmed', asRecord(resp.tool_output));
     resetPendingAction();
     showNotice('success', t('chat.experimentalTools.runSuccess'));
   } catch (error) {
@@ -604,10 +638,9 @@ async function cancelPending() {
   try {
     confirmLoading.value = true;
     await cancelExperimentalAction(pendingActionExecutionId.value, 'cancel_from_experimental_tools_page');
-    const message = t('chat.toolMarkdown.actionCancelled');
-    showToolResult(toolName, message, null);
+    showToolResult(toolName, 'cancelled', null);
     resetPendingAction();
-    showNotice('warning', message);
+    showNotice('warning', t('chat.toolMarkdown.actionCancelled'));
   } catch (error) {
     showNotice('danger', getUserFacingErrorMessage(error, t('chat.message.sendFailed')));
   } finally {

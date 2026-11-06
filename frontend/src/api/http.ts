@@ -1,8 +1,16 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import i18n from '@/i18n';
+import { currentProjectScopeVersion, getTabProjectId, projectHeaders } from '@/lib/current-project';
 import { messageFromApiEnvelope, resolveTransportErrorMessage } from '@/lib/user-facing-error';
-import { pinia, useAppStore } from '@/stores';
+import { pinia, useAppStore, useAuthStore } from '@/stores';
 import type { Locale } from '@/i18n';
+
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** 项目列表自己就是确认当前项目的请求，不能再等自己 */
+    skipProjectBootstrap?: boolean;
+  }
+}
 
 export interface ApiLegacyEnvelope<T> {
   success?: boolean;
@@ -57,6 +65,27 @@ export function notifyUnauthorized(status: number | undefined, url: string | und
   unauthorizedHandler();
 }
 
+export const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
+let passwordChangeRequiredHandler: UnauthorizedHandler | null = null;
+
+export function onPasswordChangeRequired(handler: UnauthorizedHandler) {
+  passwordChangeRequiredHandler = handler;
+}
+
+export function notifyPasswordChangeRequired(status: number | undefined, code: unknown) {
+  if (status === 403 && code === PASSWORD_CHANGE_REQUIRED) passwordChangeRequiredHandler?.();
+}
+
+/** 后端 auth_gate 等把错误标识放在字符串 code 里 */
+export function errorCodeFromPayload(payload: { code?: unknown; error_code?: string; error?: unknown } | undefined) {
+  if (payload?.error_code) return payload.error_code;
+  if (typeof payload?.code === 'string' && !/^-?\d+$/.test(payload.code)) return payload.code;
+  return typeof payload?.error === 'string' ? payload.error : undefined;
+}
+
+/** 调模型、上传和重建索引等长任务，默认 30 秒会提前断开而后端仍在执行 */
+export const LONG_TASK_TIMEOUT_MS = 10 * 60 * 1000;
+
 const http: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 30000,
@@ -86,10 +115,48 @@ function applyBackendLocale(rawLocale: unknown) {
   document.documentElement.lang = locale;
 }
 
-http.interceptors.request.use((config) => {
+let projectBootstrap: Promise<void> | null = null;
+let projectBootstrapVersion = -1;
+
+function shouldResolveProject(url: string | undefined, skip: boolean | undefined) {
+  if (skip || getTabProjectId() != null) return false;
+  const path = String(url || '');
+  if (/(^|\/)auth\//.test(path)) return false;
+  const auth = useAuthStore(pinia);
+  return auth.authRequired && auth.isAuthenticated;
+}
+
+/** 本标签页还没有项目时，先等一次项目列表，再让业务请求带上 X-Project-Id */
+function ensureCurrentProject(): Promise<void> {
+  if (getTabProjectId() != null) return Promise.resolve();
+  const version = currentProjectScopeVersion();
+  if (projectBootstrapVersion === version) return Promise.resolve();
+  if (!projectBootstrap) {
+    projectBootstrap = import('@/api/projects')
+      .then(({ listProjects }) => listProjects())
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        projectBootstrapVersion = version;
+        projectBootstrap = null;
+      });
+  }
+  return projectBootstrap;
+}
+
+export async function resolveProjectHeaders(): Promise<Record<string, string>> {
+  if (shouldResolveProject(undefined, false)) await ensureCurrentProject();
+  return projectHeaders();
+}
+
+http.interceptors.request.use(async (config) => {
   config.headers = config.headers || {};
   config.headers['X-Requested-With'] = 'XMLHttpRequest';
   config.headers['Accept-Language'] = getLocale();
+  if (shouldResolveProject(config.url, config.skipProjectBootstrap)) {
+    await ensureCurrentProject();
+  }
+  Object.assign(config.headers, projectHeaders());
 
   if (config.data instanceof FormData) {
     delete (config.headers as Record<string, string>)['Content-Type'];
@@ -127,10 +194,9 @@ function throwApiError(payload: ApiLegacyEnvelope<unknown> | undefined, fallback
   const normalizedCode = typeof payload?.code === 'number'
     ? payload.code
     : (typeof payload?.code === 'string' && /^-?\d+$/.test(payload.code) ? Number(payload.code) : undefined);
-    const errorSlug = typeof payload?.error === 'string' ? payload.error : undefined;
     throw new ApiError(message, {
       code: normalizedCode,
-      errorCode: payload?.error_code || errorSlug,
+      errorCode: errorCodeFromPayload(payload),
       messageKey: payload?.message_key,
       messageParams: payload?.message_params,
       details: payload?.data ?? payload
@@ -166,13 +232,14 @@ http.interceptors.response.use(
     }
 
     const payload = response?.data as ApiLegacyEnvelope<unknown> | undefined;
+    notifyPasswordChangeRequired(response?.status, payload?.code);
     const payloadMessage = extractMessage(payload, '').trim();
     const message = payloadMessage
       || resolveTransportErrorMessage(error.message, response?.status);
     return Promise.reject(
       new ApiError(message, {
         code: typeof payload?.code === 'number' ? payload.code : response?.status,
-        errorCode: payload?.error_code || (typeof payload?.error === 'string' ? payload.error : undefined),
+        errorCode: errorCodeFromPayload(payload),
         messageKey: payload?.message_key,
         messageParams: payload?.message_params,
         details: payload?.data ?? payload
@@ -186,8 +253,8 @@ export async function request<T = unknown>(config: AxiosRequestConfig): Promise<
   return response.data as T;
 }
 
-export function get<T = unknown>(url: string, params?: object) {
-  return request<T>({ url, method: 'GET', params });
+export function get<T = unknown>(url: string, params?: object, config?: AxiosRequestConfig) {
+  return request<T>({ url, method: 'GET', params, ...config });
 }
 
 export function post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
@@ -198,12 +265,16 @@ export function put<T = unknown>(url: string, data?: unknown, config?: AxiosRequ
   return request<T>({ url, method: 'PUT', data, ...config });
 }
 
+export function patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
+  return request<T>({ url, method: 'PATCH', data, ...config });
+}
+
 export function del<T = unknown>(url: string, config?: AxiosRequestConfig) {
   return request<T>({ url, method: 'DELETE', ...config });
 }
 
 export function download(url: string, config?: AxiosRequestConfig) {
-  return request<Blob>({ url, method: 'GET', responseType: 'blob', ...config });
+  return request<Blob>({ url, method: 'GET', responseType: 'blob', timeout: LONG_TASK_TIMEOUT_MS, ...config });
 }
 
 export default http;

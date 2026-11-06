@@ -64,6 +64,7 @@ export interface UseChatSendOptions {
   /** 发送成功后同步当前会话的总消息数（分页总数），保证计数标签实时 */
   refreshHistoryPagination: () => void | Promise<void>;
   loadSessions: (showLoading?: boolean, page?: number, silent?: boolean) => Promise<void>;
+  requestSessionTitle: (sessionId: string) => Promise<void>;
   setNotice: (type: 'success' | 'danger' | 'warning' | 'info', message: string) => void;
 }
 
@@ -81,14 +82,11 @@ export function createChatSendHandler(options: UseChatSendOptions) {
       options.resetPendingAction();
 
       if (!options.currentSessionId.value) {
-        const created = await createChatSession({ title: text.slice(0, 32) });
+        const created = await createChatSession();
         options.currentSessionId.value = created.session_id || created.session?.session_id || '';
         options.currentSessionTitle.value = created.session?.title || options.t('chat.sessions.defaultTitle');
       }
-      options.ensureSessionVisible(
-        options.currentSessionId.value,
-        options.currentSessionTitle.value || text.slice(0, 32)
-      );
+      options.ensureSessionVisible(options.currentSessionId.value, options.currentSessionTitle.value);
 
       const userKey = `user-${Date.now()}-${(options.messageCounter.value += 1)}`;
       options.messages.value.push({
@@ -103,7 +101,10 @@ export function createChatSendHandler(options: UseChatSendOptions) {
       await nextTick();
       options.scrollMessagesToBottom(true);
 
-      const assistantIndex = options.messages.value.findIndex((item) => item.key === options.pendingAssistantKey.value);
+      // 回复期间翻历史页会整体替换 messages，下标会指到别的消息上，每次写入都按 key 重新找
+      const assistantKey = options.pendingAssistantKey.value;
+      const findAssistantIndex = () => options.messages.value.findIndex((item) => item.key === assistantKey);
+      const assistantIndex = findAssistantIndex();
       const sentSessionId = options.currentSessionId.value;
       const sessionChanged = () => options.currentSessionId.value !== sentSessionId;
       const supportsKnowledge = Boolean(options.chatConfig.value?.capabilities?.supports_knowledge);
@@ -141,7 +142,10 @@ export function createChatSendHandler(options: UseChatSendOptions) {
           thinkingLabel: options.t('chat.state.thinking'),
           sendFailedLabel: options.t('chat.message.sendFailed'),
           defaultModel: options.chatConfig.value?.default_model,
-          onFlush: options.flushStreamUpdate,
+          onFlush: (_index, content, createdTime, modelName) => {
+            const index = findAssistantIndex();
+            if (index >= 0) options.flushStreamUpdate(index, content, createdTime, modelName);
+          },
           onChunkProgress: async (isChunkOrEnd) => {
             const shouldMarkUnread = !streamUnreadMarked && isChunkOrEnd;
             await options.followOrNotifyNewMessage(shouldMarkUnread);
@@ -158,8 +162,12 @@ export function createChatSendHandler(options: UseChatSendOptions) {
           options.pendingAssistantKey.value = '';
           return;
         }
-        if (!streamErrored && assistantIndex >= 0) {
-          options.updateAssistantMessage(assistantIndex, streamText, {
+        if (streamController.signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+        const finalIndex = findAssistantIndex();
+        if (!streamErrored && finalIndex >= 0) {
+          options.updateAssistantMessage(finalIndex, streamText, {
             createdTime: streamTimestamp,
             modelName: options.chatConfig.value?.default_model || undefined,
             pending: false
@@ -174,21 +182,35 @@ export function createChatSendHandler(options: UseChatSendOptions) {
         options.suggestedQuestions.value = Array.isArray(result.suggestions)
           ? result.suggestions.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3)
           : [];
-        options.updateAssistantMessage(assistantIndex, result.response || options.t('chat.state.emptyMessage'), {
-          createdTime: result.timestamp || new Date().toISOString(),
-          modelName: result.model_name || options.chatConfig.value?.default_model,
-          pending: false
-        });
+        const finalIndex = findAssistantIndex();
+        if (finalIndex >= 0) {
+          options.updateAssistantMessage(finalIndex, result.response || options.t('chat.state.emptyMessage'), {
+            createdTime: result.timestamp || new Date().toISOString(),
+            modelName: result.model_name || options.chatConfig.value?.default_model,
+            pending: false
+          });
+        }
         await options.followOrNotifyNewMessage(true);
       }
 
       options.pendingAssistantKey.value = '';
       options.resetHistoryPage();
       void options.refreshHistoryPagination();
-      void options.loadSessions(false, 1, true);
+      void options.loadSessions(false, 1, true).then(() => options.requestSessionTitle(sentSessionId));
       options.setNotice('success', options.t('chat.message.sendSuccess'));
     } catch (error) {
       if (options.isAbortError(error)) {
+        const abortedIndex = options.messages.value.findIndex((item) => item.key === options.pendingAssistantKey.value);
+        if (abortedIndex >= 0) {
+          const aborted = options.messages.value[abortedIndex];
+          const partial = String(aborted.content || '').trim();
+          if (!partial || partial === options.t('chat.state.thinking')) {
+            options.messages.value.splice(abortedIndex, 1);
+          } else {
+            options.messages.value[abortedIndex] = { ...aborted, pending: false };
+          }
+          void options.refreshHistoryPagination();
+        }
         options.pendingAssistantKey.value = '';
         return;
       }

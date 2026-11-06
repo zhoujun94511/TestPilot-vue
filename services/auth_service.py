@@ -183,6 +183,16 @@ def verify_password(stored_hash: str, salt: str, password: str) -> bool:
     return check_password_hash(stored_hash, password + salt)
 
 
+_DUMMY_PASSWORD_HASH: Optional[str] = None
+
+
+def _dummy_password_hash() -> str:
+    global _DUMMY_PASSWORD_HASH
+    if _DUMMY_PASSWORD_HASH is None:
+        _DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_hex(16))
+    return _DUMMY_PASSWORD_HASH
+
+
 def _row_to_user(user: User) -> Dict[str, Any]:
     return user.to_public_dict()
 
@@ -197,14 +207,19 @@ def attempt_login(username: str, password: str) -> LoginAttemptResult:
     name = (username or '').strip()
     if not name:
         return LoginAttemptResult(None, 'invalid')
-    user = User.query.filter_by(username=name).first()
+    # 注册按不区分大小写查重，登录也要一致；精确匹配优先，兼容历史上大小写不同的重名账号
+    user = User.query.filter_by(username=name).first() or find_user_by_username_ci(name)
     if not user:
+        # 账号不存在也算一次哈希，否则响应快慢就能看出用户名是否存在
+        check_password_hash(_dummy_password_hash(), password or '')
         return LoginAttemptResult(None, 'invalid')
+    password_ok = verify_password(user.password_hash, user.salt, password)
+    # 只有密码正确才提示已锁定，否则锁定提示会暴露账号存在
     if is_account_locked(user):
-        return LoginAttemptResult(None, 'locked')
-    if not verify_password(user.password_hash, user.salt, password):
-        locked_now = register_login_failure(user)
-        return LoginAttemptResult(None, 'locked' if locked_now else 'invalid')
+        return LoginAttemptResult(None, 'locked' if password_ok else 'invalid')
+    if not password_ok:
+        register_login_failure(user)
+        return LoginAttemptResult(None, 'invalid')
     # 停用状态只在密码正确后告知，避免借此探测账号
     if not user.is_active:
         clear_login_failures(user)
@@ -227,8 +242,10 @@ def revoke_user_sessions(user_id: int) -> None:
 
 
 def create_session(user_id: int) -> str:
+    """换掉这个账号的全部旧令牌，只留下新的一张。删除和插入在同一事务里提交。"""
     token = secrets.token_urlsafe(32)
     expires = _now_utc() + timedelta(hours=SESSION_TTL_HOURS)
+    UserSession.query.filter_by(user_id=user_id).delete(synchronize_session=False)
     db.session.add(
         UserSession(user_id=user_id, session_token=token, expires_at=expires)
     )
@@ -292,14 +309,60 @@ def stamp_ownership(record) -> None:
     user = current_user()
     if not user:
         return
+    from services.project_service import PROJECT_MODELS
+
+    if isinstance(record, PROJECT_MODELS) and getattr(record, 'project_id', None) is None:
+        from services.project_service import ensure_default_project, resolve_current_project_id
+
+        project_id = resolve_current_project_id()
+        if project_id is None and user.get('dept_id') is not None:
+            project_id = ensure_default_project(int(user['dept_id'])).id
+        if project_id is not None:
+            record.project_id = project_id
     if hasattr(record, 'dept_id') and getattr(record, 'dept_id', None) is None:
-        record.dept_id = user.get('dept_id')
+        record.dept_id = _record_project_dept_id(record)
+        if record.dept_id is None:
+            record.dept_id = user.get('dept_id')
     if hasattr(record, 'owner_user_id') and getattr(record, 'owner_user_id', None) is None:
         record.owner_user_id = user.get('id')
     if hasattr(record, 'user_id'):
         uid = getattr(record, 'user_id', None)
         if uid is None or str(uid).strip() == '':
             record.user_id = str(user.get('id'))
+
+
+def _record_project_dept_id(record) -> Optional[int]:
+    """超管切到别的部门的项目里建数据时，部门要跟项目走，否则该部门的人看不到。"""
+    project_id = getattr(record, 'project_id', None)
+    if project_id is None:
+        return None
+    from models.auth_models import Project
+
+    project = db.session.get(Project, int(project_id))
+    return project.dept_id if project else None
+
+
+_USER_REF_COLUMNS = frozenset({'user_id', 'owner_user_id', 'actor_user_id', 'target_user_id'})
+
+
+def _next_user_id() -> int:
+    """SQLite 不带 AUTOINCREMENT 时会复用最大的已删 id，新用户会继承旧用户的会话和数据归属。
+    取用户表和所有引用用户 id 的列里的最大值再加一。"""
+    from sqlalchemy import Integer, cast, func, inspect, select
+
+    existing = set(inspect(db.engine).get_table_names())
+    highest = 0
+    for table in db.metadata.tables.values():
+        if table.name not in existing:
+            continue
+        for column in table.columns:
+            is_user_pk = table.name == 'users' and column.name == 'id'
+            if not is_user_pk and column.name not in _USER_REF_COLUMNS:
+                continue
+            value = db.session.execute(select(func.max(cast(column, Integer)))).scalar()
+            if value is not None:
+                highest = max(highest, int(value))
+    return highest + 1
 
 
 def create_user(
@@ -318,6 +381,7 @@ def create_user(
     validate_password(password)
     pwd_hash, salt = new_password_fields(password)
     user = User(
+        id=_next_user_id(),
         username=clean_username,
         email=normalize_email(email),
         password_hash=pwd_hash,

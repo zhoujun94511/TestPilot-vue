@@ -1,5 +1,5 @@
 import { publicFileLabel } from '@/lib/public-file-label';
-import { ApiError, del, get, post, put } from './http';
+import { ApiError, del, get, LONG_TASK_TIMEOUT_MS, post, put } from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -119,7 +119,6 @@ export interface KnowledgeUploadPayload {
 }
 
 export interface KnowledgeRebuildPayload {
-  force?: boolean;
   clear_all?: boolean;
 }
 
@@ -274,8 +273,8 @@ export async function searchKnowledge(params: {
     const perPage = Number(params.per_page ?? 10);
     const response = await post<unknown>('/knowledge/search', {
       query: params.query,
-      top_k: params.top_k ?? params.limit ?? 10,
-      score_threshold: params.score_threshold ?? 0.7,
+      top_k: params.top_k ?? params.limit,
+      score_threshold: params.score_threshold,
       page,
       per_page: perPage
     });
@@ -312,6 +311,7 @@ export async function uploadKnowledge(
 ): Promise<KnowledgeUploadResponse> {
   try {
     const response = await post<unknown>('/knowledge/upload', formData, {
+      timeout: LONG_TASK_TIMEOUT_MS,
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (event) => {
         if (!options?.onUploadProgress) return;
@@ -374,7 +374,7 @@ export async function batchDeleteKnowledge(ids: number[]): Promise<KnowledgeDele
 
 export async function rebuildKnowledgeIndex(payload: KnowledgeRebuildPayload = {}): Promise<KnowledgeRebuildResponse> {
   try {
-    const response = await post<unknown>('/knowledge/rebuild', payload);
+    const response = await post<unknown>('/knowledge/rebuild', payload, { timeout: LONG_TASK_TIMEOUT_MS });
     return coreNormalizeResponse<KnowledgeRebuildResponse>(response, {
       fallbackMessage: 'Failed to rebuild knowledge index'
     });

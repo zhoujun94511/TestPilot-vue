@@ -26,7 +26,9 @@ from flask import Blueprint, request, jsonify, current_app
 from utils.utils_core.api_response import api_success, api_error
 from utils.utils_core.api_error_handler import build_internal_error_result
 from services.data_scope import can_access_document_filename, can_access_record
-from services.sql_query_helpers import filter_by_eq, filter_like_contains
+from services.document_service import delete_requirements
+from services.document_meta import meta_path_for_document
+from services.sql_query_helpers import filter_by_eq, path_name_matches
 from services.stats_scope import scoped_requirements_query
 
 # 创建蓝图
@@ -34,6 +36,15 @@ documents_bp = Blueprint('documents', __name__)
 
 # 与 DocumentService.validate_document 的上限一致
 MAX_DOCUMENT_UPLOAD_BYTES = 50 * 1024 * 1024
+MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+
+
+def _file_too_large_response():
+    return jsonify({
+        'success': False,
+        'message': f'文件过大，最大支持 {MAX_DOCUMENT_UPLOAD_BYTES // (1024 * 1024)}MB',
+        'error_code': 'FILE_TOO_LARGE',
+    }), 413
 
 # 初始化服务
 document_service = DocumentService()
@@ -55,6 +66,27 @@ def _document_error(code, message_key, message, status=400, message_params=None,
     )
 
 
+def _document_file(name):
+    """按文件名定位 uploads/documents 下的文档；带目录、指向说明文件或越界的都视为不存在。"""
+    safe_name = Path(str(name or '')).name
+    if not safe_name or safe_name in {'.', '..'} or safe_name != str(name or '').strip():
+        return None
+    documents_dir = (Path(current_app.config['UPLOAD_FOLDER']) / 'documents').resolve()
+    full_path = (documents_dir / safe_name).resolve()
+    if full_path.parent != documents_dir or not full_path.is_file() or is_document_meta_file(full_path):
+        return None
+    return full_path
+
+
+def _requirements_of_document(filename):
+    """文档按部门共用。删文件时清掉本部门各项目里来自这份文件的需求，不只清当前项目。"""
+    from services.data_scope import apply_data_scope
+
+    return apply_data_scope(
+        Requirement.query, Requirement, 'requirements', project=False
+    ).filter(path_name_matches(Requirement.source_file, filename))
+
+
 def allowed_file(filename):
     """检查文件类型是否允许"""
     return '.' in filename and \
@@ -64,6 +96,11 @@ def allowed_file(filename):
 @documents_bp.route('/upload', methods=['POST'])
 def upload_document():
     """上传文档"""
+    # 必须在读取 request.files 之前判断，否则 werkzeug 会先把整个请求体写进临时文件
+    body_limit = MAX_DOCUMENT_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
+    if (request.content_length or 0) > body_limit:
+        return _file_too_large_response()
+    request.max_content_length = body_limit
     try:
         if 'file' not in request.files:
             return jsonify({
@@ -91,11 +128,7 @@ def upload_document():
         upload_size = file.stream.tell()
         file.stream.seek(0)
         if upload_size > MAX_DOCUMENT_UPLOAD_BYTES:
-            return jsonify({
-                'success': False,
-                'message': f'文件过大，最大支持 {MAX_DOCUMENT_UPLOAD_BYTES // (1024 * 1024)}MB',
-                'error_code': 'FILE_TOO_LARGE',
-            }), 413
+            return _file_too_large_response()
 
         # 保存文件
         upload_dir = Path(current_app.config['UPLOAD_FOLDER']) / 'documents'
@@ -164,9 +197,10 @@ def analyze_document():
             # 从文件分析
             upload_root = Path(current_app.config['UPLOAD_FOLDER']).resolve()
             full_path = (upload_root / str(file_path)).resolve()
-            if not full_path.is_relative_to(upload_root / 'documents'):
+            if full_path.parent != (upload_root / 'documents'):
                 raise BadRequest("文件路径无效")
-            if not full_path.is_file():
+            full_path = _document_file(full_path.name)
+            if full_path is None:
                 raise BadRequest(f"文件不存在: {Path(str(file_path)).name}")
             doc_name = full_path.name
             if not can_access_document_filename(doc_name):
@@ -226,8 +260,8 @@ def list_documents():
     """获取已上传文档列表"""
     try:
         # 获取分页参数
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 10, type=int)
+        page = max(1, request.args.get('page', 1, type=int) or 1)
+        per_page = min(max(1, request.args.get('per_page', 10, type=int) or 10), 100)
         search = request.args.get('search', '').strip()
         analysis_type = request.args.get('analysis_type', '').strip().lower()
 
@@ -257,18 +291,10 @@ def list_documents():
                 continue
             stored_analysis_type = resolve_stored_analysis_type(file_path)
             if hasattr(Requirement, 'source_file'):
-                by_file = filter_like_contains(scoped_req, Requirement.source_file, filename)
+                by_file = scoped_req.filter(path_name_matches(Requirement.source_file, filename))
                 requirements_count = by_file.count()
-                functional_count = filter_by_eq(
-                    filter_like_contains(scoped_req, Requirement.source_file, filename),
-                    Requirement.type,
-                    'functional',
-                ).count()
-                business_count = filter_by_eq(
-                    filter_like_contains(scoped_req, Requirement.source_file, filename),
-                    Requirement.type,
-                    'business',
-                ).count()
+                functional_count = filter_by_eq(by_file, Requirement.type, 'functional').count()
+                business_count = filter_by_eq(by_file, Requirement.type, 'business').count()
             else:
                 requirements_count = 0
                 functional_count = 0
@@ -298,6 +324,7 @@ def list_documents():
         # 应用搜索过滤（文件名 + 关联需求标题/内容/编号）
         if search:
             search_lower = search.lower()
+            search_escaped = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
             matched = []
             for doc in documents:
                 filename = doc['filename']
@@ -308,13 +335,13 @@ def list_documents():
                     search_clause = cast(
                         ColumnElement[bool],
                         or_(
-                            Requirement.title.ilike(f'%{search}%'),
-                            Requirement.content.ilike(f'%{search}%'),
-                            Requirement.req_id.ilike(f'%{search}%'),
+                            Requirement.title.ilike(f'%{search_escaped}%', escape='\\'),
+                            Requirement.content.ilike(f'%{search_escaped}%', escape='\\'),
+                            Requirement.req_id.ilike(f'%{search_escaped}%', escape='\\'),
                         ),
                     )
-                    has_req = filter_like_contains(
-                        scoped_req, Requirement.source_file, filename
+                    has_req = scoped_req.filter(
+                        path_name_matches(Requirement.source_file, filename)
                     ).filter(search_clause).limit(1).count()
                     if has_req:
                         matched.append(doc)
@@ -368,20 +395,13 @@ def delete_document(file_path):
     """删除文档"""
     try:
         # 只接受文件名，避免 documents/ 前缀被再拼一次
-        upload_folder = Path(current_app.config['UPLOAD_FOLDER'])
         safe_name = Path(str(file_path or '')).name
-        if not safe_name or safe_name in {'.', '..'}:
-            raise BadRequest("非法的文件路径")
-        full_path = upload_folder / 'documents' / safe_name
-        if not full_path.exists():
+        full_path = _document_file(safe_name)
+        if full_path is None:
             return jsonify({
                 'success': False,
                 'message': '文件不存在'
             }), 404
-
-        # 检查文件路径安全性
-        if not str(full_path.resolve()).startswith(str((upload_folder / 'documents').resolve())):
-            raise BadRequest("非法的文件路径")
 
         if not can_access_document_filename(safe_name):
             return jsonify({
@@ -389,6 +409,8 @@ def delete_document(file_path):
                 'message': '无权删除该文档',
             }), 403
 
+        # 先在事务里删需求，文件删掉后再提交；文件删不掉就回滚，两边保持一致
+        delete_requirements(_requirements_of_document(safe_name))
         try:
             full_path.unlink()
         except OSError as exc:
@@ -401,18 +423,11 @@ def delete_document(file_path):
                 'error_code': 'FILE_DELETE_FAILED',
                 'retryable': True
             }), 500
-
+        db.session.commit()
         try:
-            filter_by_eq(
-                scoped_requirements_query(),
-                Requirement.source_file,
-                safe_name,
-            ).delete(synchronize_session=False)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            current_app.logger.error("文档文件已删除，但需求记录提交失败: %s", safe_name)
-            raise
+            meta_path_for_document(full_path).unlink(missing_ok=True)
+        except OSError as exc:
+            current_app.logger.warning("文档说明文件删除失败: %s", exc)
 
         return jsonify({
             'success': True,
@@ -443,8 +458,8 @@ def list_requirements():
     """获取需求列表"""
     try:
         # 获取查询参数
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
+        page = max(1, request.args.get('page', 1, type=int) or 1)
+        per_page = min(max(1, request.args.get('per_page', 20, type=int) or 20), 1000)
         req_type = request.args.get('type')
         priority = request.args.get('priority')
         status = request.args.get('status')
@@ -458,7 +473,8 @@ def list_requirements():
             priority=priority,
             status=status,
             source_file=source_file,
-            search=search
+            search=search,
+            exact_source=request.args.get('exact_source', '').strip().lower() in ('1', 'true')
         )
         if not result.get('success'):
             return jsonify({
@@ -547,6 +563,27 @@ def update_requirement(req_id):
                 'message': '请求数据不能为空'
             }), 400
 
+        from services.record_conflict import MissingRevision, RecordConflict, ensure_unchanged
+
+        try:
+            ensure_unchanged(requirement, data.get('updated_time'))
+        except MissingRevision:
+            return jsonify({
+                'success': False,
+                'code': 'VALIDATION_FAILED',
+                'message': 'Request failed',
+                'message_key': 'common.conflict.revisionRequired',
+                'error': 'VALIDATION_FAILED',
+            }), 400
+        except RecordConflict:
+            return jsonify({
+                'success': False,
+                'code': 'CONFLICT',
+                'message': 'Request failed',
+                'message_key': 'common.conflict.stale',
+                'error': 'CONFLICT',
+            }), 409
+
         # 更新字段
         if 'title' in data:
             requirement.title = data['title']
@@ -555,7 +592,9 @@ def update_requirement(req_id):
         if 'type' in data:
             requirement.type = data['type']
         if 'priority' in data:
-            requirement.priority = data['priority']
+            from services.case_field_filters import normalize_priority
+
+            requirement.priority = normalize_priority(data['priority'])
         if 'status' in data:
             requirement.status = data['status']
 
@@ -597,7 +636,7 @@ def delete_requirement(req_id):
                 'message_key': 'common.errors.http403',
             }), 403
 
-        db.session.delete(requirement)
+        delete_requirements(Requirement.query.filter(Requirement.id == requirement.id))
         db.session.commit()
 
         return jsonify({
@@ -606,6 +645,7 @@ def delete_requirement(req_id):
         })
 
     except Exception as e:
+        db.session.rollback()
         current_app.logger.error(f"删除需求失败: {e}")
         return jsonify({
             'success': False,
@@ -620,19 +660,12 @@ def delete_requirement(req_id):
 def get_document_preview(document_id):
     """获取文档预览"""
     try:
-        # document_id是文件名
-        upload_folder = Path(current_app.config['UPLOAD_FOLDER'])
-        file_path = upload_folder / 'documents' / document_id
-        
-        if not file_path.exists():
+        file_path = _document_file(document_id)
+        if file_path is None:
             return jsonify({
                 'success': False,
                 'message': '文件不存在'
             }), 404
-        
-        # 检查文件路径安全性
-        if not str(file_path.resolve()).startswith(str(upload_folder.resolve())):
-            raise BadRequest("非法的文件路径")
 
         if not can_access_document_filename(document_id):
             return jsonify({
@@ -672,19 +705,12 @@ def get_document_preview(document_id):
 def reanalyze_document(document_id):
     """重新分析文档"""
     try:
-        # document_id是文件名
-        upload_folder = Path(current_app.config['UPLOAD_FOLDER'])
-        file_path = upload_folder / 'documents' / document_id
-        
-        if not file_path.exists():
+        file_path = _document_file(document_id)
+        if file_path is None:
             return jsonify({
                 'success': False,
                 'message': '文件不存在'
             }), 404
-        
-        # 检查文件路径安全性
-        if not str(file_path.resolve()).startswith(str(upload_folder.resolve())):
-            raise BadRequest("非法的文件路径")
 
         if not can_access_document_filename(document_id):
             return jsonify({

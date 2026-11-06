@@ -130,6 +130,23 @@ def _safe_json_parse(json_str: str, default_value: Any) -> Any:
         return default_value
 
 
+PROVIDER_NAMES = ('OPENAI', 'DEEPSEEK', 'OLLAMA', 'GEMINI', 'QWEN', 'ANTHROPIC')
+
+
+def resolve_active_company(default_company, env_company='DEEPSEEK') -> str:
+    """同一时刻只使用配置中心里的默认提供商。
+
+    ENABLE_* 开关只是默认提供商的镜像，不参与选择。配置中心没有有效值时才看 .env。
+    """
+    default = str(default_company or '').strip().upper()
+    if default in PROVIDER_NAMES:
+        return default
+    env_name = str(env_company or 'DEEPSEEK').strip().upper()
+    if env_name not in PROVIDER_NAMES:
+        return 'DEEPSEEK'
+    return env_name
+
+
 class Config:
     """基础配置类"""
     # Flask配置
@@ -145,6 +162,9 @@ class Config:
     SESSION_PERMANENT = False
     SESSION_USE_SIGNER = True
     SESSION_FILE_DIR = str(BASE_DIR / 'sessions')
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'false').strip().lower() in ('true', '1', 'yes', 'on')
 
     # 认证与 RBAC（默认开启；空库首次启动会创建引导超管，需用该账号登录）
     AUTH_REQUIRE_AUTH = os.getenv('AUTH_REQUIRE_AUTH', 'true').strip().lower() in (
@@ -255,7 +275,7 @@ class Config:
     # 在类初始化时设置MODEL
     def __init__(self):
         self.MODEL = self._get_model()
-    
+
     def load_from_config_center(self):
         """
         从配置中心加载配置并更新当前配置
@@ -265,37 +285,12 @@ class Config:
             # 延迟导入，避免循环依赖
             from services.config_center_service import config_center_service
 
-            # 读取配置中心的AI提供商配置
-            enable_openai = config_center_service.get_config_value('ENABLE_OPENAI')
-            enable_deepseek = config_center_service.get_config_value('ENABLE_DEEPSEEK')
-            enable_ollama = config_center_service.get_config_value('ENABLE_OLLAMA')
-            enable_gemini = config_center_service.get_config_value('ENABLE_GEMINI')
-            enable_qwen = config_center_service.get_config_value('ENABLE_QWEN')
-            enable_anthropic = config_center_service.get_config_value('ENABLE_ANTHROPIC')
             default_company = config_center_service.get_config_value('DEFAULT_COMPANY')
-            
-            # 转换布尔值
-            enable_openai = str(enable_openai).lower() == 'true' if enable_openai else False
-            enable_deepseek = str(enable_deepseek).lower() == 'true' if enable_deepseek else False
-            enable_ollama = str(enable_ollama).lower() == 'true' if enable_ollama else False
-            enable_gemini = str(enable_gemini).lower() == 'true' if enable_gemini else False
-            enable_qwen = str(enable_qwen).lower() == 'true' if enable_qwen else False
-            enable_anthropic = str(enable_anthropic).lower() == 'true' if enable_anthropic else False
-            
-            # 检查是否所有AI都被禁用
-            all_disabled = not (
-                enable_openai or enable_deepseek or enable_ollama or enable_gemini or enable_qwen or enable_anthropic
+            self.DEFAULT_COMPANY = resolve_active_company(
+                default_company,
+                os.getenv('DEFAULT_COMPANY', 'OPENAI'),
             )
-            
-            # 如果配置中心有DEFAULT_COMPANY配置且不是所有AI都禁用，使用配置中心的值
-            if default_company and not all_disabled:
-                self.DEFAULT_COMPANY = default_company.upper() if isinstance(default_company, str) else default_company
-                print(f"[INFO] 从配置中心加载 DEFAULT_COMPANY: {self.DEFAULT_COMPANY}")
-            elif all_disabled:
-                # 所有AI都被禁用，回退到.env的deepseek配置
-                env_company = os.getenv('DEFAULT_COMPANY', 'DEEPSEEK').upper()
-                self.DEFAULT_COMPANY = env_company
-                print(f"[INFO] 配置中心所有AI提供商均未启用，回退到 .env 配置: {env_company}")
+            print(f"[INFO] 从配置中心加载 DEFAULT_COMPANY: {self.DEFAULT_COMPANY}")
             
             # 更新其他配置项
             config_mappings = {
@@ -342,14 +337,27 @@ class Config:
                 'ENABLE_PARALLEL': 'ENABLE_PARALLEL_PROCESSING',
                 'CONTENT_SIMILARITY_THRESHOLD': 'CONTENT_SIMILARITY_THRESHOLD',
                 'ENABLE_CONTENT_DEDUP': 'ENABLE_CONTENT_DEDUP',
+                'CONTENT_DEDUP_BATCH_SIZE': 'CONTENT_DEDUP_BATCH_SIZE',
+                'CONTENT_DEDUP_WEIGHTS': 'CONTENT_DEDUP_WEIGHTS',
             }
             
             # 从配置中心读取并更新配置
             for attr_name, config_key in config_mappings.items():
                 value = config_center_service.get_config_value(config_key)
                 if value is not None and value != '':
+                    if attr_name.endswith('_API_KEY'):
+                        from utils.utils_core.api_error_handler import is_placeholder_secret
+                        if is_placeholder_secret(value):
+                            continue
                     # 对于数值类型的配置，进行类型转换
-                    if attr_name in ['MAX_TOKENS', 'TR_MAX_TOKENS', 'TR_OPENAI_MAX_TOKENS', 'TR_DEEPSEEK_MAX_TOKENS', 'TR_GEMINI_MAX_TOKENS', 'TR_QWEN_MAX_TOKENS', 'TR_ANTHROPIC_MAX_TOKENS', 'QWEN_TIMEOUT', 'TOKEN_MAX_PER_SESSION', 'TOKEN_MAX_CALLS_PER_SESSION', 'MAX_CASE_NUM', 'CHUNK_SIZE', 'MAX_WORKERS', 'MAX_MEMORY_MB', 'RAG_TOP_K']:
+                    if attr_name == 'CONTENT_DEDUP_WEIGHTS':
+                        # 旧版本保存时会把 JSON 再编码一层，最多解两次
+                        for _ in range(2):
+                            if isinstance(value, str):
+                                value = _safe_json_parse(value, None)
+                        if not isinstance(value, dict):
+                            continue
+                    elif attr_name in ['MAX_TOKENS', 'TR_MAX_TOKENS', 'TR_OPENAI_MAX_TOKENS', 'TR_DEEPSEEK_MAX_TOKENS', 'TR_GEMINI_MAX_TOKENS', 'TR_QWEN_MAX_TOKENS', 'TR_ANTHROPIC_MAX_TOKENS', 'QWEN_TIMEOUT', 'TOKEN_MAX_PER_SESSION', 'TOKEN_MAX_CALLS_PER_SESSION', 'MAX_CASE_NUM', 'CHUNK_SIZE', 'MAX_WORKERS', 'MAX_MEMORY_MB', 'RAG_TOP_K', 'CONTENT_DEDUP_BATCH_SIZE']:
                         try:
                             value = int(value)
                         except (ValueError, TypeError):
@@ -386,6 +394,9 @@ class Config:
                             self._persist_model_name(config_center_service, 'ANTHROPIC_MODEL', resolved, 'Anthropic模型名称')
                         value = resolved
                     setattr(self, attr_name, value)
+                else:
+                    # 配置项被删除或清空后回到 .env / 内置默认值，而不是沿用上次加载的值
+                    self.__dict__.pop(attr_name, None)
             
             # 重新设置MODEL
             self.MODEL = self._get_model()
@@ -620,7 +631,7 @@ class Config:
     # 是否启用流式处理
     # 说明：控制是否使用流式处理，减少内存占用但可能影响响应速度
     # 默认值：false，可通过环境变量 ENABLE_STREAMING 修改
-    ENABLE_STREAMING = os.getenv('ENABLE_STREAMING', 'false').lower() == 'true'
+    ENABLE_STREAMING = os.getenv('ENABLE_STREAMING', 'true').lower() == 'true'
 
     # 实验功能默认可用；仅在显式设为 false/0/no/off 时关闭
     ENABLE_EXPERIMENTAL_ACTIONS = os.getenv('ENABLE_EXPERIMENTAL_ACTIONS', 'true').strip().lower() in ('true', '1', 'yes', 'on')
@@ -1019,7 +1030,7 @@ config = {
 }
 
 # 导出当前配置 - 关键修复：创建实例而不是类
-settings = config.get(os.getenv('FLASK_ENV', 'default'), DevelopmentConfig)()
+settings = config.get(os.getenv('FLASK_ENV', 'production'), ProductionConfig)()
 
 
 # 创建Settings类，用于optimization_config.py中的getattr调用

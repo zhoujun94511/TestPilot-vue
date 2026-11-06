@@ -1,4 +1,4 @@
-﻿#!/usr/bin/python
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 import os
 import atexit
@@ -26,6 +26,12 @@ FRONTEND_PUBLIC = FRONTEND_ROOT / 'public'
 FRONTEND_DIST = FRONTEND_ROOT / 'dist'
 # Vite dev server；开发态 UI 应访问此端口才有热更新
 FRONTEND_DEV_PORT = 5173
+# 页面只从本站取脚本、图片和接口；模型回复里即使混进外链图片也不会被浏览器请求
+SPA_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; "
+    "object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+)
 
 # 添加项目根目录到 Python 路径（与 run.py 一致：仓库根即 TestPilot-vue）
 project_root = Path(__file__).resolve().parent
@@ -86,6 +92,7 @@ def render_vue_index(base_path: str = '/') -> Response:
     html = index_file.read_text(encoding='utf-8')
     html = html.replace('__TESTPILOT_BASE_PATH__', base_path)
     response = Response(html, mimetype='text/html')
+    response.headers['Content-Security-Policy'] = SPA_CONTENT_SECURITY_POLICY
     # 避免浏览器长期缓存 SPA 入口，导致仍加载旧 hash 的 JS/CSS
     response.headers['Cache-Control'] = 'no-store, max-age=0, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
@@ -113,6 +120,25 @@ def serve_frontend_public_asset(*parts: str):
     return '', 404
 
 
+def _local_secret_key(key_file: Path) -> str:
+    """读取或生成本机持久化的随机会话密钥，重启后已有会话仍然有效。"""
+    import secrets
+
+    try:
+        existing = key_file.read_text(encoding='utf-8').strip()
+        if len(existing) >= 32:
+            return existing
+    except OSError:
+        pass
+    key = secrets.token_urlsafe(48)
+    try:
+        key_file.write_text(key, encoding='utf-8')
+        os.chmod(key_file, 0o600)
+    except OSError as exc:
+        get_logger(__name__).warning('会话密钥无法落盘，重启后需要重新登录: %s', exc)
+    return key
+
+
 def create_app():
     """创建Flask应用实例"""
     # 创建共享的 logger，避免在内部函数中重复定义
@@ -125,10 +151,22 @@ def create_app():
     flask_app.config.from_object(settings)
     settings.init_app(flask_app)
 
-    if not flask_app.debug and flask_app.config.get('SECRET_KEY') == 'testpilot-secret-key-2024':
-        logger.warning(
-            '当前使用默认 SECRET_KEY，存在会话安全风险；生产部署请设置环境变量 SECRET_KEY'
-        )
+    from utils.utils_core.api_error_handler import is_placeholder_secret
+
+    secret_key = str(flask_app.config.get('SECRET_KEY') or '')
+    if (
+        len(secret_key) < 16
+        or secret_key == 'testpilot-secret-key-2024'
+        or is_placeholder_secret(secret_key)
+    ):
+        flask_app.config['SECRET_KEY'] = _local_secret_key(project_root / '.secret_key')
+        logger.warning('SECRET_KEY 为默认值或占位值，已改用本机随机密钥；多实例部署请在 .env 设置同一个随机 SECRET_KEY')
+
+    if not flask_app.config.get('AUTH_REQUIRE_AUTH') and not flask_app.config.get('DEBUG'):
+        logger.warning('AUTH_REQUIRE_AUTH=false：所有接口无需登录且不做部门隔离，仅适合本机单人使用')
+
+    if not flask_app.config.get('SESSION_COOKIE_SECURE'):
+        logger.warning('SESSION_COOKIE_SECURE=false：会话 Cookie 会随 HTTP 发送。本机 HTTP 保持关闭；HTTPS 部署请在 .env 设为 true')
 
     # 初始化扩展
     db.init_app(flask_app)
@@ -138,6 +176,7 @@ def create_app():
 
     # 初始化数据库
     init_database(flask_app)
+    _warn_pending_password_changes(flask_app)
 
     # 注入功能开关到所有模板
     @flask_app.context_processor
@@ -213,7 +252,7 @@ def create_app():
 
             # 如果缓存的状态与当前配置不匹配，重新检查
             if not status_data or status_data.get('company') != current_company:
-                if current_company != "ollama":
+                if str(current_company or '').upper() != "OLLAMA":
                     try:
                         from utils.utils_core.remote_model_checker import model_checker
                         status_data = model_checker.get_model_status_summary(current_company)
@@ -224,7 +263,7 @@ def create_app():
                             'company': current_company,
                             'service_name': current_company.title(),
                             'is_available': False,
-                            'message': f'模型状态检查失败: {str(check_error)}',
+                            'message': '模型状态检查失败',
                             'details': {'error_type': 'check_failed'},
                             'timestamp': None
                         }
@@ -254,7 +293,7 @@ def create_app():
                 'message_key': 'model.message.statusFailed',
                 'message': 'Failed to load model status',
                 'message_params': {},
-                'error': f'获取模型状态失败: {str(status_error)}'
+                'error': 'internal_error'
             }), 500
 
     # 注册蓝图
@@ -269,6 +308,21 @@ def create_app():
     @flask_app.errorhandler(Exception)
     def handle_exception(exc):
         """全局异常处理器"""
+        from werkzeug.exceptions import HTTPException
+
+        # 405、413 等 HTTP 错误没有单独的处理器时也会落到这里，要保留原状态码
+        if isinstance(exc, HTTPException):
+            status = exc.code or 500
+            if not request.path.startswith('/api/'):
+                return exc
+            return jsonify({
+                'success': False,
+                'error': exc.name,
+                'code': status,
+                'error_code': 'FILE_TOO_LARGE' if status == 413 else f'HTTP_{status}',
+                'message': exc.description or exc.name,
+            }), status
+
         error_type = type(exc).__name__
         error_msg = str(exc)
 
@@ -290,7 +344,6 @@ def create_app():
             'message': 'Internal server error, please try again later',
             'code': 'INTERNAL_SERVER_ERROR',
             'message_key': 'errors.internalServerError',
-            'error_type': error_type
         }), 500
 
     # 添加请求前后处理（捕获可能的访问冲突）
@@ -352,6 +405,8 @@ def register_blueprints(flask_app: Flask) -> None:
 
     # 注册API蓝图
     flask_app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    from blueprints.projects import projects_bp
+    flask_app.register_blueprint(projects_bp, url_prefix='/api')
     flask_app.register_blueprint(cases_bp, url_prefix='/api/cases')
     flask_app.register_blueprint(documents_bp, url_prefix='/api/documents')
     flask_app.register_blueprint(knowledge_bp, url_prefix='/api/knowledge')
@@ -365,6 +420,20 @@ def register_blueprints(flask_app: Flask) -> None:
 
 def register_error_handlers(flask_app: Flask) -> None:
     """注册错误处理器"""
+    from utils.utils_performance_monitoring.token_session import TokenSessionLimitExceeded
+
+    @flask_app.errorhandler(TokenSessionLimitExceeded)
+    def token_session_limit(error: TokenSessionLimitExceeded) -> tuple:
+        payload = error.to_normalize_dict()
+        return jsonify({
+            'success': False,
+            'message': payload['message'],
+            'error': payload['error_code'],
+            'error_code': payload['error_code'],
+            'message_key': payload['message_key'],
+            'message_params': payload['message_params'],
+            'retryable': False,
+        }), 429
 
     @flask_app.errorhandler(400)
     def bad_request(_) -> tuple:
@@ -391,6 +460,39 @@ def register_error_handlers(flask_app: Flask) -> None:
         }), 500
 
 
+def _warn_pending_password_changes(flask_app: Flask) -> None:
+    """启动时只报告还有多少账号必须先改密，不写出密码。"""
+    try:
+        with flask_app.app_context():
+            from models.auth_models import User
+
+            pending = User.query.filter_by(must_change_password=True, is_active=True).count()
+        if pending:
+            get_logger(__name__).warning(
+                '%s 个账号仍在使用默认密码，登录后必须先修改才能使用业务接口',
+                pending,
+            )
+    except Exception as exc:
+        get_logger(__name__).warning('默认密码检查跳过: %s', exc)
+
+
+def warm_model_status(flask_app: Flask, company: str) -> None:
+    """后台检查远程模型。线程里要先进入应用上下文，才能读到配置中心里的密钥。"""
+    try:
+        with flask_app.app_context():
+            try:
+                from utils.utils_core.remote_model_checker import model_checker
+
+                status = model_checker.get_model_status_summary(company)
+                if not status.get('is_available'):
+                    get_logger(__name__).warning("模型可用性检查失败: %s", status.get('message'))
+                flask_app.config['MODEL_STATUS'] = status
+            finally:
+                db.session.remove()
+    except Exception as check_error:
+        get_logger(__name__).error("模型可用性检查失败: %s", check_error)
+
+
 def init_app_context(flask_app: Flask) -> None:
     """初始化应用上下文"""
     try:
@@ -411,29 +513,14 @@ def init_app_context(flask_app: Flask) -> None:
 
         if not skip_llm_init:
             # 检查远程模型可用性（非Ollama本地模型）
-            flask_app.model_status = None
-            if settings.DEFAULT_COMPANY != "OLLAMA":
-                try:
-                    from utils.utils_core.remote_model_checker import model_checker
-                    flask_app.model_status = model_checker.get_model_status_summary(settings.DEFAULT_COMPANY)
-
-                    if not flask_app.model_status['is_available']:
-                        get_logger(__name__).warning(f"模型可用性检查失败: {flask_app.model_status['message']}")
-                        # 将模型状态存储到应用上下文中，供前端使用
-                        flask_app.config['MODEL_STATUS'] = flask_app.model_status
-                    else:
-                        flask_app.config['MODEL_STATUS'] = flask_app.model_status
-                except Exception as e:
-                    get_logger(__name__).error(f"模型可用性检查失败: {e}")
-                    flask_app.model_status = {
-                        "company": settings.DEFAULT_COMPANY,
-                        "service_name": settings.DEFAULT_COMPANY.title(),
-                        "is_available": False,
-                        "message": f"模型可用性检查失败: {str(e)}",
-                        "details": {"error_type": "check_failed"},
-                        "timestamp": None
-                    }
-                    flask_app.config['MODEL_STATUS'] = flask_app.model_status
+            if str(settings.DEFAULT_COMPANY or '').upper() != "OLLAMA":
+                # 远程探测最长要等十秒，放到后台，避免拖慢启动
+                threading.Thread(
+                    target=warm_model_status,
+                    args=(flask_app, settings.DEFAULT_COMPANY),
+                    name='model-status-warmup',
+                    daemon=True,
+                ).start()
 
             # 初始化LLM
             try:
@@ -445,6 +532,15 @@ def init_app_context(flask_app: Flask) -> None:
                 flask_app.llm_requirement_analysis = get_llm(settings.DEFAULT_COMPANY,
                                                              use_case='requirement_analysis')  # 需求分析
                 get_logger(__name__).info("LLM初始化成功！")
+            except ValueError as key_error:
+                get_logger(__name__).warning(
+                    "当前提供商 %s 未就绪，已跳过模型初始化: %s",
+                    settings.DEFAULT_COMPANY,
+                    key_error,
+                )
+                flask_app.llm = None
+                flask_app.llm_case_generation = None
+                flask_app.llm_requirement_analysis = None
             except Exception as e:
                 get_logger(__name__).error(f"LLM初始化失败: {e}")
                 flask_app.llm = None
@@ -455,7 +551,6 @@ def init_app_context(flask_app: Flask) -> None:
             flask_app.llm = None
             flask_app.llm_case_generation = None
             flask_app.llm_requirement_analysis = None
-            flask_app.model_status = None
             get_logger(__name__).debug("跳过 LLM 初始化（SKIP_LLM_INIT=true）")
 
         # 初始化向量数据库（ENABLE_VECTOR_STORE=false 时不加载 sqlite-vec/FTS5，可缩减打包体积）
@@ -612,9 +707,11 @@ if __name__ == '__main__':
         args=(host_ip, server_port)
     )
 
+    # 绑定局域网 IP 时交互式调试台等于把远程执行代码的入口暴露出去
     app.run(
         host=host_ip,
         port=server_port,
         debug=True,
-        use_reloader=False
+        use_reloader=False,
+        use_debugger=False,
     )

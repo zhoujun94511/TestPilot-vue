@@ -39,6 +39,7 @@ class RagFileRecord(db.Model):
     category = Column(String(50), default='other', comment='文件分类: requirements, test_cases, business_rules, best_practices, other')
     dept_id = Column(Integer, nullable=True, comment='所属部门')
     owner_user_id = Column(Integer, nullable=True, comment='创建者用户 ID')
+    project_id = Column(Integer, nullable=True, index=True, comment='所属项目')
     vector_meta_pending = Column(
         Integer,
         default=0,
@@ -83,7 +84,7 @@ class TestCase(db.Model):
     precondition = Column(Text, nullable=True, comment='前置条件')
     steps = Column(Text, nullable=False, comment='测试步骤(JSON格式)')
     expected_result = Column(Text, nullable=True, comment='预期结果')
-    priority = Column(String(20), default='medium', comment='优先级: high, medium, low')
+    priority = Column(String(20), default='P2', comment='优先级: P0-P4')
     category = Column(String(100), nullable=True, comment='用例分类')
     tags = Column(String(500), nullable=True, comment='标签(逗号分隔)')
     status = Column(String(20), default='draft', comment='状态: draft, active, deprecated')
@@ -96,6 +97,7 @@ class TestCase(db.Model):
     test_method = Column(String(100), nullable=True, comment='测试方法')
     dept_id = Column(Integer, nullable=True, comment='所属部门')
     owner_user_id = Column(Integer, nullable=True, comment='创建者用户 ID')
+    project_id = Column(Integer, nullable=True, index=True, comment='所属项目')
 
     def to_dict(self):
         """转换为字典格式"""
@@ -194,7 +196,7 @@ class Requirement(db.Model):
     title = Column(String(500), nullable=False, comment='需求标题')
     content = Column(Text, nullable=False, comment='需求内容')
     type = Column(String(50), nullable=True, comment='需求类型')
-    priority = Column(String(20), default='medium', comment='优先级')
+    priority = Column(String(20), default='P2', comment='优先级: P0-P4')
     status = Column(String(20), default='active', comment='状态')
     source_file = Column(String(500), nullable=True, comment='来源文件')
     created_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
@@ -202,6 +204,7 @@ class Requirement(db.Model):
                           onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
     dept_id = Column(Integer, nullable=True, comment='所属部门')
     owner_user_id = Column(Integer, nullable=True, comment='创建者用户 ID')
+    project_id = Column(Integer, nullable=True, index=True, comment='所属项目')
 
     def __repr__(self):
         return f'<Requirement {self.req_id}: {self.title}>'
@@ -235,6 +238,7 @@ class ChatSession(db.Model):
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(100), nullable=False, unique=True, comment='会话ID')
     title = Column(String(200), nullable=False, comment='会话标题')
+    title_source = Column(String(20), nullable=True, comment='标题来源: 空=未定, auto=自动生成, manual=用户命名')
     user_id = Column(String(100), nullable=True, comment='用户ID')
     created_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
     updated_time = Column(DateTime, default=lambda: datetime.now(timezone.utc),
@@ -429,8 +433,8 @@ def init_database(app):
         # 导入配置中心模型以确保表被创建
         # 必须显式导入，否则 SQLAlchemy 不会识别这些模型
         try:
-            from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule
-            from models.auth_models import AuthAuditLog, BootstrapMarker, Department, User, UserSession  # noqa: F401
+            from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule  # noqa: F401
+            from models.auth_models import AuthAuditLog, BootstrapMarker, Department, Project, User, UserSession  # noqa: F401
         except ImportError as import_error:
             # 如果导入失败，记录警告但不阻止启动
             import logging
@@ -446,8 +450,9 @@ def init_database(app):
             import logging
             logging.getLogger(__name__).warning('认证迁移/种子失败: %s', migration_error)
         try:
-            from services.first_run_bootstrap import run_first_run_bootstrap
+            from services.first_run_bootstrap import ensure_ai_provider_rows, run_first_run_bootstrap
             app.config['FIRST_RUN_STATUS'] = run_first_run_bootstrap()
+            ensure_ai_provider_rows()
         except Exception as seed_error:
             import logging
             logging.getLogger(__name__).warning('首次初始化未完成: %s', seed_error)

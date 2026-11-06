@@ -76,7 +76,6 @@ Dashboard / Cases / Chat / Config / Knowledge 各切换浅↔深；触发 PageNo
 
 - `GET /api/experimental-actions/execution/<id>`（执行详情；确认/取消已由聊天 API 封装，页面在 `/experimental-tools`）
 - `POST /api/stats/record`（后端内部埋点）
-- `POST /api/chat/save-ai-message`（Legacy 落库，流式/消息链路已覆盖）
 
 **2026-11 前后端对齐（已落地）**：用例 `PUT`+编辑抽屉+`getCase`；需求 `GET/PUT`+历史页/分析页编辑；知识库 `PUT` 元数据+上传读 `config`；Chat 快捷回复接 `quick-reply/stats`；配置中心展示 `audit-logs`。
 
@@ -108,6 +107,6 @@ Dashboard / Cases / Chat / Config / Knowledge 各切换浅↔深；触发 PageNo
 
 ## CI 与集成测试
 
-- GitHub Actions：`.github/workflows/frontend-quality.yml`（`quality:api-contract`、`pytest tests/test_api_get_snapshots.py`、`quality:release:full`）。
+- 发版前本地检查：`npm run quality:api-contract`、`pytest tests/test_api_get_snapshots.py`、`npm run quality:release:full`。`.github/workflows/frontend-quality.yml` 只覆盖 GitHub，GitLab 不使用这份工作流。
 - GET 字段快照：`tests/fixtures/api_get_snapshots.json`；更新：`UPDATE_API_GET_SNAPSHOTS=1 pytest tests/test_api_get_snapshots.py`。
 - 发版手工联调：`RELEASE-CHECKLIST.md`。

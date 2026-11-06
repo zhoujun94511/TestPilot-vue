@@ -14,7 +14,6 @@ export default {
     cases: 'Test Cases'
   },
   shell: {
-    pageKicker: 'Enterprise AI Testing',
     mainNav: 'Main navigation',
     breadcrumb: 'Breadcrumb',
     collapseSidebar: 'Collapse sidebar',
@@ -80,7 +79,8 @@ export default {
   },
   toolbar: {
     selectedCount: '{count} selected',
-    clearSelection: 'Clear selection'
+    clearSelection: 'Clear selection',
+    selectAllMatching: 'Select all {count}'
   },
   pagination: {
     range: 'Items {start}–{end} of {total}'
@@ -115,6 +115,40 @@ export default {
       'Session token budget exhausted ({used}/{limit}). Raise the limit in Config Center or restart the backend, then retry.',
     exceededCalls:
       'Session LLM call limit reached ({used}/{limit}). Raise the limit in Config Center or restart the backend, then retry.'
+  },
+  project: {
+    label: 'Current project',
+    defaultName: 'Default project',
+    create: 'New project',
+    namePlaceholder: 'Project name',
+    invalidName: 'Enter a valid project name',
+    invalidDept: 'Department is invalid',
+    duplicateName: 'This department already has a project with that name',
+    required: 'Select a project',
+    notFound: 'That project does not exist or this account cannot open it',
+    defaultLocked: 'The default project cannot be renamed or deleted',
+    notEmpty: 'This project still has documents, requirements or test cases. Move or delete them first.',
+    manage: 'Manage projects',
+    manageTitle: 'Projects',
+    manageHint:
+      'Documents, requirements and test cases belong to a project. The knowledge base and AI chat are shared across the department.',
+    department: 'Department',
+    departmentValue: 'Department: {name}',
+    usage: '{documents} docs · {requirements} requirements · {cases} cases',
+    current: 'Current',
+    rename: 'Rename',
+    save: 'Save',
+    delete: 'Delete',
+    deleteConfirm: 'Delete project "{name}"? This cannot be undone.',
+    deleted: 'Project deleted',
+    renamed: 'Project renamed',
+    created: 'Project created and opened',
+    empty: 'No projects yet',
+    loadFailed: 'Could not load projects'
+  },
+  conflict: {
+    stale: 'Someone else just changed this record. Reopen it before saving.',
+    revisionRequired: 'Reopen this record before saving.'
   },
   errors: {
     requestFailed: 'Request failed. Please try again.',

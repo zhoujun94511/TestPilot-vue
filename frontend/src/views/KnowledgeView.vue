@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section :class="pageRootMarkedClass(pageMarkerKnowledge)">
     <PageNoticeBanner :notice="pageBanner" @close="clearPageBanner" />
 
@@ -8,15 +8,15 @@
           :class="cn(knowledgeFilesPanelClass, 'min-h-0 flex-1')"
           :padded="false"
           :title="t('knowledge.tabs.files')"
-          :subtitle="t('knowledge.toolbar.filesLead')"
         >
           <template #actions>
             <div :class="pageToolbarStripClass">
               <TpButton variant="ghost" size="sm" :loading="refreshing" @click="handleRefresh">
                 {{ t('common.actions.refresh') }}
               </TpButton>
-              <ToolbarOverflowMenu>
+              <ToolbarOverflowMenu v-if="canRebuild || previewVisible">
                 <DropdownMenuItem
+                  v-if="canRebuild"
                   :disabled="vectorDisabled || rebuilding"
                   @select="openConfirm('rebuild')"
                 >
@@ -30,15 +30,21 @@
           </template>
 
           <div class="px-[var(--tp-space-4)]">
-            <ToolbarBulkBar :count="selectedIds.length" @clear="clearKnowledgeSelection">
+            <ToolbarBulkBar
+              :count="selectedIds.length"
+              :select-all-count="knowledgeSelectAllCount"
+              @clear="clearKnowledgeSelection"
+              @select-all="selectAllMatchingKnowledge"
+            >
               <TpButton
                 variant="danger"
                 size="sm"
                 :loading="deleteLoading"
-                :disabled="vectorDisabled || deleteLoading || !selectedIds.length"
+                :disabled="vectorDisabled || !selectedIds.length"
+                :aria-label="deleteLoading ? t('knowledge.actions.deleting') : undefined"
                 @click="openConfirm('delete')"
               >
-                {{ deleteLoading ? t('knowledge.actions.deleting') : t('knowledge.actions.batchDelete') }}
+                {{ t('knowledge.actions.batchDelete') }}
               </TpButton>
             </ToolbarBulkBar>
           </div>
@@ -57,7 +63,7 @@
             v-if="!vectorDisabled"
             :class="cn(pageSectionDivideClass, knowledgeFilterStickyClass, 'z-30 bg-[var(--tp-bg-surface)] px-[var(--tp-space-4)]')"
           >
-            <TableToolbar :title="t('knowledge.filters.title')" :subtitle="t('knowledge.filters.subtitle')">
+            <TableToolbar :title="t('knowledge.filters.title')">
               <template #filters>
                 <TableFilterForm @submit="handleSearch">
                   <TableFilterInput
@@ -112,22 +118,9 @@
                 <template #toolbar>
                   <TableToolbar :title="t('knowledge.table.title')" :pagination="pagination">
                     <template #actions>
-                      <div
-                        v-if="selectedIds.length"
-                        :class="[captionTextClass, 'text-[var(--tp-color-text-500)]']"
-                      >
-                        {{ selectedIds.length }} / {{ files.length }}
+                      <div :class="[captionTextClass, 'text-[var(--tp-color-text-500)]']">
+                        {{ t('common.toolbar.selectedCount', { count: selectedIds.length }) }} / {{ pagination.total }}
                       </div>
-                      <label :class="inlineToggleLabelClass">
-                        <input
-                          :class="tableCheckboxClass"
-                          type="checkbox"
-                          :checked="allVisibleSelected"
-                          :disabled="!files.length"
-                          @change="toggleSelectAll(($event.target as HTMLInputElement).checked)"
-                        />
-                        <span>{{ t('knowledge.table.selectAll') }}</span>
-                      </label>
                     </template>
                   </TableToolbar>
                 </template>
@@ -274,16 +267,12 @@ import {
 import {
   captionTextClass,
   dataSubtitleDenseClass,
-  dataTitleClass,
-  inlineToggleLabelClass
+  dataTitleClass
 } from '@/lib/page-typography';
 import { cn } from '@/lib/utils';
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
-import {
-  tableCellAlignEndClass,
-  tableCheckboxClass
-} from '@/lib/table-ui';
-import { useAppStore } from '@/stores';
+import { tableCellAlignEndClass } from '@/lib/table-ui';
+import { useAppStore, useAuthStore } from '@/stores';
 import {
   batchDeleteKnowledge,
   getKnowledgeFileDetail,
@@ -306,6 +295,8 @@ interface SelectOption {
 const { t, locale } = useI18n();
 const route = useRoute();
 const appStore = useAppStore();
+const authStore = useAuthStore();
+const canRebuild = computed(() => authStore.canManageKnowledgeIndex());
 const { vectorDisabled } = useKnowledgeVectorGate();
 const {
   banner: pageBanner,
@@ -386,7 +377,6 @@ const tableColumns = computed<BaseTableColumn[]>(() => [
 ]);
 
 const hasSelection = computed(() => selectedIds.value.length > 0);
-const allVisibleSelected = computed(() => files.value.length > 0 && files.value.every((file) => selectedIds.value.includes(file.id)));
 
 const statsCards = computed(() => [
   { key: 'total-files', label: t('knowledge.stats.totalFiles'), value: stats.value?.total_files ?? 0, hint: statsError.value || undefined, icon: 'KB' },
@@ -473,8 +463,28 @@ function clearKnowledgeSelection() {
   selectedIds.value = [];
 }
 
-function toggleSelectAll(checked: boolean) {
-  selectedIds.value = checked ? files.value.map((item) => item.id) : [];
+const knowledgeSelectAllCount = computed(() => {
+  const total = Number(pagination.value.total || 0);
+  const pageSelected = files.value.length > 0 && files.value.every((file) => selectedIds.value.includes(file.id));
+  return pageSelected && total > selectedIds.value.length ? total : 0;
+});
+
+async function selectAllMatchingKnowledge() {
+  const ids: number[] = [];
+  let page = 1;
+  while (page <= 100) {
+    const response = await listKnowledge({
+      page,
+      per_page: 200,
+      search: filters.keyword || undefined,
+      category: filters.category || undefined,
+      status: filters.status || undefined
+    });
+    ids.push(...response.files.map((file) => file.id).filter((id) => Number.isFinite(id)));
+    if (!response.pagination.has_next || page >= (response.pagination.pages || 1)) break;
+    page += 1;
+  }
+  selectedIds.value = ids;
 }
 
 function openConfirm(kind: 'delete' | 'rebuild') {
@@ -544,17 +554,19 @@ async function loadFiles(page = filters.page, mode: ListFetchMode = 'page') {
   );
   if (!result) return;
   filters.page = result.pagination.page || page;
-  selectedIds.value = selectedIds.value.filter((id) => result.rows.some((file) => file.id === id));
+  if (mode === 'filter') selectedIds.value = [];
   if (previewFile.value && !result.rows.some((file) => file.id === previewFile.value?.id)) {
     clearPreview();
   }
 }
 
 async function handleSearch() {
-  searchLoading.value = true;
   filters.page = 1;
+  selectedIds.value = [];
+  const hasRows = files.value.length > 0;
+  if (!hasRows) searchLoading.value = true;
   try {
-    await loadFiles(1, 'filter');
+    await loadFiles(1, hasRows ? 'page' : 'filter');
   } finally {
     searchLoading.value = false;
   }
@@ -657,7 +669,7 @@ function openDeleteOne(id: number) {
 async function handleRebuild() {
   rebuilding.value = true;
   try {
-    await rebuildKnowledgeIndex({ force: false, clear_all: false });
+    await rebuildKnowledgeIndex({ clear_all: false });
     showNotice('success', t('knowledge.message.rebuildSuccess'));
     await Promise.all([loadFiles(filters.page, 'refresh'), loadStats()]);
   } catch (error) {

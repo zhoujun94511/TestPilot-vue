@@ -7,17 +7,14 @@
     :class="classes"
     :disabled="disabled || loading"
     :aria-disabled="disabled || loading || undefined"
+    :aria-busy="loading || undefined"
     @click="emit('click', $event)"
   >
-    <span
-      v-if="loading"
-      class="inline-block h-[0.85rem] w-[0.85rem] animate-spin rounded-full border-2 border-current border-r-transparent"
-      aria-hidden="true"
-    />
-    <span v-if="$slots.icon" class="inline-flex shrink-0 items-center justify-center">
+    <TpSpinner v-if="loading" :size="size === 'sm' ? 'sm' : 'md'" />
+    <span v-if="$slots.icon" class="inline-flex shrink-0 items-center justify-center leading-none">
       <slot name="icon" />
     </span>
-    <span class="inline-flex items-center">
+    <span class="inline-flex items-center leading-none">
       <slot />
     </span>
   </component>
@@ -26,13 +23,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { cva, type VariantProps } from 'class-variance-authority';
+import TpSpinner from '@/components/ui/base/TpSpinner.vue';
 import { cn } from '@/lib/utils';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'ai' | 'success' | 'danger' | 'warning';
 type Size = 'sm' | 'md';
 
 const tpButtonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border-0 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md border-0 text-sm font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {
       variant: {

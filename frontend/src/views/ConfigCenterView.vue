@@ -5,12 +5,6 @@
       @close="clearPageBanner"
     />
 
-    <ActionBar v-if="showConfigBackendHint">
-      <template #lead>
-        <p :class="pageToolbarSubtitleClass">{{ t('config.toolbar.backendHint') }}</p>
-      </template>
-    </ActionBar>
-
     <input
       ref="importInput"
       class="hidden"
@@ -27,7 +21,6 @@
               v-if="categoriesLoading"
               variant="loading"
               :title="t('config.state.loadingCategories')"
-              :message="t('config.category.loading')"
             />
             <BaseState
               v-else-if="categoriesError"
@@ -74,17 +67,28 @@
                 {{ t('common.actions.refresh') }}
               </TpButton>
               <template v-if="!isAuditCategorySelected">
-                <TpButton variant="ghost" size="sm" :loading="exporting" @click="handleExport">
-                  {{ exporting ? t('config.actions.exporting') : t('config.actions.export') }}
+                <TpButton
+                  variant="ghost"
+                  size="sm"
+                  :loading="exporting"
+                  :aria-label="exporting ? t('config.actions.exporting') : undefined"
+                  @click="handleExport"
+                >
+                  {{ t('config.actions.export') }}
                 </TpButton>
-                <TpButton variant="ghost" size="sm" :loading="importing" @click="handleImportClick">
-                  {{ importing ? t('config.actions.importing') : t('config.actions.import') }}
+                <TpButton
+                  variant="ghost"
+                  size="sm"
+                  :loading="importing"
+                  :aria-label="importing ? t('config.actions.importing') : undefined"
+                  @click="handleImportClick"
+                >
+                  {{ t('config.actions.import') }}
                 </TpButton>
               </template>
             </div>
           </template>
           <template v-if="isAuditCategorySelected">
-            <p :class="[configMetaClass, 'mb-4']">{{ t('config.audit.subtitle') }}</p>
             <BaseState v-if="auditLogsLoading" variant="loading" :title="t('config.audit.loading')" />
             <BaseState
               v-else-if="auditLogsError"
@@ -189,7 +193,9 @@
                         >
                           {{ t('config.actions.clearValue') }}
                         </TpButton>
-                        <TpTag variant="primary">{{ t('config.section.active') }}</TpTag>
+                        <TpTag :variant="quickProviderEnabled ? 'success' : 'neutral'">
+                          {{ quickProviderEnabled ? t('configCenter.providerUi.active') : t('configCenter.providerUi.inactive') }}
+                        </TpTag>
                       </div>
                     </template>
 
@@ -214,6 +220,24 @@
                         />
                       </div>
                     </div>
+
+                    <div :class="cn(grid12Class, 'mt-4')">
+                      <div
+                        v-for="item in providerEnableItems"
+                        :key="item.key"
+                        :class="colSpan12Lg4"
+                      >
+                        <ConfigFormItem
+                          :model-value="item.value"
+                          kind="boolean"
+                          :label="resolveItemLabel(item)"
+                          :dirty="isItemDirty(item)"
+                          :switch-key="`switch-${item.key}`"
+                          :disabled="item.value === true"
+                          @update:model-value="(value) => onProviderEnableChange(item, value)"
+                        />
+                      </div>
+                    </div>
                   </PagePanel>
 
                   <PagePanel
@@ -224,7 +248,6 @@
                     "
                     :class="cn(configSectionPanelClass({ scope: 'shared' }), 'mb-3')"
                     :title="t('config.section.tokenBudget')"
-                    :subtitle="t('config.section.tokenBudgetHint')"
                   >
                     <div
                       v-if="aiModelTokenBudget.chatItem || aiModelTokenBudget.hasGenerationMaxTokens"
@@ -298,12 +321,8 @@
                   <div :class="configOverviewHeadClass">
                     <div>
                       <div :class="configOverviewEyebrowClass">{{ t('config.section.providers') }}</div>
-                      <div :class="configMetaClass">
-                        {{
-                          currentDefaultProviderLabel
-                            ? t('config.section.providerHint', { provider: currentDefaultProviderLabel })
-                            : t('config.section.sharedScopeHint')
-                        }}
+                      <div v-if="currentDefaultProviderLabel" :class="configMetaClass">
+                        {{ t('config.section.providerHint', { provider: currentDefaultProviderLabel }) }}
                       </div>
                     </div>
                     <div :class="configOverviewMetricsClass">
@@ -322,7 +341,6 @@
                     v-if="groupedConfigSections.shared.items.length"
                     :class="cn(configSectionPanelClass({ scope: 'shared' }), 'mb-3')"
                     :title="t('config.section.shared')"
-                    :subtitle="t('config.section.sharedHint')"
                   >
                     <div :class="configFormStackClass">
                       <ConfigFormItem
@@ -357,7 +375,6 @@
                         )
                       "
                       :title="section.title"
-                      :subtitle="section.subtitle"
                     >
                       <template #actions>
                         <div :class="cn(pageToolbarStripClass, 'gap-2')">
@@ -407,10 +424,11 @@
                       variant="primary"
                       size="sm"
                       :loading="saving"
-                      :disabled="saving || !currentItems.length"
+                      :disabled="!currentItems.length"
+                      :aria-label="saving ? t('config.actions.saving') : undefined"
                       @click="handleSave"
                     >
-                      {{ saving ? t('config.actions.saving') : t('config.actions.save') }}
+                      {{ t('config.actions.save') }}
                     </TpButton>
                   </div>
                 </div>
@@ -438,7 +456,6 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
-import ActionBar from '@/components/common/ActionBar.vue';
 import PagePanel from '@/components/common/PagePanel.vue';
 import TableToolbar from '@/components/common/TableToolbar.vue';
 import SidebarMenu from '@/components/layout/SidebarMenu.vue';
@@ -491,7 +508,7 @@ import {
 } from '@/lib/page-layout-ui';
 import { captionTextClass, dataSubtitleClass, dataTitleClass } from '@/lib/page-typography';
 import { navItemClass } from '@/lib/shell-ui';
-import { pageToolbarStripClass, pageToolbarSubtitleClass } from '@/lib/page-chrome-ui';
+import { pageToolbarStripClass } from '@/lib/page-chrome-ui';
 import { cn } from '@/lib/utils';
 import { refreshAppFeatureFlags } from '@/composables/useFeatureFlags';
 import { usePageNotifier } from '@/composables/usePageNotifier';
@@ -639,10 +656,6 @@ function resolveSidebarNavEntryDescription(entry: ConfigSidebarNavEntry) {
   return entry.kind === 'audit' ? t('config.audit.navDescription') : resolveCategoryDescription(entry.category);
 }
 
-const showConfigBackendHint = computed(
-  () => Boolean(categoriesError.value) && !categoriesLoading.value && !sortedCategories.value.length
-);
-
 const selectedCategory = computed(() => categories.value.find((item) => item.id === selectedCategoryId.value) || null);
 const selectedCategoryLabel = computed(() => (selectedCategory.value ? resolveCategoryLabel(selectedCategory.value) : ''));
 const selectedCategoryDescription = computed(() => (selectedCategory.value ? resolveCategoryDescription(selectedCategory.value) : ''));
@@ -665,7 +678,6 @@ type ProviderKey = (typeof providerKeys)[number];
 interface ConfigSection {
   key: ProviderKey | 'shared';
   title: string;
-  subtitle: string;
   items: ConfigItem[];
   active: boolean;
 }
@@ -742,17 +754,47 @@ const providerEnableKeyMap: Record<ProviderKey, string> = {
   ANTHROPIC: 'ENABLE_ANTHROPIC'
 };
 
+function activateProvider(provider: ProviderKey) {
+  const target = currentItems.value.find((item) => item.key === 'DEFAULT_COMPANY');
+  if (target) {
+    target.value = provider;
+    target.error = '';
+  }
+  providerKeys.forEach((name) => {
+    const enableItem = currentItems.value.find((item) => item.key === providerEnableKeyMap[name]);
+    if (!enableItem) return;
+    enableItem.value = name === provider;
+    enableItem.error = '';
+  });
+}
+
+function onProviderEnableChange(item: ConfigItem, value: string | number | boolean | null) {
+  const provider = providerKeys.find((name) => providerEnableKeyMap[name] === item.key);
+  if (provider && value === true) activateProvider(provider);
+}
+
+function applySingleActiveProvider(items: ConfigItem[]) {
+  const company = String(items.find((item) => item.key === 'DEFAULT_COMPANY')?.value || '').toUpperCase();
+  if (!providerKeys.includes(company as ProviderKey)) return;
+  providerKeys.forEach((provider) => {
+    const enableItem = items.find((item) => item.key === providerEnableKeyMap[provider]);
+    if (!enableItem) return;
+    enableItem.value = provider === company;
+  });
+}
+
 const quickSelectedProvider = computed<string>({
   get() {
     return defaultProviderKey.value || 'OPENAI';
   },
   set(value) {
     const target = currentItems.value.find((item) => item.key === 'DEFAULT_COMPANY');
-    if (target) {
-      target.value = String(value || 'OPENAI').toUpperCase();
-      target.error = '';
+    const next = String(value || 'OPENAI').toUpperCase() as ProviderKey;
+    if (!providerKeys.includes(next)) {
+      if (target) target.value = 'OPENAI';
+      return;
     }
-    syncAiModelProviderFlags();
+    activateProvider(next);
   }
 });
 
@@ -761,11 +803,20 @@ const quickFieldConfig = computed(() => {
   return providerQuickFieldMap[provider];
 });
 
-const quickFieldDisabled = computed(() => {
-  const field = quickFieldConfig.value;
-  if (!field?.key) return true;
-  return !currentItems.value.some((item) => item.key === field.key);
+const quickFieldDisabled = computed(() => !quickFieldConfig.value?.key);
+
+const quickProviderEnabled = computed(() => {
+  const provider = quickSelectedProvider.value as ProviderKey;
+  if (!providerKeys.includes(provider)) return false;
+  const enableItem = currentItems.value.find((item) => item.key === providerEnableKeyMap[provider]);
+  return enableItem?.value === true;
 });
+
+const providerEnableItems = computed(() =>
+  providerKeys
+    .map((provider) => currentItems.value.find((item) => item.key === providerEnableKeyMap[provider]))
+    .filter((item): item is ConfigItem => Boolean(item))
+);
 
 const quickFieldLabel = computed(() => {
   const field = quickFieldConfig.value;
@@ -776,16 +827,19 @@ const quickFieldLabel = computed(() => {
 const quickFieldInputType = computed(() => quickFieldConfig.value?.inputType || 'text');
 
 const quickFieldPlaceholder = computed(() => {
-  if (quickFieldDisabled.value) return t('configCenter.providerUi.noApiKeyNeeded');
   const field = quickFieldConfig.value;
   if (!field) return t('configCenter.providerUi.apiKeyPlaceholder');
   return t(field.placeholderKey);
 });
 
 const quickFieldHelper = computed(() => {
-  if (quickFieldDisabled.value) return t('configCenter.providerUi.noApiKeyNeeded');
   const field = quickFieldConfig.value;
   if (!field) return t('configCenter.defaultSetting');
+  if (field.key.endsWith('_API_KEY')) {
+    return String(quickFieldValue.value || '') === '********'
+      ? t('configCenter.providerUi.keySavedHint')
+      : '';
+  }
   return t(field.helperKey);
 });
 
@@ -900,7 +954,6 @@ const groupedConfigSections = computed(() => {
     .map((key): ConfigSection => ({
       key,
       title: translateKey(`configCenter.provider.${key}`, key),
-      subtitle: t('config.section.providerHint', { provider: translateKey(`configCenter.provider.${key}`, key) }),
       items: groupedItems.get(key) || [],
       active: defaultProviderKey.value === key
     }))
@@ -910,7 +963,6 @@ const groupedConfigSections = computed(() => {
     shared: {
       key: 'shared' as const,
       title: t('config.section.shared'),
-      subtitle: t('config.section.sharedHint'),
       items: sharedItems,
       active: false
     },
@@ -1091,53 +1143,39 @@ function isItemDirty(item: ConfigItem) {
   return snapshot !== serializeValueForComparison(item);
 }
 
-function syncAiModelProviderFlags() {
-  if (selectedCategoryId.value !== 'ai_model') return;
-  const selected = String(quickSelectedProvider.value || '').toUpperCase() as ProviderKey;
-  if (!providerKeys.includes(selected)) return;
-
+function ensureAiProviderDrafts(items: ConfigItem[]) {
+  const company = String(items.find((item) => item.key === 'DEFAULT_COMPANY')?.value || '').toUpperCase();
   providerKeys.forEach((provider) => {
-    const enableKey = providerEnableKeyMap[provider];
-    const target = currentItems.value.find((item) => item.key === enableKey);
-    if (!target) return;
-    target.value = provider === selected;
-    target.error = '';
-  });
-}
-
-function buildAiModelSubmitItems(items: ConfigItem[]) {
-  if (selectedCategoryId.value !== 'ai_model') return items;
-  const selected = String(quickSelectedProvider.value || '').toUpperCase() as ProviderKey;
-  if (!providerKeys.includes(selected)) return items;
-
-  const nextItems = [...items];
-  providerKeys.forEach((provider) => {
-    const enableKey = providerEnableKeyMap[provider];
-    const expectedValue = provider === selected;
-    const existing = currentItems.value.find((item) => item.key === enableKey);
-    if (existing) {
-      existing.value = expectedValue;
-      if (isItemDirty(existing) && !nextItems.some((item) => item.key === enableKey)) {
-        nextItems.push(existing);
-      }
-      return;
+    const secretKey = providerQuickFieldMap[provider]?.key;
+    if (secretKey?.endsWith('_API_KEY') && !items.some((item) => item.key === secretKey)) {
+      items.push({
+        key: secretKey,
+        value: '',
+        value_type: 'string',
+        category: 'ai_model',
+        is_sensitive: true,
+        configured: false,
+        inputKind: 'password',
+        dirty: false,
+        touched: false,
+        raw: { key: secretKey, value_type: 'string', category: 'ai_model', is_sensitive: true }
+      });
     }
-
-    nextItems.push({
-      key: enableKey,
-      value: expectedValue,
-      value_type: 'bool',
-      category: 'ai_model',
-      description: `Enable ${provider} provider`,
-      is_sensitive: false,
-      inputKind: 'boolean',
-      dirty: true,
-      touched: true,
-      raw: { key: enableKey, value_type: 'bool', category: 'ai_model' }
-    });
+    const enableKey = providerEnableKeyMap[provider];
+    if (!items.some((item) => item.key === enableKey)) {
+      items.push({
+        key: enableKey,
+        value: provider === company,
+        value_type: 'bool',
+        category: 'ai_model',
+        is_sensitive: false,
+        inputKind: 'boolean',
+        dirty: false,
+        touched: false,
+        raw: { key: enableKey, value_type: 'bool', category: 'ai_model' }
+      });
+    }
   });
-
-  return nextItems;
 }
 
 function resetDirtySnapshot(items: ConfigItem[]) {
@@ -1200,7 +1238,15 @@ async function loadCategories({ preserveSelection = false } = {}) {
   }
 }
 
+let loadCategoryRequestSeq = 0;
+let categoryLoadInFlight = false;
+
 async function loadCategoryItems(categoryId: string) {
+  // 先点 A 再点 B 时，A 的慢响应不能覆盖 B 的配置项，否则保存会把 A 的值提交到 B
+  const requestSeq = ++loadCategoryRequestSeq;
+  const isStale = () => requestSeq !== loadCategoryRequestSeq || categoryId !== selectedCategoryId.value;
+  // 切到审计日志等不走请求的分类时，前一个还没返回的请求不再负责清 loading
+  categoryLoadInFlight = false;
   if (!categoryId) {
     currentItems.value = [];
     baselineSnapshot.value = {};
@@ -1218,10 +1264,16 @@ async function loadCategoryItems(categoryId: string) {
   itemsLoading.value = true;
   itemsError.value = '';
   appStore.setLoading(true);
+  categoryLoadInFlight = true;
 
   try {
     const response = await getCategoryConfig(categoryId);
+    if (isStale()) return;
     currentItems.value = response;
+    if (categoryId === 'ai_model') {
+      ensureAiProviderDrafts(currentItems.value);
+      applySingleActiveProvider(currentItems.value);
+    }
     resetDirtySnapshot(currentItems.value);
     currentItems.value.forEach((item) => {
       item.error = '';
@@ -1230,13 +1282,17 @@ async function loadCategoryItems(categoryId: string) {
       syncGenerationMaxTokensToLegacyKeys(currentItems.value, generationMaxTokensValue.value);
     }
   } catch (error) {
+    if (isStale()) return;
     currentItems.value = [];
     baselineSnapshot.value = {};
     itemsError.value = getUserFacingErrorMessage(error, t('config.message.loadFailed'));
     showApiError(error, t('config.message.loadFailed'), t('validation.loadFailed'));
   } finally {
-    itemsLoading.value = false;
-    appStore.setLoading(false);
+    if (requestSeq === loadCategoryRequestSeq || !categoryLoadInFlight) {
+      itemsLoading.value = false;
+      appStore.setLoading(false);
+    }
+    if (requestSeq === loadCategoryRequestSeq) categoryLoadInFlight = false;
   }
 }
 
@@ -1320,12 +1376,10 @@ async function handleSave() {
   appStore.setLoading(true);
 
   try {
-    syncAiModelProviderFlags();
     if (selectedCategoryId.value === 'ai_model') {
       syncGenerationMaxTokensToLegacyKeys(currentItems.value, generationMaxTokensValue.value);
     }
-    const dirtyItems = currentItems.value.filter((item) => isItemDirty(item));
-    const submitItems = buildAiModelSubmitItems(dirtyItems);
+    const submitItems = currentItems.value.filter((item) => isItemDirty(item));
     if (!submitItems.length) {
       showNotice('info', t('common.feedback.info'), t('config.message.noChangesToSave'));
       return;
@@ -1364,7 +1418,11 @@ async function handleSave() {
     await loadCategoryItems(selectedCategoryId.value);
     await refreshAppFeatureFlags();
   } catch (error) {
-    showApiError(error, t('config.message.saveFailed'), t('validation.saveFailed'));
+    showNotice(
+      'danger',
+      t('config.message.saveFailed'),
+      getUserFacingErrorMessage(error, t('validation.saveFailed'))
+    );
   } finally {
     saving.value = false;
     appStore.setLoading(false);

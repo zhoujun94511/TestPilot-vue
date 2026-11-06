@@ -1,12 +1,6 @@
 export default {
   page: {
-    title: 'Dashboard',
-    subtitle: 'A unified overview of core business, system status, and entry points'
-  },
-  welcome: {
-    kicker: 'Welcome back',
-    title: 'TestPilot Overview',
-    description: 'Unified view of key metrics across configuration, knowledge, documents, cases, and chat.'
+    title: 'Dashboard'
   },
   actions: {
     refresh: 'Refresh overview',
@@ -18,34 +12,21 @@ export default {
   },
   kpi: {
     title: 'Business overview',
-    subtitle: 'Core counts across cases, documents, knowledge, and chat',
+    totalRequirements: 'Total requirements',
+    recentNew: '{count} added in {days}d',
+    recentMessages: '{count} messages in {days}d',
     totalCases: 'Total cases',
-    totalDocuments: 'Total documents',
     totalKnowledge: 'Knowledge files',
-    totalChatSessions: 'Chat sessions',
-    casesHint: 'Scope: {name}',
-    documentsHint: 'Scope: {name}',
-    knowledgeHint: 'Scope: {name}',
-    chatHint: 'Scope: {name}',
-    recentDocuments: 'Recent analyses',
-    recentChats: 'Recent messages'
+    totalChatSessions: 'Chat sessions'
   },
   system: {
     title: 'System Status',
-    subtitle: 'Service health and key runtime signals',
-    overall: 'Overall',
     updatedAt: 'Updated at',
-    healthTitle: 'Service health',
-    healthHint: 'The health endpoint did not return extra details',
     aiService: 'AI service',
     aiServiceRowHint: 'Check API and model settings in Configuration',
     knowledge: 'Knowledge service',
     performance: 'Performance',
-    network: 'Network',
-    networkLabel: 'Current access',
-    networkHidden: 'Access address hidden for security',
     model: 'Model',
-    responseTime: 'Response time',
     documents: 'Documents',
     vectors: 'Vectors',
     cpu: 'CPU',
@@ -67,11 +48,9 @@ export default {
   },
   activities: {
     title: 'Recent Activities',
-    subtitle: 'A compact feed of recent generations, analyses, and updates',
     emptyTitle: 'No recent activity',
-    emptyMessage: 'There are no recent activity records to show yet.',
-    groupCollapsedHint: '{count} items — expand for details',
-    groupExpandedHint: 'Click to collapse details',
+    groupCountSummary: '{count} in {days} days. Latest: {latest}',
+    viewAll: 'View all {count}',
     types: {
       case: 'Case',
       requirement: 'Document analysis',
@@ -94,12 +73,7 @@ export default {
     }
   },
   shortcuts: {
-    title: 'Shortcuts',
-    subtitle: 'Common workflows in one click',
-    generateDesc: 'Generate test cases from requirements',
-    uploadDesc: 'Upload and analyze requirement documents',
-    chatDesc: 'Talk to the AI assistant',
-    configDesc: 'Models, RAG, and system settings'
+    title: 'Shortcuts'
   },
   attention: {
     offlineTitle: 'Backend disconnected',
@@ -107,24 +81,13 @@ export default {
     aiTitle: 'AI service needs attention',
     aiMessage: 'Model or connectivity issues may block generation and chat.',
     aiAction: 'Open configuration',
-    reliabilityTitle: 'Low system trust score',
-    reliabilityMessage: 'Multiple services or the knowledge base need setup before production use.'
-  },
-  pulse: {
-    title: 'Readiness',
-    subtitle: 'Model, knowledge coverage, and trust score'
+    reliabilityTitle: 'Low system trust score'
   },
   advanced: {
     title: 'Advanced Metrics',
-    subtitle: 'Recent output and AI usage (complements KPI totals above)',
-    emptyCollapsed:
-      'No stats yet. Output fills 30-day metrics; 7-day tokens cover all logged LLM usage.',
     recentCases: 'Cases added ({days}d)',
-    recentCasesHint: 'Summed by case creation date',
     recentRequirements: 'Requirements added ({days}d)',
-    recentRequirementsHint: 'Summed by requirement creation date',
     recentChats: 'Chat messages ({days}d)',
-    recentChatsHint: 'Summed by message creation date',
     totalTokensPeriod: 'Token usage ({days}d)',
     badgeNoData: 'No data',
     tokensEmptyHint: 'No token usage in the last 7 days',
@@ -135,16 +98,13 @@ export default {
     loadingOverview: 'Loading overview...',
     loadingSystem: 'Loading system status...',
     loadingAdvanced: 'Loading advanced metrics...',
-    loadingActivities: 'Loading recent activities...',
-    loadingHint: 'Local failures will not blank the page',
-    emptyNetwork: 'No network info available'
+    loadingActivities: 'Loading recent activities...'
   },
   message: {
     overviewFailed: 'Failed to load dashboard overview',
     healthFailed: 'Failed to load health status',
     systemFailed: 'Failed to load system status',
     activitiesFailed: 'Failed to load recent activities',
-    networkFailed: 'Failed to load network info',
     logsFailed: 'Failed to load log stats',
     advancedFailed: 'Failed to load advanced metrics',
     partialFailure: 'Some data failed to load, so the page is showing a degraded view',

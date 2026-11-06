@@ -106,7 +106,12 @@
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <ChangePasswordDialog v-if="showAccountActions" v-model="changePasswordOpen" />
+          <ChangePasswordDialog
+            v-if="showAccountActions"
+            :model-value="changePasswordOpen || mustChangePassword"
+            :required="mustChangePassword"
+            @update:model-value="changePasswordOpen = $event"
+          />
 
           <footer
             v-show="!sidebarCollapsedVisual"
@@ -134,10 +139,8 @@
             <Menu :size="20" :stroke-width="2" />
           </button>
           <div class="min-w-0">
-            <div v-if="showPageKicker" :class="shellPageKickerClass">{{ t('common.shell.pageKicker') }}</div>
             <AppBreadcrumb />
             <div v-if="showPageTitle" :class="pageContextClass">{{ pageTitle }}</div>
-            <div v-if="showTopbarSubtitle" :class="pageSubtitleClass">{{ pageSubtitle }}</div>
           </div>
         </div>
 
@@ -145,6 +148,7 @@
           <span class="sr-only" aria-live="polite">
             {{ appStore.loading ? t('common.shell.system.busy') : t('common.shell.system.ready') }}
           </span>
+          <ProjectSwitcher />
           <LanguageSwitcher />
           <button
             type="button"
@@ -171,7 +175,7 @@
 
       <main :class="shellContentClass">
         <router-view v-slot="{ Component, route: activeRoute }">
-          <component :is="Component" v-if="Component" :key="shellModuleKey(activeRoute)" />
+          <component :is="Component" v-if="Component && !mustChangePassword" :key="shellModuleKey(activeRoute)" />
         </router-view>
       </main>
     </div>
@@ -214,13 +218,12 @@ import AppBreadcrumb from '@/components/layout/AppBreadcrumb.vue';
 import AppTooltipProvider from '@/components/layout/AppTooltipProvider.vue';
 import AppToastStack from '@/components/layout/AppToastStack.vue';
 import LanguageSwitcher from '@/components/common/LanguageSwitcher.vue';
+import ProjectSwitcher from '@/components/shell/ProjectSwitcher.vue';
 import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
 import {
   brandNameClass,
   brandSubtitleClass,
-  pageContextClass,
-  pageSubtitleClass,
-  shellPageKickerClass
+  pageContextClass
 } from '@/lib/page-typography';
 import {
   navItemClass,
@@ -275,7 +278,9 @@ const navGroups = computed(() =>
   appNavGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => navItemVisible(item.roles))
+      items: group.items.filter(
+        (item) => navItemVisible(item.roles) && (!item.featureFlag || appStore.featureFlags[item.featureFlag])
+      )
     }))
     .filter((group) => group.items.length > 0)
 );
@@ -287,6 +292,7 @@ const sidebarCollapsedVisual = computed(
 const showAccountActions = computed(
   () => authStore.authRequired && authStore.isAuthenticated
 );
+const mustChangePassword = computed(() => Boolean(authStore.user?.must_change_password));
 
 const signedInLabel = computed(() =>
   t('common.shell.signedInAs', { name: authStore.user?.username || '' })
@@ -296,19 +302,6 @@ const pageTitle = computed(() => {
   const key = String(route.meta.titleKey || 'dashboard.page.title');
   return t(key);
 });
-
-const pageSubtitle = computed(() => {
-  const key = route.meta.subtitleKey as string | undefined;
-  return key ? t(key) : '';
-});
-
-/**
- * 顶栏副标题：默认关闭（各页在 Tab / PagePanel / ActionBar / hero 内已有说明）。
- * 仅当路由显式 `meta.showTopbarSubtitle: true` 时展示。
- */
-const showTopbarSubtitle = computed(
-  () => route.meta.showTopbarSubtitle === true && Boolean(pageSubtitle.value)
-);
 
 /**
  * 顶栏大标题：面包屑已表达「模块 / Tab / 当前页」时不再插入 route.meta.title。
@@ -321,9 +314,6 @@ const showPageTitle = computed(() => {
   if (items.length >= 2) return false;
   return true;
 });
-
-/** 模块内子 Tab 页由面包屑表达层级，隐藏固定 kicker 以减少顶栏重复信息 */
-const showPageKicker = computed(() => breadcrumbs.value.length < 2);
 
 const collapseSidebarTitle = computed(() => {
   if (mobileNavOpen.value) return t('common.shell.closeMenu');

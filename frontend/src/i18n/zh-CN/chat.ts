@@ -1,11 +1,6 @@
 export default {
   page: {
-    title: 'AI 对话助手',
-    subtitle: '先把会话和消息链路做稳，再逐步补充增强能力'
-  },
-  toolbar: {
-    noSessionHint: '请先新建或选择会话，再进行刷新、导出或清空。',
-    backendUnavailableHint: '会话列表加载失败时，请确认后端已连接，可使用「新建会话」或侧栏重试。'
+    title: 'AI 对话助手'
   },
   actions: {
     newSession: '新建会话',
@@ -124,7 +119,6 @@ export default {
     sendSuccess: '消息已发送',
     newSessionReady: '新会话已创建',
     createSessionFailed: '创建会话失败',
-    noHistory: '当前会话暂无历史消息',
     exportSuccess: '聊天记录导出已开始',
     exportFailed: '导出聊天记录失败',
     clearSessionConfirm: '确认清空当前会话的所有消息吗？该操作不可恢复。',
@@ -138,10 +132,7 @@ export default {
     deleteSessionFailed: '删除会话失败',
     renameSessionSuccess: '会话已重命名',
     renameSessionFailed: '重命名会话失败',
-    renameSessionEmpty: '会话名称不能为空',
-    experimentalToggleSuccess: '实验动作开关已更新',
-    experimentalToggleFailed: '更新实验动作开关失败',
-    experimentalActionsConfigDesc: '启用实验动作运行时'
+    renameSessionEmpty: '会话名称不能为空'
   },
   toolMarkdown: {
     genericActionSuccess: '动作执行成功',
@@ -185,6 +176,31 @@ export default {
       casesUnlinked: '未关联需求的用例（{count} 条）',
       requirementsWithCases: '已有用例的需求（{count} 条，用例少的在前）',
       caseCount: '{count} 条用例'
+    },
+    listSeparator: '、',
+    titleWithId: '{title}（{id}）',
+    itemDetail: '{item}：{detail}',
+    actionDenied: '无权限执行该动作',
+    actionFailed: '动作执行失败',
+    previewReady: '预览已生成，确认后入库',
+    msg: {
+      requirement_not_found: '需求不存在',
+      requirement_forbidden: '没有权限访问该需求',
+      requirement_required: '请选择需求',
+      requirement_text_required: '请填写需求描述或选择关联需求',
+      no_preview_cases: '没有可保存的预览用例',
+      save_failed: '保存失败',
+      cases_saved: '已保存 {count} 条草稿用例',
+      no_scenario: '没有识别出搜索、登录或表单场景，也未启用模型补充',
+      skeleton_preview: '规则写出 {rule} 条，模型补充 {llm} 条，确认后入库',
+      coverage_summary: '{total} 个验收点覆盖 {covered} 个，{issues} 条用例结构待改',
+      trace_summary: '{requirements} 条需求中 {uncovered} 条没有用例；{dangling} 条用例指向不存在的需求，{unlinked} 条用例未关联需求',
+      llm_unavailable: '用例生成模型未初始化，只返回规则骨架',
+      llm_failed: '模型补充失败，只返回规则骨架',
+      llm_unparsed: '模型没有返回可解析的补充用例，只返回规则骨架',
+      llm_budget_exhausted: '模型调用额度已用尽，只返回规则骨架',
+      preview_failed: '预览失败',
+      preview_invalid: '预览结果格式错误'
     }
   },
   roles: {
@@ -212,7 +228,6 @@ export default {
   },
   template: {
     title: '模板',
-    placeholder: '选择模板后可插入到输入框。',
     selectLabel: '提问模板',
     loading: '正在加载模板...',
     empty: '暂无模板内容',
@@ -243,30 +258,19 @@ export default {
   action: {
     pendingTitle: '待确认动作',
     executionId: '执行ID',
-    plan: '动作计划',
-    intent: '意图',
-    tool: '工具',
-    risk: '风险',
-    args: '参数',
-    preview: '预演结果',
-    deletePreviewTitle: '即将删除对象（预演）',
     highRiskHint: '高风险动作：确认后将实际执行，请谨慎操作。',
     deleteConfirmLabel: '请输入 DELETE 进行二次确认',
     deleteConfirmPlaceholder: '输入 DELETE 后可确认',
     deleteConfirmInvalid: '请输入 DELETE 后再确认',
-    deleteConfirmReady: '二次确认已通过，可执行确认',
-    deleteConfirmPending: '等待二次确认（请输入 DELETE）',
     field: {
       success: '是否成功',
       message: '提示信息',
       caseId: '用例ID',
       title: '标题',
       status: '状态',
-      deleted: '将删除',
       dryRun: '预演模式',
       total: '总数',
-      count: '数量',
-      useRag: '启用RAG'
+      count: '数量'
     }
   }
 };

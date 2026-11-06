@@ -22,14 +22,17 @@ _SCOPE_COLUMNS: dict[str, list[tuple[str, str]]] = {
     'test_cases': [
         ('dept_id', 'INTEGER'),
         ('owner_user_id', 'INTEGER'),
+        ('project_id', 'INTEGER'),
     ],
     'requirements': [
         ('dept_id', 'INTEGER'),
         ('owner_user_id', 'INTEGER'),
+        ('project_id', 'INTEGER'),
     ],
     'rag_file_records': [
         ('dept_id', 'INTEGER'),
         ('owner_user_id', 'INTEGER'),
+        ('project_id', 'INTEGER'),
         ('vector_meta_pending', 'INTEGER DEFAULT 0'),
     ],
     'chat_sessions': [
@@ -45,6 +48,11 @@ _SCOPE_COLUMNS: dict[str, list[tuple[str, str]]] = {
 _AUTH_USER_COLUMNS: list[tuple[str, str]] = [
     ('failed_login_count', 'INTEGER DEFAULT 0'),
     ('locked_until', 'DATETIME'),
+    ('must_change_password', 'BOOLEAN DEFAULT 0'),
+]
+
+_CHAT_SESSION_COLUMNS: list[tuple[str, str]] = [
+    ('title_source', 'VARCHAR(20)'),
 ]
 
 
@@ -60,12 +68,45 @@ def ensure_auth_user_security_columns() -> None:
         except Exception as exc:
             logger.warning('跳过 users 安全列检查: %s', exc)
             return
+        added: set[str] = set()
         for col_name, col_type in _AUTH_USER_COLUMNS:
             if col_name in columns:
                 continue
             conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_name} {col_type}'))
             conn.commit()
+            added.add(col_name)
             logger.info('已添加 users.%s', col_name)
+    if 'must_change_password' in added:
+        flag_users_with_builtin_password()
+
+
+def flag_users_with_builtin_password() -> None:
+    """老库里仍在用内置默认密码的账号，下次登录先改密码。只在加列时跑一次。"""
+    from services.auth_service import verify_password
+
+    flagged = 0
+    for user in User.query.all():
+        if verify_password(user.password_hash, user.salt, BUILTIN_BOOTSTRAP_PASSWORD):
+            user.must_change_password = True
+            flagged += 1
+    if flagged:
+        db.session.commit()
+        logger.warning('%d 个账号仍在使用内置默认密码，登录后需先修改密码', flagged)
+
+
+def ensure_chat_session_columns() -> None:
+    with db.engine.connect() as conn:
+        try:
+            columns = _table_columns(conn, 'chat_sessions')
+        except Exception as exc:
+            logger.warning('跳过 chat_sessions 列检查: %s', exc)
+            return
+        for col_name, col_type in _CHAT_SESSION_COLUMNS:
+            if col_name in columns:
+                continue
+            conn.execute(text(f'ALTER TABLE chat_sessions ADD COLUMN {col_name} {col_type}'))
+            conn.commit()
+            logger.info('已添加 chat_sessions.%s', col_name)
 
 
 def ensure_scope_columns() -> None:
@@ -84,10 +125,16 @@ def ensure_scope_columns() -> None:
                 logger.info('已添加 %s.%s', table, col_name)
 
 
+def find_default_department_id():
+    """只读查找默认部门，不存在返回 None；读权限判断用，避免查询途中提交事务。"""
+    row = Department.query.with_entities(Department.id).filter_by(code=DEFAULT_DEPT_CODE).first()
+    return row[0] if row else None
+
+
 def get_default_department_id() -> int:
-    dept = Department.query.filter_by(code=DEFAULT_DEPT_CODE).first()
-    if dept:
-        return dept.id
+    dept_id = find_default_department_id()
+    if dept_id is not None:
+        return dept_id
     dept = Department(code=DEFAULT_DEPT_CODE, name=DEFAULT_DEPT_NAME, is_active=True)
     db.session.add(dept)
     db.session.commit()
@@ -183,19 +230,22 @@ def ensure_bootstrap_accounts() -> list[str]:
                     spec['role'],
                 )
             continue
-        create_user(
+        user = create_user(
             username=spec['username'],
             password=spec['password'],
             role=spec['role'],
             dept_id=default_dept_id,
             email=spec['email'],
         )
+        if spec['builtin_password']:
+            user.must_change_password = True
+            db.session.commit()
         created.append(f"{spec['role']}:{spec['username']}")
         used_builtin = used_builtin or bool(spec['builtin_password'])
     if created:
         logger.info('已创建初始账号: %s', ', '.join(created))
         if used_builtin:
-            logger.warning('部分初始账号使用了内置默认密码，请登录后立即修改。密码不写入界面提示。')
+            logger.warning('部分初始账号使用了内置默认密码，首次登录后必须先修改密码。密码不写入界面提示。')
     return created
 
 
@@ -215,7 +265,14 @@ def seed_auth_bootstrap() -> None:
 def run_auth_migrations() -> None:
     ensure_scope_columns()
     ensure_auth_user_security_columns()
+    ensure_chat_session_columns()
     seed_auth_bootstrap()
+    try:
+        from services.project_service import backfill_projects
+
+        backfill_projects()
+    except Exception as exc:
+        logger.warning('项目归属回填跳过: %s', exc)
     try:
         from services.llm_usage_backfill import backfill_llm_usage_scope
 

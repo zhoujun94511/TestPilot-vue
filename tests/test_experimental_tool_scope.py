@@ -53,3 +53,4 @@ def test_coverage_review_denies_other_department(tmp_path, monkeypatch):
 
     assert result['success'] is False
     assert result['message'] == '没有权限访问该需求'
+    assert result['message_key'] == 'requirement_forbidden'

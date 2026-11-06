@@ -9,6 +9,21 @@ from pathlib import Path
 from utils.utils_core.logger import get_logger
 logger = get_logger(__name__)
 
+# 入库、检索和预览只接住文件、编码、向量库和计算步骤实际会抛出的异常
+_KNOWLEDGE_ERRORS = (
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    RuntimeError,
+    LookupError,
+    ArithmeticError,
+    UnicodeError,
+    ImportError,
+    MemoryError,
+)
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -180,8 +195,12 @@ class KnowledgeService:
         if not file_hash:
             return {'is_duplicate': False, 'existing_record': None}
         
-        # 检查是否存在相同哈希的文件
-        existing_record = RagFileRecord.query.filter_by(
+        from services.data_scope import apply_data_scope
+
+        # 只在当前用户可见的范围内查重，别的部门有同一文件不应挡住本部门上传
+        existing_record = apply_data_scope(
+            RagFileRecord.query, RagFileRecord, 'knowledge'
+        ).filter_by(
             file_hash=file_hash,
             status='active'
         ).first()
@@ -368,6 +387,7 @@ class KnowledgeService:
         except Exception as e:
             logger.error(f"数据库提交失败: {e}", exc_info=True)
             db.session.rollback()
+            self.discard_vectors(process_result['document_ids'], vector_db)
             raise
         
         action = '上传'
@@ -853,26 +873,32 @@ class KnowledgeService:
                         'error': 'no_document_ids'
                     }
 
+            if failed_batch_count:
+                # 缺块的文件检索结果不完整，且写入的那部分向量没有记录可追踪，整体回滚
+                self.discard_vectors(document_ids, vector_db)
+                return {
+                    'success': False,
+                    'message': f'{failed_batch_count}个批次写入向量库失败，已回滚',
+                    'error': 'vector_partial_write'
+                }
+
             # 记录性能指标
             elapsed_time = self.performance_monitor.end_timer(start_time)
 
-            message = f'成功处理文档，添加了{len(document_ids)}个文档块'
-            if failed_batch_count:
-                message += f'，另有{failed_batch_count}个批次写入失败'
             return {
                 'success': True,
-                'message': message,
-                'partial': bool(failed_batch_count),
+                'message': f'成功处理文档，添加了{len(document_ids)}个文档块',
                 'document_ids': document_ids,
                 'processing_time': elapsed_time,
                 'content_length': sum(len(text) for text in texts)
             }
 
-        except Exception as e:
+        except _KNOWLEDGE_ERRORS as error:
+            logger.error(f"知识库文件处理失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'知识库文件处理失败: {str(e)}',
-                'error': str(e)
+                'message': '知识库文件处理失败',
+                'error': 'internal_error'
             }
 
     def search_knowledge(
@@ -924,6 +950,7 @@ class KnowledgeService:
                     context=context,
                     top_k=top_k,
                     vector_search_kwargs=vector_kwargs,
+                    score_threshold=float(score_threshold),
                 )
                 
                 # 转换为标准格式，并补充文件信息
@@ -950,11 +977,6 @@ class KnowledgeService:
                         'strategy': result.strategy.value,
                         'relevance_factors': result.relevance_factors
                     })
-                search_results = [
-                    item for item in search_results
-                    if float(item.get('score') or 0) >= float(score_threshold)
-                ]
-                
             else:
                 # 使用传统搜索（必须带分数，避免默认 1.0 绕过阈值）
                 search_start_time = time.time()
@@ -1011,11 +1033,12 @@ class KnowledgeService:
                 'search_time': elapsed_time
             }
 
-        except Exception as e:
+        except _KNOWLEDGE_ERRORS as error:
+            logger.error(f"知识库搜索失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'知识库搜索失败: {str(e)}',
-                'error': str(e)
+                'message': '知识库搜索失败',
+                'error': 'internal_error'
             }
 
     @staticmethod
@@ -1104,11 +1127,12 @@ class KnowledgeService:
                 'full_length': len(content)
             }
 
-        except Exception as e:
+        except _KNOWLEDGE_ERRORS as error:
+            logger.error(f"获取文档预览失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'获取文档预览失败: {str(e)}',
-                'error': str(e)
+                'message': '获取文档预览失败',
+                'error': 'internal_error'
             }
 
     @staticmethod
@@ -1133,59 +1157,93 @@ class KnowledgeService:
                 }
 
             # 分批删除（ChromaDB可能有批量删除限制）
+            if not hasattr(vector_db, 'delete'):
+                return {
+                    'success': False,
+                    'message': '向量数据库不支持删除',
+                    'error': 'vector_delete_unsupported'
+                }
+
             batch_size = 1000
-            total_deleted = 0
-            
+            deleted_ids: List[str] = []
+            failed_ids: List[str] = []
             for i in range(0, len(document_ids), batch_size):
                 batch_ids = document_ids[i:i + batch_size]
                 try:
-                    # 使用 ChromaDB 的 delete 方法
-                    if hasattr(vector_db, 'delete'):
-                        vector_db.delete(ids=batch_ids)
-                        total_deleted += len(batch_ids)
-                        logger.debug(f"已删除批次 {i//batch_size + 1}，包含 {len(batch_ids)} 个文档ID")
-                    else:
-                        logger.warning("向量数据库不支持 delete 方法")
+                    vector_db.delete(ids=batch_ids)
+                    deleted_ids.extend(batch_ids)
                 except Exception as batch_error:
                     logger.error(f"删除文档批次 {i//batch_size + 1} 失败: {batch_error}")
-                    # 继续处理下一批次，不中断整个流程
-                    continue
+                    failed_ids.extend(batch_ids)
 
+            if failed_ids:
+                # 有向量没删掉时调用方必须保留数据库记录，否则这些向量会成为检索得到却无法管理的孤儿
+                return {
+                    'success': False,
+                    'message': f'有 {len(failed_ids)} 个向量删除失败',
+                    'error': 'vector_delete_failed',
+                    'deleted_count': len(deleted_ids),
+                    'deleted_ids': deleted_ids,
+                    'failed_ids': failed_ids,
+                }
             return {
                 'success': True,
-                'message': f'成功删除{total_deleted}个文档',
-                'deleted_count': total_deleted,
-                'deleted_ids': document_ids[:total_deleted] if total_deleted > 0 else []
+                'message': f'成功删除{len(deleted_ids)}个文档',
+                'deleted_count': len(deleted_ids),
+                'deleted_ids': deleted_ids
             }
 
         except Exception as e:
             logger.error(f"删除向量数据库文档失败: {e}")
             return {
                 'success': False,
-                'message': f'删除文档失败: {str(e)}',
-                'error': str(e)
+                'message': '删除文档失败',
+                'error': 'internal_error'
             }
+
+    def discard_vectors(self, document_ids, vector_db) -> bool:
+        """丢弃没有数据库记录承载的向量，避免成为检索得到却无法管理的孤儿。"""
+        if not document_ids or vector_db is None:
+            return True
+        result = self.delete_documents(list(document_ids), vector_db)
+        if not result.get('success'):
+            logger.error('回滚向量失败，残留 %s 个孤儿向量', len(result.get('failed_ids') or document_ids))
+            return False
+        return True
+
+    @staticmethod
+    def _list_all_vector_ids(vector_db) -> List[str]:
+        actual_db = getattr(vector_db, '_vector_db', vector_db)
+        if hasattr(actual_db, 'get_all'):
+            all_data = actual_db.get_all(include=['ids'])
+        else:
+            all_data = vector_db.get()
+        if not all_data or 'ids' not in all_data:
+            return []
+        return [str(i) for i in (all_data['ids'] or [])]
+
+    @staticmethod
+    def _parse_record_ids(raw) -> List[str]:
+        if not raw:
+            return []
+        import ast
+        try:
+            parsed = ast.literal_eval(raw)
+        except (ValueError, SyntaxError, TypeError):
+            return []
+        return [str(i) for i in parsed] if isinstance(parsed, list) else []
 
     def rebuild_knowledge_base(
             self,
             vector_db=None,
-            force: bool = False,
             clear_all: bool = False
     ) -> Dict[str, Any]:
         """
-        重建知识库
-        
-        功能：
-        1. (可选) 完全清空向量数据库
-        2. 获取所有活跃的知识库文件
-        3. 删除旧的向量数据
-        4. 重新处理文件并生成新的向量数据（包含完整metadata）
-        5. 更新数据库记录
-        
+        重建知识库：逐个文件写入新向量、切换记录后删除旧向量。
+
         Args:
             vector_db: 向量数据库实例
-            force: 是否强制重建（即使文件已有向量数据）
-            clear_all: 是否完全清空向量数据库（包括孤儿数据）
+            clear_all: 重建全部文件并清掉不属于任何记录的孤儿向量
             
         Returns:
             重建结果信息
@@ -1200,46 +1258,30 @@ class KnowledgeService:
 
             start_time = self.performance_monitor.start_timer()
             
-            # 如果需要完全清空向量数据库
-            if clear_all:
-                logger.info("开始清空向量数据库...")
-                try:
-                    # 获取所有文档ID并删除
-                    # 检查是否是 SQLiteVectorStore
-                    actual_db = getattr(vector_db, '_vector_db', vector_db)
-                    if hasattr(actual_db, 'get_all'):
-                        # SQLiteVectorStore 路径
-                        all_data = actual_db.get_all(include=['ids'])
-                    else:
-                        # ChromaDB 路径
-                        all_data = vector_db.get()
-                    
-                    if all_data and 'ids' in all_data:
-                        all_ids = all_data['ids']
-                        if all_ids:
-                            logger.info(f"找到{len(all_ids)}个向量数据，开始清空...")
-                            vector_db.delete(ids=all_ids)
-                            logger.info("向量数据库已完全清空")
-                except Exception as clear_error:
-                    logger.warning(f"清空向量数据库失败: {clear_error}")
-                    # 继续执行，不中断重建流程
-            
-            # 导入必要的模块
             from models.models import RagFileRecord, db
             from flask import current_app
-            import ast
-            
-            logger.info("开始重建知识库...")
-            
             from services.data_scope import apply_data_scope
 
-            # 获取当前数据范围内、状态为 active 的知识库文件
-            files = apply_data_scope(
-                RagFileRecord.query.filter(RagFileRecord.status == 'active'),
-                RagFileRecord,
-                'knowledge',
-            ).all()
-            
+            # 清空全库时先记下旧向量，等新向量全部写完再删，重建失败的文件保留旧向量
+            stale_ids: List[str] = []
+            if clear_all:
+                try:
+                    stale_ids = self._list_all_vector_ids(vector_db)
+                except Exception as clear_error:
+                    logger.warning(f"读取全库向量失败，跳过清空: {clear_error}")
+
+            logger.info("开始重建知识库...")
+
+            # 清空全库要重建全部文件，否则不在当前范围内的文件会丢失向量
+            base_query = RagFileRecord.query.filter(RagFileRecord.status == 'active')
+            files = (
+                base_query.all() if clear_all
+                else apply_data_scope(base_query, RagFileRecord, 'knowledge').all()
+            )
+
+            if not files and stale_ids:
+                self.discard_vectors(stale_ids, vector_db)
+
             if not files:
                 return {
                     'success': True,
@@ -1256,7 +1298,7 @@ class KnowledgeService:
             processed_count = 0
             failed_count = 0
             failed_files = []
-            
+
             for file_record in files:
                 try:
                     logger.info(f"处理文件: {file_record.file_name} (ID: {file_record.id})")
@@ -1275,34 +1317,34 @@ class KnowledgeService:
                         })
                         continue
                     
-                    # 删除旧的向量数据
-                    if file_record.ids:
-                        try:
-                            old_ids = ast.literal_eval(file_record.ids)
-                            if isinstance(old_ids, list) and old_ids:
-                                logger.debug(f"删除旧向量数据: {len(old_ids)}个文档块")
-                                # ChromaDB的删除方法
-                                try:
-                                    vector_db.delete(ids=old_ids)
-                                except Exception as delete_error:
-                                    logger.warning(f"删除旧向量数据失败: {delete_error}")
-                        except (ValueError, SyntaxError, AttributeError) as e:
-                            logger.warning(f"解析旧文档ID失败: {e}")
-                    
-                    # 重新处理文件
+                    old_ids = self._parse_record_ids(file_record.ids)
+
+                    # 先写新向量，记录切换成功后再删旧向量；失败时旧索引保持可用
                     result = self.process_knowledge_file(
                         file_path=str(file_path),
                         vector_db=vector_db
                     )
-                    
+
                     if result['success']:
-                        # 更新数据库记录
-                        file_record.ids = str(result['document_ids'])
-                        db.session.commit()
-                        
+                        new_ids = result['document_ids']
+                        file_record.ids = str(new_ids)
+                        try:
+                            db.session.commit()
+                        except Exception:
+                            db.session.rollback()
+                            self.discard_vectors(new_ids, vector_db)
+                            raise
+
+                        from services.knowledge_vector_scope import patch_vector_metadata_for_record
+                        patch_vector_metadata_for_record(file_record, vector_db)
+
+                        if not clear_all:
+                            new_id_set = {str(i) for i in new_ids}
+                            self.discard_vectors([i for i in old_ids if i not in new_id_set], vector_db)
+
                         processed_count += 1
                         logger.info(f"成功重建文件: {file_record.file_name}, "
-                                  f"生成{len(result['document_ids'])}个文档块")
+                                  f"生成{len(new_ids)}个文档块")
                     else:
                         failed_count += 1
                         failed_files.append({
@@ -1318,21 +1360,29 @@ class KnowledgeService:
                     failed_files.append({
                         'id': file_record.id,
                         'name': file_record.file_name,
-                        'reason': str(file_error)
+                        'reason': '处理异常'
                     })
                     logger.error(f"处理文件异常: {file_record.file_name}, 错误: {file_error}")
                     continue
-            
+
+            if stale_ids:
+                current_ids = set()
+                for record in files:
+                    current_ids.update(self._parse_record_ids(record.ids))
+                self.discard_vectors(
+                    [i for i in stale_ids if i not in current_ids],
+                    vector_db,
+                )
+
             # 记录性能指标
             elapsed_time = self.performance_monitor.end_timer(start_time)
-            
+
             rebuild_info = {
                 'total_files': len(files),
                 'processed': processed_count,
                 'failed': failed_count,
                 'failed_files': failed_files,
                 'rebuild_time': float(elapsed_time),
-                'force': force
             }
             
             success_rate = (processed_count / len(files) * 100) if files else 0
@@ -1351,8 +1401,8 @@ class KnowledgeService:
             logger.error(f"知识库重建失败: {e}", exc_info=True)
             return {
                 'success': False,
-                'message': f'知识库重建失败: {str(e)}',
-                'error': str(e)
+                'message': '知识库重建失败',
+                'error': 'internal_error'
             }
 
     @staticmethod
@@ -1452,9 +1502,13 @@ class KnowledgeService:
             content_snippet = ' '.join(content_snippet.split())
             match_snippet = content_snippet[:100]  # 使用前100个字符进行匹配
             
-            # 查询所有活跃的文件记录
-            files = RagFileRecord.query.filter(
-                RagFileRecord.status == 'active'
+            # 只在当前项目可见的知识库文件里对内容，避免把别的项目的文件名标上来
+            from services.data_scope import apply_data_scope
+
+            files = apply_data_scope(
+                RagFileRecord.query.filter(RagFileRecord.status == 'active'),
+                RagFileRecord,
+                'knowledge',
             ).all()
             
             # 尝试在文件内容中查找匹配
@@ -1603,9 +1657,10 @@ class KnowledgeService:
                 'statistics': stats
             }
 
-        except Exception as e:
+        except _KNOWLEDGE_ERRORS as error:
+            logger.error(f"知识库统计失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'知识库统计失败: {str(e)}',
-                'error': str(e)
+                'message': '知识库统计失败',
+                'error': 'internal_error'
             }

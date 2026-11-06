@@ -1,15 +1,11 @@
 export default {
   page: {
-    title: '知识库管理',
-    subtitle: '上传、搜索、维护并重建 RAG 知识库'
+    title: '知识库管理'
   },
   tabs: {
     upload: '知识库上传',
     files: '知识库文件管理',
     search: '知识检索'
-  },
-  toolbar: {
-    filesLead: '维护向量库文件；选中后可批量删除，索引异常时可重建。'
   },
   banner: {
     vectorDisabledTitle: '向量库功能已关闭',
@@ -22,7 +18,6 @@ export default {
   },
   actions: {
     upload: '上传文件',
-    refresh: '刷新',
     rebuild: '重建索引',
     search: '搜索',
     delete: '删除',
@@ -39,7 +34,6 @@ export default {
   },
   filters: {
     title: '筛选与检索',
-    subtitle: '按关键词、分类与状态筛选知识库文件',
     keywordLabel: '搜索关键词',
     keywordPlaceholder: '搜索',
     categoryLabel: '分类',
@@ -59,7 +53,6 @@ export default {
     descriptionPlaceholder: '为文件补充说明',
     submit: '开始上传',
     empty: '请先选择文件',
-    dragHint: '可一次选择多个文件，上传后系统将自动解析并入库',
     progress: '上传进度',
     filesSelected: '已选择 {count} 个文件'
   },
@@ -97,7 +90,6 @@ export default {
     title: '文件列表',
     empty: '暂无知识库文件',
     loading: '正在加载文件列表...',
-    selectAll: '全选',
     columns: {
       name: '名称',
       category: '分类',

@@ -1,29 +1,23 @@
 export default {
   page: {
-    title: 'Document Analysis',
-    subtitle: 'Upload requirement documents, analyze them, and generate test cases from results'
+    title: 'Document Analysis'
   },
   tabs: {
     upload: 'Document Upload',
     manage: 'Document & Requirement Management',
     history: 'Requirement History'
   },
-  toolbar: {
-    manageLead: 'Upload and analyze documents; select rows for bulk actions or case generation.',
-    historyLead: 'Browse saved requirements; select rows to generate cases or delete in bulk.',
-    generateSettings: 'Generation settings'
-  },
   actions: {
     upload: 'Upload Document',
     backToDocuments: 'Back to Documents',
     analyzeCurrent: 'Analyze Current',
     reanalyze: 'Reanalyze',
-    refresh: 'Refresh List',
     generateCases: 'Generate Test Cases',
     exportRequirements: 'Export Requirements',
     exportingRequirements: 'Exporting Requirements',
     analyzing: 'Analyzing',
     generating: 'Generating',
+    generatingProgress: '{done}/{total} done, {saved} saved',
     uploading: 'Uploading',
     deleteDocuments: 'Delete Documents',
     deleteRequirements: 'Delete Requirements',
@@ -44,7 +38,6 @@ export default {
     fileHint: 'Supported: TXT / CSV / DOCX / PDF / JSON / MD / XLSX / YAML',
     analysisType: 'Default Analysis Type',
     empty: 'Please choose a document before uploading',
-    autoAnalyzeHint: 'Auto-analyze after upload and open result page',
     autoAnalyzeToggle: 'Auto-analyze after upload and open results'
   },
   table: {
@@ -81,12 +74,11 @@ export default {
   },
   history: {
     title: 'Parsed Requirement History',
-    subtitle: 'Browse and manage all persisted requirement analysis results',
     loading: 'Loading parsed requirements...',
     empty: 'No parsed requirements yet',
     source: 'Source Document',
     sourceAll: 'All Source Documents',
-    selectedRequirementsCount: '{count} requirements selected (cross-page)',
+    selectedRequirementsCount: '{count} requirements selected',
     searchPlaceholder: 'Search',
     typeAll: 'All Types',
     priorityAll: 'All Priorities'
@@ -98,7 +90,7 @@ export default {
     businessRulesCount: 'Business Rules',
     totalCount: 'Total',
     selected: 'Selected Document',
-    selectedDocumentsCount: '{count} documents selected (cross-page)'
+    selectedDocumentsCount: '{count} documents selected'
   },
   requirement: {
     id: 'ID',
@@ -121,8 +113,10 @@ export default {
     uploadFailed: 'Failed to upload document',
     analyzeSuccess: 'Document analyzed successfully',
     analyzeFailed: 'Failed to analyze document',
+    analyzeInProgress: 'This document is already being analyzed. Wait for it to finish.',
     generateSuccess: 'Test case generation triggered',
     generateFailed: 'Failed to generate test cases',
+    generatePartial: '{saved} cases were saved. {failed} requirements failed. Saved cases are kept.',
     exportRequirementsSuccess: 'Requirements export started',
     exportRequirementsFailed: 'Failed to export requirements',
     selectDocumentFirst: 'Please select a document first',
@@ -144,8 +138,8 @@ export default {
   confirm: {
     generateCases: 'Generate test cases from the current analysis result?',
     batchGenerateTitle: 'Batch Generation Confirmation',
-    batchGenerateByRequirementsMessage: 'Batch generate: process {reqCount} requirements (3 each, about {caseCount} cases). Continue?',
-    batchGenerateByDocumentsMessage: 'Batch generate: {count} docs, {reqCount} requirements (about {caseCount} cases), skipped {skippedCount} unanalyzed. Continue?',
+    batchGenerateByRequirementsMessage: 'Batch generate: process {reqCount} requirements ({perReq} each, about {caseCount} cases). Continue?',
+    batchGenerateByDocumentsMessage: 'Batch generate: {count} docs, {reqCount} requirements ({perReq} each, about {caseCount} cases), skipped {skippedCount} unanalyzed. Continue?',
     deleteDocuments: 'Delete selected documents? This action cannot be undone.',
     deleteRequirements: 'Delete selected requirements? This action cannot be undone.'
   }

@@ -7,7 +7,14 @@ import zipfile
 import pandas as pd
 from typing import Dict, Any, List
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+try:
+    EXPORT_TIMEZONE = ZoneInfo('Asia/Shanghai')
+except ZoneInfoNotFoundError:
+    # 系统没有 tzdata 时退回固定东八区
+    EXPORT_TIMEZONE = timezone(timedelta(hours=8))
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -19,6 +26,67 @@ from utils.utils_performance_monitoring.performance_monitor import get_performan
 from utils.utils_core.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 导出只接住文件、编码、表格和压缩这些步骤实际会抛出的异常
+_EXPORT_ERRORS = (
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    RuntimeError,
+    LookupError,
+    ArithmeticError,
+    UnicodeError,
+    ImportError,
+    zipfile.BadZipFile,
+)
+
+
+def format_export_datetime(value: Any) -> str:
+    """数据库时间统一按北京时间导出为 YYYY-MM-DD HH:MM:SS。
+
+    库里存的是 UTC（naive 或带 +00:00 的 ISO 字符串）；无时区信息时按 UTC 解释。
+    无法解析的值原样返回，空值返回空串。
+    """
+    if value is None or value == '':
+        return ''
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return ''
+        try:
+            parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+        except ValueError:
+            return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(EXPORT_TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
+
+
+_CSV_FORMULA_PREFIXES = ('=', '+', '-', '@', '\t', '\r')
+_CHAT_ROLE_LABELS = {'user': '用户', 'assistant': '助手', 'system': '系统'}
+
+
+def append_dataframe_rows(ws, df) -> None:
+    """写入 Excel 时文本一律按字符串存，避免以 = 开头的内容被 openpyxl 当成公式。"""
+    for row in dataframe_to_rows(df, index=False, header=True):
+        ws.append(row)
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.data_type == 'f':
+                cell.data_type = 's'
+
+
+def csv_safe_dataframe(df):
+    """CSV 没有类型信息，表格软件会执行 = + - @ 开头的单元格，统一加 ' 前缀。"""
+    def neutralize(value):
+        if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+            return "'" + value
+        return value
+    return df.apply(lambda column: column.map(neutralize))
 
 
 class ExportService:
@@ -248,7 +316,7 @@ class ExportService:
             headers['test_method']: ExportService._localize_case_field_value('test_method', case_dict.get('test_method', ''), locale),
             headers['tags']: tags_text,
             headers['status']: ExportService._localize_case_field_value('status', case_dict.get('status', ''), locale),
-            headers['created_time']: case_dict.get('created_time', ''),
+            headers['created_time']: format_export_datetime(case_dict.get('created_time')),
             headers['created_by']: case_dict.get('created_by', ''),
             headers['requirement_id']: case_dict.get('requirement_id', '')
         }
@@ -318,8 +386,7 @@ class ExportService:
             ws.title = "Test Cases" if self._normalize_locale(locale) == 'en' else "测试用例"
 
             # 写入数据
-            for r in dataframe_to_rows(df, index=False, header=True):
-                ws.append(r)
+            append_dataframe_rows(ws, df)
 
             # 设置样式
             self._style_excel_worksheet(ws, df)
@@ -344,8 +411,8 @@ class ExportService:
             logger.error(f"Excel导出失败: {e}")
             return {
                 'success': False,
-                'message': f'Excel导出失败: {str(e)}',
-                'error': str(e)
+                'message': 'Excel导出失败',
+                'error': 'internal_error'
             }
 
     def export_cases_to_csv(self, cases: List[Any], locale: str = None) -> Dict[str, Any]:
@@ -374,7 +441,7 @@ class ExportService:
 
             # 转换为CSV
             output = io.StringIO()
-            df.to_csv(output, index=False, encoding='utf-8-sig')
+            csv_safe_dataframe(df).to_csv(output, index=False, encoding='utf-8-sig')
             csv_data = output.getvalue().encode('utf-8-sig')
 
             # 记录性能指标
@@ -392,8 +459,8 @@ class ExportService:
             logger.error(f"CSV导出失败: {e}")
             return {
                 'success': False,
-                'message': f'CSV导出失败: {str(e)}',
-                'error': str(e)
+                'message': 'CSV导出失败',
+                'error': 'internal_error'
             }
 
     def export_cases_to_json(self, cases: List[Any], locale: str = None) -> Dict[str, Any]:
@@ -437,8 +504,8 @@ class ExportService:
             logger.error(f"JSON导出失败: {e}")
             return {
                 'success': False,
-                'message': f'JSON导出失败: {str(e)}',
-                'error': str(e)
+                'message': 'JSON导出失败',
+                'error': 'internal_error'
             }
 
     def export_requirements_to_excel(self, requirements: List[Any]) -> Dict[str, Any]:
@@ -473,8 +540,8 @@ class ExportService:
                     '优先级': req_dict.get('priority', ''),
                     '状态': req_dict.get('status', ''),
                     '来源文件': req_dict.get('source_file', ''),
-                    '创建时间': req_dict.get('created_time', ''),
-                    '更新时间': req_dict.get('updated_time', '')
+                    '创建时间': format_export_datetime(req_dict.get('created_time')),
+                    '更新时间': format_export_datetime(req_dict.get('updated_time'))
                 })
 
             df = pd.DataFrame(req_data)
@@ -485,8 +552,7 @@ class ExportService:
             ws.title = "需求列表"
 
             # 写入数据
-            for r in dataframe_to_rows(df, index=False, header=True):
-                ws.append(r)
+            append_dataframe_rows(ws, df)
 
             # 设置样式
             self._style_excel_worksheet(ws, df)
@@ -510,8 +576,8 @@ class ExportService:
             logger.error(f"需求Excel导出失败: {e}")
             return {
                 'success': False,
-                'message': f'需求Excel导出失败: {str(e)}',
-                'error': str(e)
+                'message': '需求Excel导出失败',
+                'error': 'internal_error'
             }
 
     def export_chat_history_to_excel(self, chat_history: List[Any]) -> Dict[str, Any]:
@@ -540,12 +606,12 @@ class ExportService:
                 chat_dict = chat.to_dict() if hasattr(chat, 'to_dict') else chat
                 chat_data.append({
                     '会话ID': chat_dict.get('session_id', ''),
-                    '用户消息': chat_dict.get('user_message', ''),
-                    '助手回复': chat_dict.get('assistant_message', ''),
+                    '角色': _CHAT_ROLE_LABELS.get(chat_dict.get('role'), chat_dict.get('role') or ''),
+                    '内容': chat_dict.get('content', ''),
                     '消息类型': chat_dict.get('message_type', ''),
                     'Token使用': chat_dict.get('tokens_used', 0),
                     '模型名称': chat_dict.get('model_name', ''),
-                    '创建时间': chat_dict.get('created_time', '')
+                    '创建时间': format_export_datetime(chat_dict.get('created_time'))
                 })
 
             df = pd.DataFrame(chat_data)
@@ -556,8 +622,7 @@ class ExportService:
             ws.title = "聊天历史"
 
             # 写入数据
-            for r in dataframe_to_rows(df, index=False, header=True):
-                ws.append(r)
+            append_dataframe_rows(ws, df)
 
             # 设置样式
             self._style_excel_worksheet(ws, df)
@@ -581,8 +646,8 @@ class ExportService:
             logger.error(f"聊天记录Excel导出失败: {e}")
             return {
                 'success': False,
-                'message': f'聊天记录Excel导出失败: {str(e)}',
-                'error': str(e)
+                'message': '聊天记录Excel导出失败',
+                'error': 'internal_error'
             }
 
     @staticmethod
@@ -618,15 +683,13 @@ class ExportService:
                 chat_dict = chat.to_dict() if hasattr(chat, 'to_dict') else chat
 
                 lines.append(f"【记录 {i}】")
-                lines.append(f"时间: {chat_dict.get('created_time', '')}")
+                lines.append(f"时间: {format_export_datetime(chat_dict.get('created_time'))}")
                 lines.append(f"会话ID: {chat_dict.get('session_id', '')}")
                 lines.append(f"消息类型: {chat_dict.get('message_type', '')}")
                 lines.append("")
-                lines.append("用户:")
-                lines.append(chat_dict.get('user_message', ''))
-                lines.append("")
-                lines.append("助手:")
-                lines.append(chat_dict.get('assistant_message', ''))
+                role = chat_dict.get('role')
+                lines.append(f"{_CHAT_ROLE_LABELS.get(role, role or '')}:")
+                lines.append(chat_dict.get('content', '') or '')
                 lines.append("")
                 if chat_dict.get('tokens_used'):
                     lines.append(f"Token使用: {chat_dict.get('tokens_used')}")
@@ -644,11 +707,12 @@ class ExportService:
                 'total_messages': len(chat_history)
             }
 
-        except Exception as e:
+        except _EXPORT_ERRORS as error:
+            logger.error(f"聊天记录TXT导出失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'聊天记录TXT导出失败: {str(e)}',
-                'error': str(e)
+                'message': '聊天记录TXT导出失败',
+                'error': 'internal_error'
             }
 
     @staticmethod
@@ -697,11 +761,12 @@ class ExportService:
                 'total_messages': len(chat_data)
             }
 
-        except Exception as e:
+        except _EXPORT_ERRORS as error:
+            logger.error(f"聊天记录JSON导出失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'聊天记录JSON导出失败: {str(e)}',
-                'error': str(e)
+                'message': '聊天记录JSON导出失败',
+                'error': 'internal_error'
             }
 
     def generate_cases_template(self, template_type: str = 'excel', locale: str = None) -> Dict[str, Any]:
@@ -832,12 +897,18 @@ class ExportService:
                     'error': 'unsupported_template_type'
                 }
 
-        except Exception as e:
+        except _EXPORT_ERRORS as error:
+            logger.error(f"模板生成失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'模板生成失败: {str(e)}',
-                'error': str(e)
+                'message': '模板生成失败',
+                'error': 'internal_error'
             }
+
+    @staticmethod
+    def file_extension(format_type: str) -> str:
+        """导出格式名到文件后缀。excel 必须落成 xlsx，不能直接拼格式名。"""
+        return {'excel': 'xlsx', 'csv': 'csv', 'json': 'json', 'txt': 'txt'}.get(format_type, format_type)
 
     def batch_export(self, export_config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -871,7 +942,7 @@ class ExportService:
                                 continue
 
                             if result['success']:
-                                filename = f"test_cases.{format_type}"
+                                filename = f"test_cases.{self.file_extension(format_type)}"
                                 zip_file.writestr(filename, result['data'])
                                 export_count += 1
 
@@ -899,7 +970,7 @@ class ExportService:
                                 continue
 
                             if result['success']:
-                                filename = f"chat_history.{format_type}"
+                                filename = f"chat_history.{self.file_extension(format_type)}"
                                 zip_file.writestr(filename, result['data'])
                                 export_count += 1
 
@@ -913,11 +984,12 @@ class ExportService:
                 'format': 'zip'
             }
 
-        except Exception as e:
+        except _EXPORT_ERRORS as error:
+            logger.error(f"批量导出失败: {error}", exc_info=True)
             return {
                 'success': False,
-                'message': f'批量导出失败: {str(e)}',
-                'error': str(e)
+                'message': '批量导出失败',
+                'error': 'internal_error'
             }
 
     @staticmethod

@@ -1,9 +1,6 @@
 <template>
   <section :class="pageRootMarkedClass(pageMarkerDocumentsUpload)">
-    <PagePanel
-      :title="t('documents.upload.title')"
-      :subtitle="t('documents.upload.autoAnalyzeHint')"
-    >
+    <PagePanel :title="t('documents.upload.title')">
       <TpInput
         v-model="analysisType"
         as="select"

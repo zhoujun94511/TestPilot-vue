@@ -8,7 +8,7 @@ import re
 import yaml
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple
-from flask import request
+from flask import has_request_context, request
 from models.models import db
 from models.config_models import ConfigItem, ConfigAuditLog, ConfigValidationRule
 from utils.utils_core.logger import get_logger
@@ -66,7 +66,7 @@ class ConfigCenterService:
     def set_config_value(self, key: str, value: Any, value_type: str, 
                         category: str, description: str = "", 
                         is_sensitive: bool = False, operator: str = "system") -> Tuple[bool, str]:
-        """设置配置值"""
+        """设置配置值。已存在的配置项沿用库里的类型和分类，请求里的 value_type / category 只用于新建。"""
         try:
             # 特殊处理：DEFAULT_COMPANY 统一转换为大写
             if key == 'DEFAULT_COMPANY' and isinstance(value, str):
@@ -75,6 +75,9 @@ class ConfigCenterService:
 
             old_config = self.session.query(ConfigItem).filter_by(key=key).first()
             old_value = old_config.value if old_config else None
+            if old_config:
+                value_type = old_config.value_type or value_type
+                category = old_config.category or category
             sensitive = is_sensitive_config_key(
                 key,
                 bool(is_sensitive) or bool(old_config and old_config.is_sensitive),
@@ -98,7 +101,8 @@ class ConfigCenterService:
                 old_config.value = str_value
                 old_config.value_type = value_type
                 old_config.category = category
-                old_config.description = description
+                if description is not None:
+                    old_config.description = description
                 old_config.is_sensitive = is_sensitive
                 old_config.updated_at = datetime.now(timezone.utc)
                 operation_type = "update"
@@ -130,7 +134,7 @@ class ConfigCenterService:
         except Exception as e:
             self.session.rollback()
             logger.error(f"设置配置值失败: {key}, 错误: {e}")
-            return False, f"设置配置值失败: {str(e)}"
+            return False, "设置配置值失败"
     
     def get_configs_by_category(self, category: str) -> List[Dict]:
         """根据分类获取配置"""
@@ -175,9 +179,9 @@ class ConfigCenterService:
         except Exception as e:
             self.session.rollback()
             logger.error(f"删除配置失败: {key}, 错误: {e}")
-            return False, f"删除配置失败: {str(e)}"
+            return False, "删除配置失败"
     
-    def export_configs(self, format_type: str = "json") -> Tuple[bool, str, str]:
+    def export_configs(self, format_type: str = "json", operator: str = "system") -> Tuple[bool, str, str]:
         """导出配置"""
         try:
             configs = self.get_all_configs()
@@ -201,14 +205,15 @@ class ConfigCenterService:
                 old_value="",
                 new_value=f"导出{len(configs)}个配置",
                 operation_type="export",
-                operator="system"
+                operator=operator
             )
+            self.session.commit()
             
             return True, content, filename
             
         except Exception as e:
             logger.error(f"导出配置失败: {e}")
-            return False, f"导出配置失败: {str(e)}", ""
+            return False, "导出配置失败", ""
     
     def import_configs(self, content: str, format_type: str = "json", 
                       operator: str = "system") -> Tuple[bool, str, int]:
@@ -222,23 +227,25 @@ class ConfigCenterService:
             else:
                 return False, "不支持的导入格式", 0
             
-            if "configs" not in import_data:
+            if not isinstance(import_data, dict) or not isinstance(import_data.get("configs"), list):
                 return False, "导入文件格式错误", 0
-            
+
+            # 只更新系统里已有的配置项，导入文件不能新增配置或改动类型、分类
+            known_keys = {row[0] for row in self.session.query(ConfigItem.key).all()}
             imported_count = 0
             for config_data in import_data["configs"]:
                 try:
-                    # 验证必需字段
-                    required_fields = ["key", "value", "value_type", "category"]
-                    if not all(field in config_data for field in required_fields):
+                    if not isinstance(config_data, dict) or "key" not in config_data or "value" not in config_data:
                         continue
-                    
-                    # 导入配置
+                    if config_data["key"] not in known_keys:
+                        logger.warning(f"导入时跳过未知配置项: {config_data['key']}")
+                        continue
+
                     success, message = self.set_config_value(
                         key=config_data["key"],
                         value=config_data["value"],
-                        value_type=config_data["value_type"],
-                        category=config_data["category"],
+                        value_type=config_data.get("value_type") or "string",
+                        category=config_data.get("category") or "general",
                         description=config_data.get("description"),
                         is_sensitive=config_data.get("is_sensitive", False),
                         operator=operator
@@ -259,12 +266,13 @@ class ConfigCenterService:
                 operation_type="import",
                 operator=operator
             )
+            self.session.commit()
             
             return True, f"成功导入{imported_count}个配置", imported_count
             
         except Exception as e:
             logger.error(f"导入配置失败: {e}")
-            return False, f"导入配置失败: {str(e)}", 0
+            return False, "导入配置失败", 0
     
     def get_audit_logs(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """获取审计日志"""
@@ -295,7 +303,10 @@ class ConfigCenterService:
             # 基本类型验证
             if not self._validate_basic_type(value, value_type):
                 return False, f"配置值类型不匹配，期望: {value_type}"
-            
+
+            # 表单提交的数字是字符串，按声明类型转换后再比较范围和枚举
+            value = self._convert_value(self._convert_to_string(value, value_type), value_type)
+
             # 获取验证规则
             rules = self.session.query(ConfigValidationRule).filter_by(config_key=key).all()
             
@@ -314,7 +325,7 @@ class ConfigCenterService:
             
         except Exception as e:
             logger.error(f"验证配置失败: {key}, 错误: {e}")
-            return False, f"验证配置失败: {str(e)}"
+            return False, "验证配置失败"
     
     @staticmethod
     def _validate_basic_type(value: Any, value_type: str) -> bool:
@@ -382,7 +393,14 @@ class ConfigCenterService:
             elif value_type == "bool":
                 return str_value.lower() in ("true", "1", "yes", "on")
             elif value_type == "json":
-                return json.loads(str_value)
+                parsed = json.loads(str_value)
+                # 兼容旧数据：之前保存时会把 JSON 字符串再编码一层
+                if isinstance(parsed, str):
+                    try:
+                        parsed = json.loads(parsed)
+                    except (ValueError, TypeError):
+                        pass
+                return parsed
             else:
                 return str_value
         except (ValueError, TypeError, json.JSONDecodeError):
@@ -393,9 +411,13 @@ class ConfigCenterService:
         """转换值为字符串"""
         try:
             if value_type == "json":
+                # 表单和导出文件里的 JSON 已经是文本，先解析再序列化，避免存成带引号的字符串
+                if isinstance(value, str):
+                    value = json.loads(value)
                 return json.dumps(value, ensure_ascii=False)
-            else:
-                return str(value)
+            if value_type == "bool":
+                return 'true' if str(value).strip().lower() in ("true", "1", "yes", "on") else 'false'
+            return str(value)
         except (TypeError, ValueError):
             return str(value)
     
@@ -404,7 +426,11 @@ class ConfigCenterService:
         """列表、单条读取和导出使用的视图，密钥只保留是否已配置。"""
         data = config.to_dict()
         sensitive = is_sensitive_config_key(config.key, bool(config.is_sensitive))
-        configured = bool((config.value or "").strip())
+        raw_value = (config.value or "").strip()
+        configured = bool(raw_value)
+        if sensitive:
+            from utils.utils_core.api_error_handler import is_placeholder_secret
+            configured = configured and not is_placeholder_secret(raw_value)
         data["configured"] = configured
         if sensitive:
             data["is_sensitive"] = True
@@ -447,16 +473,20 @@ class ConfigCenterService:
                 old_value = masked_secret_text(old_value)
                 new_value = masked_secret_text(new_value)
             change_reason = ""
-            if request and hasattr(request, 'headers'):
+            operator_ip = get_local_ip()
+            if has_request_context():
+                from services.auth_service import client_ip
+
                 change_reason = request.headers.get('X-Change-Reason', '')
-            
+                operator_ip = client_ip(request)
+
             audit_log = ConfigAuditLog(
                 config_key=key,
                 old_value=old_value,
                 new_value=new_value,
                 operation_type=operation_type,
                 operator=operator,
-                operator_ip=get_local_ip(),
+                operator_ip=operator_ip,
                 change_reason=change_reason
             )
             self.session.add(audit_log)

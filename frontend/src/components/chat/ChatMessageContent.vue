@@ -49,6 +49,8 @@ const markdown = new MarkdownIt({
     </div>`;
   }
 });
+// 模型输出可能受知识库里的提示注入控制，外链图片一渲染就会把对话内容带到第三方地址
+markdown.disable('image');
 
 const defaultLinkRender = markdown.renderer.rules.link_open
   || ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
@@ -67,6 +69,7 @@ const renderedHtml = computed(() => {
   const raw = markdown.render(String(props.content || ''));
   return DOMPurify.sanitize(raw, {
     USE_PROFILES: { html: true },
+    FORBID_TAGS: ['img'],
     ADD_ATTR: ['target', 'rel', 'class', 'data-role']
   });
 });

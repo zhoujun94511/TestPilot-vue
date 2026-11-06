@@ -13,8 +13,37 @@
       {{ helper }}
     </div>
 
+    <div v-if="as === 'input' && isPasswordField" class="relative min-w-0">
+      <input
+        :id="inputId"
+        :class="mergeControlSizeClass(inputVariants(), controlClass, 'pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden')"
+        :type="resolvedInputType"
+        :value="modelValue ?? ''"
+        :placeholder="placeholder"
+        :disabled="disabled"
+        :aria-required="required ? 'true' : undefined"
+        :autocomplete="autocomplete"
+        v-bind="controlAttrs"
+        @input="emitValue(($event.target as HTMLInputElement).value)"
+        @blur="emit('blur')"
+        @keydown="emit('keydown', $event)"
+      />
+      <button
+        type="button"
+        class="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border-0 bg-transparent text-[var(--tp-color-text-500)] hover:bg-[color-mix(in_srgb,var(--tp-bg-surface)_70%,transparent)] hover:text-[var(--tp-color-text-900)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        :aria-pressed="passwordVisible"
+        :aria-label="passwordToggleLabel"
+        :title="passwordToggleLabel"
+        :disabled="disabled"
+        @click="passwordVisible = !passwordVisible"
+      >
+        <EyeOff v-if="passwordVisible" :size="16" :stroke-width="2" />
+        <Eye v-else :size="16" :stroke-width="2" />
+      </button>
+    </div>
+
     <input
-      v-if="as === 'input'"
+      v-else-if="as === 'input'"
       :id="inputId"
       :class="mergeControlSizeClass(inputVariants(), controlClass)"
       :type="type"
@@ -69,8 +98,37 @@
   </div>
 
   <template v-else>
+    <div v-if="as === 'input' && isPasswordField" class="relative min-w-0">
+      <input
+        :id="inputId"
+        :class="mergeControlSizeClass(inputVariants(), controlClass, 'pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden')"
+        :type="resolvedInputType"
+        :value="modelValue ?? ''"
+        :placeholder="placeholder"
+        :disabled="disabled"
+        :aria-required="required ? 'true' : undefined"
+        :autocomplete="autocomplete"
+        v-bind="controlAttrs"
+        @input="emitValue(($event.target as HTMLInputElement).value)"
+        @blur="emit('blur')"
+        @keydown="emit('keydown', $event)"
+      />
+      <button
+        type="button"
+        class="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border-0 bg-transparent text-[var(--tp-color-text-500)] hover:bg-[color-mix(in_srgb,var(--tp-bg-surface)_70%,transparent)] hover:text-[var(--tp-color-text-900)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        :aria-pressed="passwordVisible"
+        :aria-label="passwordToggleLabel"
+        :title="passwordToggleLabel"
+        :disabled="disabled"
+        @click="passwordVisible = !passwordVisible"
+      >
+        <EyeOff v-if="passwordVisible" :size="16" :stroke-width="2" />
+        <Eye v-else :size="16" :stroke-width="2" />
+      </button>
+    </div>
+
     <input
-      v-if="as === 'input'"
+      v-else-if="as === 'input'"
       :id="inputId"
       :class="mergeControlSizeClass(inputVariants(), controlClass)"
       :type="type"
@@ -122,7 +180,9 @@
 
 <script setup lang="ts">
 import type { HTMLAttributes, InputHTMLAttributes } from 'vue';
-import { computed, useAttrs } from 'vue';
+import { computed, ref, useAttrs } from 'vue';
+import { Eye, EyeOff } from '@lucide/vue';
+import { useI18n } from 'vue-i18n';
 import { cn } from '@/lib/utils';
 import {
   fieldErrorTextClass,
@@ -178,7 +238,14 @@ const emit = defineEmits<{
   (event: 'keydown', payload: KeyboardEvent): void;
 }>();
 
+const { t } = useI18n();
 const attrs = useAttrs();
+const passwordVisible = ref(false);
+const isPasswordField = computed(() => props.as === 'input' && props.type === 'password');
+const resolvedInputType = computed(() => (isPasswordField.value && passwordVisible.value ? 'text' : props.type));
+const passwordToggleLabel = computed(() =>
+  passwordVisible.value ? t('auth.form.hidePassword') : t('auth.form.showPassword')
+);
 /** 不把 HTML required 传给原生控件，避免浏览器按系统语言弹出校验气泡 */
 const controlAttrs = computed(() => {
   const raw = { ...(attrs as Record<string, unknown>) };

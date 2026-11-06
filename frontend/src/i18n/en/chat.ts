@@ -1,11 +1,6 @@
 export default {
   page: {
-    title: 'AI Chat Assistant',
-    subtitle: 'Finish the session and message loop first, then layer in enhancements'
-  },
-  toolbar: {
-    noSessionHint: 'Create or select a session to refresh, export, or clear messages.',
-    backendUnavailableHint: 'If sessions fail to load, check the backend connection, then try New session or Retry in the sidebar.'
+    title: 'AI Chat Assistant'
   },
   actions: {
     newSession: 'New Session',
@@ -125,7 +120,6 @@ export default {
     sendSuccess: 'Message sent',
     newSessionReady: 'New session created',
     createSessionFailed: 'Failed to create session',
-    noHistory: 'This session has no history yet',
     exportSuccess: 'Chat history export started',
     exportFailed: 'Failed to export chat history',
     clearSessionConfirm: 'Clear all messages in current session? This action cannot be undone.',
@@ -139,10 +133,7 @@ export default {
     deleteSessionFailed: 'Failed to delete session',
     renameSessionSuccess: 'Session renamed',
     renameSessionFailed: 'Failed to rename session',
-    renameSessionEmpty: 'Session name cannot be empty',
-    experimentalToggleSuccess: 'Experimental actions setting updated',
-    experimentalToggleFailed: 'Failed to update experimental actions setting',
-    experimentalActionsConfigDesc: 'Enable experimental action runtime'
+    renameSessionEmpty: 'Session name cannot be empty'
   },
   toolMarkdown: {
     genericActionSuccess: 'Action executed successfully',
@@ -186,6 +177,31 @@ export default {
       casesUnlinked: 'Cases with no requirement ({count})',
       requirementsWithCases: 'Requirements with cases ({count}, fewest first)',
       caseCount: '{count} cases'
+    },
+    listSeparator: ', ',
+    titleWithId: '{title} ({id})',
+    itemDetail: '{item}: {detail}',
+    actionDenied: 'Not allowed to run this action',
+    actionFailed: 'Action failed',
+    previewReady: 'Preview ready. Confirm to save.',
+    msg: {
+      requirement_not_found: 'Requirement not found',
+      requirement_forbidden: 'No access to this requirement',
+      requirement_required: 'Select a requirement',
+      requirement_text_required: 'Enter a requirement description or select a requirement',
+      no_preview_cases: 'No preview cases to save',
+      save_failed: 'Save failed',
+      cases_saved: 'Saved {count} draft cases',
+      no_scenario: 'No search, login or form scenario detected, and model supplements are off',
+      skeleton_preview: 'Rules wrote {rule}, the model added {llm}. Confirm to save.',
+      coverage_summary: '{covered} of {total} acceptance points covered, {issues} cases need structure fixes',
+      trace_summary: '{uncovered} of {requirements} requirements have no cases; {dangling} cases point to a missing requirement, {unlinked} cases have no requirement',
+      llm_unavailable: 'Case generation model is not initialized. Showing rule cases only.',
+      llm_failed: 'Model supplement failed. Showing rule cases only.',
+      llm_unparsed: 'The model returned no usable cases. Showing rule cases only.',
+      llm_budget_exhausted: 'Model usage limit reached. Showing rule cases only.',
+      preview_failed: 'Preview failed',
+      preview_invalid: 'Preview result has an invalid format'
     }
   },
   roles: {
@@ -213,7 +229,6 @@ export default {
   },
   template: {
     title: 'Templates',
-    placeholder: 'Choose a template and insert it into the message box.',
     selectLabel: 'Prompt Template',
     loading: 'Loading template...',
     empty: 'No template content',
@@ -243,30 +258,19 @@ export default {
   action: {
     pendingTitle: 'Pending action confirmation',
     executionId: 'Execution ID',
-    plan: 'Action plan',
-    intent: 'Intent',
-    tool: 'Tool',
-    risk: 'Risk',
-    args: 'Arguments',
-    preview: 'Dry-run preview',
-    deletePreviewTitle: 'Target to delete (dry-run)',
     highRiskHint: 'High-risk action: confirming will execute the operation.',
     deleteConfirmLabel: 'Type DELETE for second confirmation',
     deleteConfirmPlaceholder: 'Enter DELETE to enable confirm',
     deleteConfirmInvalid: 'Please type DELETE before confirming',
-    deleteConfirmReady: 'Second confirmation passed, ready to confirm',
-    deleteConfirmPending: 'Waiting for second confirmation (type DELETE)',
     field: {
       success: 'Success',
       message: 'Message',
       caseId: 'Case ID',
       title: 'Title',
       status: 'Status',
-      deleted: 'Will delete',
       dryRun: 'Dry run',
       total: 'Total',
-      count: 'Count',
-      useRag: 'Use RAG'
+      count: 'Count'
     }
   }
 };

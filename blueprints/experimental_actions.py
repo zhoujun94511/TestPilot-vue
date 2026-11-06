@@ -1,7 +1,5 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-import time
-
 from flask import Blueprint, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 from pydantic import ValidationError
@@ -16,17 +14,17 @@ from experiments.action_runtime.validation import (
 )
 from models.models import ToolExecutionLog
 from services.auth_service import auth_required, current_user
+from services.request_rate_limit import reset_rate_limits, sliding_window_allow
 
 experimental_actions_bp = Blueprint("experimental_actions", __name__, url_prefix="/api/experimental-actions")
 orchestrator = ExperimentalActionOrchestrator()
-_RATE_BUCKET: dict[str, list] = {}
 _RATE_LIMIT_MAX = 12
 _RATE_LIMIT_WINDOW_SECONDS = 60
 
 
 def clear_rate_limit_for_tests() -> None:
     """测试隔离用：清空进程内限流计数。"""
-    _RATE_BUCKET.clear()
+    reset_rate_limits()
 
 
 def _ensure_enabled():
@@ -211,11 +209,12 @@ def _guard_registered_tool(metadata: dict):
 
 
 def _enforce_rate_limit():
-    now = time.time()
-    key = _rate_limit_key()
-    bucket = _RATE_BUCKET.get(key, [])
-    bucket = [ts for ts in bucket if now - ts <= _RATE_LIMIT_WINDOW_SECONDS]
-    if len(bucket) >= _RATE_LIMIT_MAX:
+    allowed = sliding_window_allow(
+        f"experimental:{_rate_limit_key()}",
+        max_calls=_RATE_LIMIT_MAX,
+        window_seconds=_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    if not allowed:
         return jsonify({
             "success": False,
             "message": "请求过于频繁，请稍后重试",
@@ -224,8 +223,6 @@ def _enforce_rate_limit():
             "limit": _RATE_LIMIT_MAX,
             "window_seconds": _RATE_LIMIT_WINDOW_SECONDS,
         }), 429
-    bucket.append(now)
-    _RATE_BUCKET[key] = bucket
     return None
 
 
@@ -275,6 +272,18 @@ def execute():
             "error": "unauthorized",
         }), 401
 
+    session_id = str(body.session_id or "").strip() or None
+    if session_id:
+        from models.models import ChatSession
+        from services.chat_access import session_access_error
+
+        session_denied = session_access_error(ChatSession.query.filter_by(session_id=session_id).first())
+        if session_denied:
+            response, status = session_denied
+            payload = response.get_json() or {}
+            payload["error"] = "session_unavailable"
+            return jsonify(payload), status
+
     metadata = dict(body.metadata) if isinstance(body.metadata, dict) else {}
     if body.tool_name and str(body.tool_name).strip():
         metadata["tool_name"] = str(body.tool_name).strip()
@@ -290,7 +299,7 @@ def execute():
 
     action_request = ActionRequest(
         query=body.query,
-        session_id=body.session_id,
+        session_id=session_id,
         user_id=actor_id,
         require_confirmation=bool(body.require_confirmation),
         metadata=metadata,

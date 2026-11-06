@@ -2,10 +2,13 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { AuthUser, UserRole } from '@/api/auth';
 import { fetchCheckAuth, login as apiLogin, logout as apiLogout } from '@/api/auth';
+import { EXPERIMENTAL_TOOLS_SESSION_STORAGE_KEY } from '@/config/experimentalTools';
+import { setTabProjectId } from '@/lib/current-project';
 
 export const useAuthStore = defineStore('auth', () => {
   const bootstrapped = ref(false);
-  const authRequired = ref(false);
+  // 与后端 AUTH_REQUIRE_AUTH 默认值一致；探测失败时按需要登录处理
+  const authRequired = ref(true);
   const registerEnabled = ref(false);
   const registerRequiresApproval = ref(true);
   const passwordComplexityRequired = ref(true);
@@ -34,11 +37,22 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null;
   }
 
+  function markPasswordChangeRequired() {
+    if (user.value && !user.value.must_change_password) {
+      user.value = { ...user.value, must_change_password: true };
+    }
+  }
+
+  /** 不抛错：接口失败时本地状态照样清掉，调用方可以直接跳到登录页 */
   async function logout() {
     try {
       await apiLogout();
+    } catch (error) {
+      console.warn('logout request failed', error);
     } finally {
       user.value = null;
+      localStorage.removeItem(EXPERIMENTAL_TOOLS_SESSION_STORAGE_KEY);
+      setTabProjectId(null);
     }
   }
 
@@ -53,6 +67,11 @@ export const useAuthStore = defineStore('auth', () => {
     return hasRole('super_admin');
   }
 
+  function canManageKnowledgeIndex() {
+    if (!authRequired.value) return true;
+    return hasRole('super_admin', 'admin');
+  }
+
   return {
     bootstrapped,
     authRequired,
@@ -65,8 +84,10 @@ export const useAuthStore = defineStore('auth', () => {
     bootstrap,
     login,
     clearSession,
+    markPasswordChangeRequired,
     logout,
     hasRole,
-    canSeeConfigCenter
+    canSeeConfigCenter,
+    canManageKnowledgeIndex
   };
 });

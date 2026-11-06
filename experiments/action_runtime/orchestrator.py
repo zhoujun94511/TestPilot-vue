@@ -192,6 +192,20 @@ class ExperimentalActionOrchestrator:
             db.session.rollback()
             logger.warning("写入实验动作审计日志失败: %s", log_error)
 
+    @staticmethod
+    def _claim_for_execution(execution_id: str) -> bool:
+        """同一条待确认记录只能被执行一次：并发确认时只有改到状态的那个请求继续。"""
+        try:
+            claimed = ToolExecutionLog.query.filter_by(
+                execution_id=execution_id, status="needs_confirmation"
+            ).update({"status": "running"}, synchronize_session=False)
+            db.session.commit()
+        except Exception as claim_error:
+            db.session.rollback()
+            logger.warning("实验动作确认抢占失败: %s", claim_error)
+            return False
+        return claimed == 1
+
     def _execute_now(self, execution_id: str, request: ActionRequest, plan: ActionPlan) -> ActionResult:
         handler = self.registry.get(plan.tool_name)
         if not handler:
@@ -260,7 +274,7 @@ class ExperimentalActionOrchestrator:
                 message="动作执行失败",
                 plan=plan,
                 tool_output=None,
-                error=error_text,
+                error="internal_error",
             )
 
     def _preview(self, plan: ActionPlan) -> Dict[str, Any]:
@@ -270,8 +284,15 @@ class ExperimentalActionOrchestrator:
             output = handler(**args, save=False)
         except Exception as preview_error:  # noqa: BLE001
             logger.warning("实验动作预览失败: %s", preview_error)
-            return {"success": False, "message": f"预览失败: {preview_error}"}
-        return output if isinstance(output, dict) else {"success": False, "message": "预览结果格式错误"}
+            return {
+                "success": False,
+                "message": "预览失败",
+                "message_key": "preview_failed",
+                "message_params": {},
+            }
+        if isinstance(output, dict):
+            return output
+        return {"success": False, "message": "预览结果格式错误", "message_key": "preview_invalid", "message_params": {}}
 
     def run(self, request: ActionRequest) -> ActionResult:
         execution_id = str(uuid.uuid4())
@@ -458,6 +479,16 @@ class ExperimentalActionOrchestrator:
                     tool_output=None,
                     error="confirmation_required",
                 )
+        if not self._claim_for_execution(record.execution_id):
+            return self._build_result(
+                execution_id=record.execution_id,
+                success=False,
+                status="failed",
+                message="当前状态不可确认执行",
+                plan=None,
+                tool_output=None,
+                error="invalid_status:running",
+            )
         if plan.tool_name in PREVIEW_THEN_SAVE_TOOLS:
             plan.args["save"] = True
         action_request = ActionRequest(

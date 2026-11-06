@@ -111,6 +111,9 @@ def rbac_app(tmp_path, monkeypatch):
         )
 
         db.session.commit()
+        from services.project_service import backfill_projects
+
+        backfill_projects()
 
     return app
 
@@ -140,7 +143,7 @@ def test_dept_admin_cases_stats_is_scoped(rbac_app):
     assert stats.get('total_cases') == 1
 
 
-def test_super_admin_sees_all_department_cases(rbac_app):
+def test_super_admin_list_follows_current_project(rbac_app):
     client = rbac_app.test_client()
     assert client.post(
         '/api/auth/login',
@@ -149,7 +152,8 @@ def test_super_admin_sees_all_department_cases(rbac_app):
 
     payload = client.get('/api/cases/list').get_json()
     case_ids = {row.get('case_id') for row in payload.get('cases', [])}
-    assert {'TC-SCOPE-A', 'TC-SCOPE-B'}.issubset(case_ids)
+    assert 'TC-SCOPE-A' in case_ids
+    assert 'TC-SCOPE-B' not in case_ids
 
 
 def test_dept_user_cannot_read_other_department_case(rbac_app):
@@ -193,13 +197,17 @@ def test_dept_admin_system_status_hides_host_metrics(rbac_app):
     from services.auth_migrations import get_default_department_id
 
     with rbac_app.app_context():
+        from services.project_service import ensure_default_project
+
         dept_a_id = get_default_department_id()
         dept_b_id = Department.query.filter_by(code='dept_b').first().id
         db.session.add_all([
             RagFileRecord(file_name='a.md', file_path='knowledge/a.md', status='active',
-                          ids=str(['a1', 'a2']), dept_id=dept_a_id),
+                          ids=str(['a1', 'a2']), dept_id=dept_a_id,
+                          project_id=ensure_default_project(dept_a_id).id),
             RagFileRecord(file_name='b.md', file_path='knowledge/b.md', status='active',
-                          ids=str(['b1', 'b2', 'b3']), dept_id=dept_b_id),
+                          ids=str(['b1', 'b2', 'b3']), dept_id=dept_b_id,
+                          project_id=ensure_default_project(dept_b_id).id),
         ])
         db.session.commit()
 

@@ -20,7 +20,9 @@ const API_ERROR_I18N_KEY: Record<string, string> = {
   [ErrorCodes.MODEL_AUTH_FAILED]: 'chat.message.apiKeyInvalid',
   [ErrorCodes.MODEL_RATE_LIMITED]: 'chat.message.providerRateLimited',
   [ErrorCodes.MODEL_TIMEOUT]: 'chat.message.providerTimeout',
-  [ErrorCodes.MODEL_NETWORK_ERROR]: 'chat.message.providerNetworkError'
+  [ErrorCodes.MODEL_NETWORK_ERROR]: 'chat.message.providerNetworkError',
+  [ErrorCodes.TOKEN_SESSION_TOKEN_LIMIT]: 'common.tokenSession.exceededTokens',
+  [ErrorCodes.TOKEN_SESSION_CALL_LIMIT]: 'common.tokenSession.exceededCalls'
 };
 
 function lookupApiErrorI18nKey(error: ApiError): string | undefined {

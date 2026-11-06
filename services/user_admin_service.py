@@ -184,6 +184,8 @@ def admin_update_user(
         pwd_hash, salt = new_password_fields(password)
         target.password_hash = pwd_hash
         target.salt = salt
+        # 管理员设的密码对方并不私有，下次登录必须自己改掉
+        target.must_change_password = target.id != actor.get('id')
         revoke = True
 
     db.session.commit()
@@ -256,11 +258,17 @@ def change_own_password(old_password: str, new_password: str) -> None:
     user = User.query.get(actor['id'])
     if not user:
         raise LookupError('not_found')
-    if not verify_password(user.password_hash, user.salt, old_password):
+    forced = bool(user.must_change_password)
+    if not forced and not verify_password(user.password_hash, user.salt, old_password):
         raise ValueError('bad_old_password')
     validate_password(new_password)
+    if verify_password(user.password_hash, user.salt, new_password) or (
+        not forced and new_password == old_password
+    ):
+        raise ValueError('same_password')
     pwd_hash, salt = new_password_fields(new_password)
     user.password_hash = pwd_hash
     user.salt = salt
+    user.must_change_password = False
     db.session.commit()
     revoke_user_sessions(user.id)

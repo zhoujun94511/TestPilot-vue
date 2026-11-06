@@ -9,6 +9,7 @@ export interface AuthUser {
   role: UserRole;
   dept_id?: number | null;
   is_active: boolean;
+  must_change_password?: boolean;
   failed_login_count?: number;
   is_locked?: boolean;
   locked_until?: string | null;

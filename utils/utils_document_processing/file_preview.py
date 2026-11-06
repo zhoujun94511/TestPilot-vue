@@ -125,7 +125,7 @@ def get_file_preview(file_path: str, max_length: int = 3000, max_csv_rows: int =
                         'content_type': 'text',
                         'file_type': file_type,
                         'is_truncated': is_truncated,
-                        'error': f'JSON解析错误: {str(e)}'
+                        'error': 'JSON解析错误'
                     }
         
         # ----------------- CSV -----------------
@@ -250,11 +250,11 @@ def get_file_preview(file_path: str, max_length: int = 3000, max_csv_rows: int =
                 }
             except Exception as e:
                 return {
-                    'content': f'DOCX解析失败: {str(e)}',
+                    'content': 'DOCX解析失败',
                     'content_type': 'text',
                     'file_type': file_type,
                     'is_truncated': False,
-                    'error': str(e)
+                    'error': 'internal_error'
                 }
         
         # ----------------- PDF -----------------
@@ -297,11 +297,11 @@ def get_file_preview(file_path: str, max_length: int = 3000, max_csv_rows: int =
                 }
             except Exception as e:
                 return {
-                    'content': f'PDF解析失败: {str(e)}',
+                    'content': 'PDF解析失败',
                     'content_type': 'text',
                     'file_type': file_type,
                     'is_truncated': False,
-                    'error': str(e)
+                    'error': 'internal_error'
                 }
         
         # ----------------- Excel (XLSX) -----------------
@@ -358,11 +358,11 @@ def get_file_preview(file_path: str, max_length: int = 3000, max_csv_rows: int =
                 }
             except Exception as e:
                 return {
-                    'content': f'Excel解析失败: {str(e)}',
+                    'content': 'Excel解析失败',
                     'content_type': 'text',
                     'file_type': file_type,
                     'is_truncated': False,
-                    'error': str(e)
+                    'error': 'internal_error'
                 }
         
         # ----------------- YAML -----------------
@@ -397,11 +397,11 @@ def get_file_preview(file_path: str, max_length: int = 3000, max_csv_rows: int =
                     }
             except Exception as e:
                 return {
-                    'content': f'YAML解析失败: {str(e)}',
+                    'content': 'YAML解析失败',
                     'content_type': 'text',
                     'file_type': file_type,
                     'is_truncated': False,
-                    'error': str(e)
+                    'error': 'internal_error'
                 }
         
         # ----------------- 其他格式，尝试文本读取 -----------------
@@ -425,7 +425,7 @@ def get_file_preview(file_path: str, max_length: int = 3000, max_csv_rows: int =
                     'content_type': 'text',
                     'file_type': file_type,
                     'is_truncated': False,
-                    'error': str(e)
+                    'error': 'internal_error'
                 }
     
     except Exception as e:
@@ -434,11 +434,11 @@ def get_file_preview(file_path: str, max_length: int = 3000, max_csv_rows: int =
         if 'file_type' not in locals():
             file_type = 'unknown'
         return {
-            'content': f'获取预览失败: {str(e)}',
+            'content': '获取预览失败',
             'content_type': 'text',
             'file_type': file_type,
             'is_truncated': False,
-            'error': str(e)
+            'error': 'internal_error'
         }
 
 

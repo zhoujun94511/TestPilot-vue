@@ -124,10 +124,15 @@ def judge_sentences(llm, source_text: str, sentences: List[str]) -> List[Dict[st
         f"句子：\n{numbered}\n"
         '只返回 JSON 数组，例如 [{"index":1,"verdict":"entailed"}]。'
     )
+    from utils.utils_performance_monitoring.token_monitor import ensure_session_budget, record_message_usage
+    from utils.utils_performance_monitoring.token_session import TokenSessionLimitExceeded
+
     try:
+        ensure_session_budget()
         response = llm.invoke([{"role": "user", "content": prompt}])
+        record_message_usage(response, source="case_generation")
         content = response.content if hasattr(response, "content") else str(response)
-    except (AttributeError, TypeError, ValueError, RuntimeError, OSError, TimeoutError):
+    except (TokenSessionLimitExceeded, AttributeError, TypeError, ValueError, RuntimeError, OSError, TimeoutError):
         return []
     return _parse_sentence_verdicts(content, sentences)
 

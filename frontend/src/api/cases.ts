@@ -1,4 +1,15 @@
-import http, { ApiError, del, get, post, put } from './http';
+import http, {
+  ApiError,
+  del,
+  errorCodeFromPayload,
+  get,
+  LONG_TASK_TIMEOUT_MS,
+  notifyPasswordChangeRequired,
+  notifyUnauthorized,
+  post,
+  put,
+  resolveProjectHeaders
+} from './http';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -58,6 +69,7 @@ export interface CaseGenerationConfig {
   case_count_options: CaseCountOption[];
   test_type_options: Array<{ value: string; label: string }>;
   max_case_num?: number;
+  max_cases_per_requirement?: number;
   default_case_count?: number;
   priority_auto_determined?: boolean;
   enable_case_generation_rag?: boolean;
@@ -110,6 +122,16 @@ export interface CaseBatchGenerateResult {
   raw?: Record<string, unknown>;
 }
 
+export interface CaseStreamEvent {
+  type: 'start' | 'requirement_done' | 'requirement_failed' | 'done' | 'error';
+  index: number;
+  total: number;
+  savedCount: number;
+  failedCount: number;
+  message: string;
+  cases: CaseRecord[];
+}
+
 export interface CaseExportPayload {
   category?: string;
   priority?: string;
@@ -130,6 +152,7 @@ export interface CaseUpdatePayload {
   status?: string;
   module?: string;
   test_method?: string;
+  updated_time?: string | null;
 }
 
 export interface CaseGenerateFromAnalysisPayload {
@@ -258,6 +281,9 @@ function normalizeGenerationConfig(payload: unknown): CaseGenerationConfig {
     case_count_options: countOptions,
     test_type_options: testTypeOptions,
     max_case_num: normalized.max_case_num != null ? Number(normalized.max_case_num) : undefined,
+    max_cases_per_requirement: normalized.max_cases_per_requirement != null
+      ? Number(normalized.max_cases_per_requirement)
+      : undefined,
     default_case_count: normalized.default_case_count != null ? Number(normalized.default_case_count) : undefined,
     priority_auto_determined: Boolean(normalized.priority_auto_determined),
     enable_case_generation_rag: Boolean(normalized.enable_case_generation_rag),
@@ -361,7 +387,7 @@ export async function getCase(caseId: string): Promise<CaseRecord> {
 
 export async function generateCases(payload: CaseGeneratePayload): Promise<CaseGenerateResult> {
   try {
-    const response = await post<unknown>('/cases/generate', payload);
+    const response = await post<unknown>('/cases/generate', payload, { timeout: LONG_TASK_TIMEOUT_MS });
     const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to generate test cases'
     });
@@ -371,9 +397,133 @@ export async function generateCases(payload: CaseGeneratePayload): Promise<CaseG
   }
 }
 
+function buildApiBase(): string {
+  const base = import.meta.env.VITE_API_BASE_URL || '/api';
+  return base.endsWith('/') ? base.slice(0, -1) : base;
+}
+
+async function fetchSse(url: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  const response = await fetch(`${buildApiBase()}${url}`, {
+    method: 'POST',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept-Language': localStorage.getItem('testpilot_locale') || 'zh-CN',
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(await resolveProjectHeaders())
+    },
+    credentials: 'include',
+    body: JSON.stringify(body)
+  });
+  if (!response.ok || !response.body) {
+    notifyUnauthorized(response.status, url);
+    let errorMessage = `HTTP ${response.status}`;
+    let errorCode: string | undefined;
+    try {
+      const payload = await response.json();
+      if (isRecord(payload)) {
+        notifyPasswordChangeRequired(response.status, payload.code);
+        const message = pickCompatField(payload, ['message', 'error'], '');
+        if (message) errorMessage = String(message);
+        errorCode = errorCodeFromPayload(payload);
+      }
+    } catch {
+      // 保留 HTTP 状态说明
+    }
+    throw new ApiError(errorMessage, { code: response.status, errorCode });
+  }
+  return response;
+}
+
+async function* readSse(response: Response): AsyncGenerator<Record<string, unknown>> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: !done });
+      if (done) {
+        buffer += decoder.decode();
+        if (buffer.trim() && !buffer.endsWith('\n\n')) buffer += '\n\n';
+      }
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const packet = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf('\n\n');
+        const dataLine = packet
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n');
+        if (!dataLine) continue;
+        try {
+          const parsed = JSON.parse(dataLine) as unknown;
+          if (isRecord(parsed)) yield parsed;
+        } catch {
+          yield { type: 'error', message: dataLine };
+        }
+      }
+      if (done) break;
+    }
+  } finally {
+    // 调用方中途 break 时要取消底层流，否则连接会一直挂到服务端结束
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+function toStreamEvent(raw: Record<string, unknown>): CaseStreamEvent {
+  const typeValue = String(pickCompatField(raw, ['type'], 'error'));
+  const type = (
+    typeValue === 'start' || typeValue === 'requirement_done' || typeValue === 'requirement_failed' || typeValue === 'done'
+      ? typeValue
+      : 'error'
+  ) as CaseStreamEvent['type'];
+  return {
+    type,
+    index: Number(pickCompatField(raw, ['index'], 0)),
+    total: Number(pickCompatField(raw, ['total'], 0)),
+    savedCount: Number(pickCompatField(raw, ['saved_count'], 0)),
+    failedCount: Number(pickCompatField(raw, ['failed_count'], 0)),
+    message: String(pickCompatField(raw, ['message'], '')),
+    cases: coreAsArray<Record<string, unknown>>(pickCompatField(raw, ['cases'], [])).map(normalizeCaseRecord)
+  };
+}
+
+export async function streamBatchGenerateCases(
+  payload: { requirements: Array<string | object>; case_count_per_req?: number },
+  onEvent?: (event: CaseStreamEvent) => void,
+  signal?: AbortSignal
+): Promise<CaseBatchGenerateResult> {
+  const response = await fetchSse('/cases/batch-generate/stream', payload, signal);
+  const cases: CaseRecord[] = [];
+  let savedCount = 0;
+  let failedCount = 0;
+  let message = '';
+  for await (const raw of readSse(response)) {
+    const event = toStreamEvent(raw);
+    savedCount = event.savedCount;
+    failedCount = event.failedCount;
+    if (event.message) message = event.message;
+    if (event.type === 'requirement_done') cases.push(...event.cases);
+    onEvent?.(event);
+    if (event.type === 'error') {
+      throw new ApiError(event.message || 'Batch generation failed');
+    }
+  }
+  return {
+    cases,
+    total_cases: savedCount || cases.length,
+    message,
+    summary: { failed_count: failedCount }
+  };
+}
+
 export async function batchGenerateCases(payload: CaseBatchGeneratePayload): Promise<CaseBatchGenerateResult> {
   try {
-    const response = await post<unknown>('/cases/batch-generate', payload);
+    const response = await post<unknown>('/cases/batch-generate', payload, { timeout: LONG_TASK_TIMEOUT_MS });
     const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to batch generate test cases'
     });
@@ -452,7 +602,8 @@ export async function exportCases(payload: CaseExportPayload = {}, format: CaseE
       url: exportPath(format),
       method: 'POST',
       data: payload,
-      responseType: 'blob'
+      responseType: 'blob',
+      timeout: LONG_TASK_TIMEOUT_MS
     });
 
     const blob = response.data as Blob;
@@ -477,7 +628,8 @@ export async function downloadCasesTemplate(format: CaseTemplateFormat = 'excel'
       url: '/export/template/cases',
       method: 'GET',
       params: { type: format },
-      responseType: 'blob'
+      responseType: 'blob',
+      timeout: LONG_TASK_TIMEOUT_MS
     });
 
     const blob = response.data as Blob;
@@ -495,7 +647,7 @@ export async function downloadCasesTemplate(format: CaseTemplateFormat = 'excel'
 
 export async function generateCasesFromAnalysis(payload: CaseGenerateFromAnalysisPayload): Promise<CaseGenerateResult> {
   try {
-    const response = await post<unknown>('/cases/generate-from-analysis', payload);
+    const response = await post<unknown>('/cases/generate-from-analysis', payload, { timeout: LONG_TASK_TIMEOUT_MS });
     const normalized = coreNormalizeResponse<Record<string, unknown>>(response, {
       fallbackMessage: 'Failed to generate test cases from analysis'
     });

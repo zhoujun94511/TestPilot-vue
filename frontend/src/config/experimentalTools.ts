@@ -1,3 +1,6 @@
+/** 实验工具页复用的聊天会话 ID；登出时清掉，避免下一个账号接着用 */
+export const EXPERIMENTAL_TOOLS_SESSION_STORAGE_KEY = 'testpilot_experimental_tools_session_id';
+
 /** requirement：从当前账号可见的需求里下拉选择 */
 export type ExperimentalToolFieldType = 'number' | 'text' | 'textarea' | 'boolean' | 'requirement';
 

@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 import ast
+import os
 from pathlib import Path
 from datetime import datetime
 from werkzeug.exceptions import BadRequest
@@ -80,10 +81,37 @@ def _save_uploaded_file(file, file_path: Path) -> None:
             time.sleep(0.1)
 
 
+def _max_knowledge_total_size() -> int:
+    return int(current_app.config.get('MAX_CONTENT_LENGTH') or 3072 * 1024 * 1024)
+
+
+def _max_knowledge_file_size() -> int:
+    """单个文件上限：总上限的 1/6，且不超过 500MB；/config 返回同一个值给前端。"""
+    return min(500 * 1024 * 1024, _max_knowledge_total_size() // 6)
+
+
+def _upload_size(file) -> int:
+    stream = getattr(file, 'stream', file)
+    position = stream.tell()
+    stream.seek(0, os.SEEK_END)
+    size = stream.tell()
+    stream.seek(position)
+    return size
+
+
 def _process_knowledge_upload(file, description: str, category: str, relative_path: str = ''):
     """处理单个知识库文件上传，返回 (result, status_code)"""
     if not file or file.filename == '':
         raise BadRequest("未选择文件")
+
+    max_file_size = _max_knowledge_file_size()
+    if _upload_size(file) > max_file_size:
+        return {
+            'success': False,
+            'message': f'文件过大，最大支持 {max_file_size // (1024 * 1024)}MB',
+            'error': 'FILE_TOO_LARGE',
+            'error_code': 'FILE_TOO_LARGE',
+        }, 413
 
     original_filename = file.filename
     if '/' in original_filename or '\\' in original_filename:
@@ -284,8 +312,15 @@ def search_knowledge():
             raise BadRequest("搜索查询不能为空")
 
         # 搜索参数（支持 top_k 和 limit 两种参数名）
-        top_k = data.get('top_k') or data.get('limit', current_app.config.get('RAG_TOP_K', 5))
-        score_threshold = data.get('score_threshold', current_app.config.get('RAG_SCORE_THRESHOLD', 0.7))
+        top_k = data.get('top_k') or data.get('limit', config_settings.RAG_TOP_K)
+        score_threshold = data.get('score_threshold')
+        if score_threshold is not None:
+            try:
+                score_threshold = float(score_threshold)
+            except (TypeError, ValueError):
+                raise BadRequest("相似度阈值必须是数字")
+            if not 0 <= score_threshold <= 1:
+                raise BadRequest("相似度阈值必须在 0 到 1 之间")
         page = data.get('page', 1)
         per_page = data.get('per_page', 10)
         
@@ -293,7 +328,7 @@ def search_knowledge():
         try:
             top_k = int(top_k)
         except (ValueError, TypeError):
-            top_k = current_app.config.get('RAG_TOP_K', 5)
+            top_k = config_settings.RAG_TOP_K
 
         try:
             page = int(page)
@@ -308,6 +343,7 @@ def search_knowledge():
             per_page = 10
         if per_page < 1:
             per_page = 10
+        per_page = min(per_page, 100)
 
         # 分页查询至少需要拿到当前页范围的数据
         required_top_k = page * per_page
@@ -387,7 +423,7 @@ def list_knowledge_files():
     try:
         # 获取查询参数
         page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
+        per_page = min(max(1, request.args.get('per_page', 20, type=int) or 20), 200)
         file_type = request.args.get('file_type')
         category = request.args.get('category', '').strip()
         status = request.args.get('status', 'active')
@@ -404,8 +440,8 @@ def list_knowledge_files():
         query = filter_column_eq(query, RagFileRecord.status, status or None)
         if search:
             query = query.filter(
-                RagFileRecord.file_name.contains(search) |
-                RagFileRecord.description.contains(search)
+                RagFileRecord.file_name.contains(search, autoescape=True) |
+                RagFileRecord.description.contains(search, autoescape=True)
             )
 
         # 排序和分页
@@ -506,7 +542,7 @@ def get_knowledge_file(file_id):
                 current_app.logger.warning(f"知识库文件不存在: {file_path}")
         except Exception as e:
             current_app.logger.warning(f"获取文件预览失败: {e}", exc_info=True)
-            file_dict['preview'] = f'获取预览失败: {str(e)}'
+            file_dict['preview'] = '获取预览失败'
             file_dict['preview_type'] = 'text'
             file_dict['preview_truncated'] = False
 
@@ -526,6 +562,60 @@ def get_knowledge_file(file_id):
         }), 500
 
 
+def _remove_knowledge_record(record):
+    """删向量、删文件并把记录标记为待删除（不提交）；向量删不掉时保留记录并返回错误文案。"""
+    if record.ids:
+        try:
+            doc_ids = ast.literal_eval(record.ids)
+        except (ValueError, SyntaxError) as e:
+            current_app.logger.error(f"知识库记录 {record.id} 的向量 ID 无法解析: {e}")
+            return '向量记录无法解析，文件记录已保留'
+        if isinstance(doc_ids, list) and doc_ids:
+            delete_result = knowledge_service.delete_documents(
+                document_ids=doc_ids,
+                vector_db=getattr(current_app, 'vector_db', None)  # type: ignore
+            )
+            if not delete_result['success']:
+                current_app.logger.warning(f"向量数据库删除失败: {delete_result.get('message')}")
+                failed_ids = delete_result.get('failed_ids')
+                if failed_ids:
+                    record.ids = str(failed_ids)
+                return '向量数据删除失败，文件记录已保留'
+
+    db.session.delete(record)
+    return None
+
+
+def _remove_knowledge_file(relative_path) -> None:
+    """记录删除提交成功之后再删磁盘文件，提交失败时文件还在、记录也还在。"""
+    if not relative_path:
+        return
+    try:
+        knowledge_dir = get_knowledge_uploads_path().resolve()
+        file_path = (Path(current_app.config['UPLOAD_FOLDER']) / relative_path).resolve()
+        if file_path.is_relative_to(knowledge_dir):
+            file_path.unlink(missing_ok=True)
+        else:
+            current_app.logger.warning(f"拒绝删除非知识库目录文件: {file_path}")
+    except (OSError, IOError) as e:
+        current_app.logger.warning(f"删除物理文件失败: {e}")
+
+
+def _delete_knowledge_record(record):
+    """删一条记录并提交；返回错误文案，成功返回 None。"""
+    relative_path = record.file_path
+    try:
+        error = _remove_knowledge_record(record)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    if error:
+        return error
+    _remove_knowledge_file(relative_path)
+    return None
+
+
 @knowledge_bp.route('/<int:file_id>', methods=['DELETE'])
 def delete_knowledge_file(file_id):
     """删除知识库文件"""
@@ -539,48 +629,15 @@ def delete_knowledge_file(file_id):
         if not can_access_record(record, 'knowledge'):
             return _knowledge_access_denied()
 
-        # 从向量数据库中删除文档
-        if record.ids:
-            try:
-                doc_ids = ast.literal_eval(record.ids)
-                if isinstance(doc_ids, list) and doc_ids:
-                    delete_result = knowledge_service.delete_documents(
-                        document_ids=doc_ids,
-                        vector_db=getattr(current_app, 'vector_db', None)  # type: ignore
-                    )
-                    if not delete_result['success']:
-                        current_app.logger.warning(f"向量数据库删除失败: {delete_result.get('message')}")
-                        return jsonify({
-                            'success': False,
-                            'message': '向量数据删除失败，文件记录已保留',
-                            'error': 'vector_delete_failed'
-                        }), 500
-            except (ValueError, SyntaxError) as e:
-                current_app.logger.error(f"删除向量数据库文档失败: {e}")
-                return jsonify({
-                    'success': False,
-                    'message': '向量记录无法解析，文件记录已保留',
-                    'error': 'vector_delete_failed'
-                }), 500
-
-        # 删除物理文件（仅限知识库目录）
-        if record.file_path:
-            try:
-                from pathlib import Path
-                file_path = Path(current_app.config['UPLOAD_FOLDER']) / record.file_path
-                knowledge_dir = get_knowledge_uploads_path()
-                
-                # 安全检查：确保文件在知识库目录内
-                if file_path.exists() and str(knowledge_dir) in str(file_path.resolve()):
-                    file_path.unlink()
-                elif file_path.exists():
-                    current_app.logger.warning(f"拒绝删除非知识库目录文件: {file_path}")
-            except (OSError, IOError) as e:
-                current_app.logger.warning(f"删除物理文件失败: {e}")
-
-        # 从数据库删除记录
-        db.session.delete(record)
-        db.session.commit()
+        error = _delete_knowledge_record(record)
+        if error:
+            return jsonify({
+                'success': False,
+                'message': error,
+                'error': 'vector_delete_failed',
+                'error_code': 'vector_delete_failed',
+                'retryable': True,
+            }), 500
 
         return jsonify({
             'success': True,
@@ -678,17 +735,13 @@ def update_knowledge_file(file_id):
 def get_knowledge_config():
     """获取知识库上传配置（文件大小限制、允许的文件类型等）"""
     try:
-        max_content_length = current_app.config.get('MAX_CONTENT_LENGTH', 3072 * 1024 * 1024)
         allowed_extensions = current_app.config.get('ALLOWED_EXTENSIONS', {'txt', 'csv', 'docx', 'pdf', 'json', 'md'})
-        
-        # 单个文件限制建议为总限制的1/6，但最小500MB，最大500MB（当前后端没有单独限制）
-        max_file_size = min(500 * 1024 * 1024, max_content_length // 6)
-        
+
         return jsonify({
             'success': True,
             'config': {
-                'max_file_size': max_file_size,  # 单个文件最大大小（字节）
-                'max_total_size': max_content_length,  # 批量上传总大小限制（字节）
+                'max_file_size': _max_knowledge_file_size(),  # 单个文件最大大小（字节）
+                'max_total_size': _max_knowledge_total_size(),  # 批量上传总大小限制（字节）
                 'allowed_extensions': list(allowed_extensions)  # 允许的文件类型
             }
         })
@@ -696,7 +749,7 @@ def get_knowledge_config():
         current_app.logger.error(f"获取知识库配置失败: {e}")
         return jsonify({
             'success': False,
-            'message': f'获取配置失败: {str(e)}',
+            'message': '获取配置失败',
             'error': 'INTERNAL_SERVER_ERROR',
             'error_code': 'INTERNAL_SERVER_ERROR',
             'retryable': False
@@ -813,45 +866,14 @@ def batch_delete_knowledge_files():
                     failed_count += 1
                     continue
 
-                # 从向量数据库中删除文档
-                if record.ids:
-                    try:
-                        doc_ids = ast.literal_eval(record.ids)
-                        if isinstance(doc_ids, list) and doc_ids:
-                            delete_result = knowledge_service.delete_documents(
-                                document_ids=doc_ids,
-                                vector_db=getattr(current_app, 'vector_db', None)  # type: ignore
-                            )
-                            if not delete_result['success']:
-                                current_app.logger.warning(f"向量数据库删除失败: {delete_result.get('message')}")
-                    except (ValueError, SyntaxError) as e:
-                        current_app.logger.error(f"删除向量数据库文档失败: {e}")
-
-                # 删除物理文件（仅限知识库目录）
-                if record.file_path:
-                    try:
-                        from pathlib import Path
-                        file_path = Path(current_app.config['UPLOAD_FOLDER']) / record.file_path
-                        knowledge_dir = get_knowledge_uploads_path()
-                        
-                        # 安全检查：确保文件在知识库目录内
-                        if file_path.exists() and str(knowledge_dir) in str(file_path.resolve()):
-                            file_path.unlink()
-                        elif file_path.exists():
-                            current_app.logger.warning(f"拒绝删除非知识库目录文件: {file_path}")
-                    except (OSError, IOError) as e:
-                        current_app.logger.warning(f"删除物理文件失败: {e}")
-
-                # 从数据库删除记录
-                db.session.delete(record)
+                if _delete_knowledge_record(record):
+                    failed_count += 1
+                    continue
                 deleted_count += 1
 
             except Exception as e:
                 current_app.logger.error(f"删除文件{file_id}失败: {e}")
                 failed_count += 1
-
-        # 提交所有删除操作
-        db.session.commit()
 
         return jsonify({
             'success': True,
@@ -882,21 +904,23 @@ def rebuild_knowledge_base():
     """重建知识库"""
     try:
         data = request.get_json() or {}
-        force_rebuild = data.get('force', False)
-        clear_all = data.get('clear_all', False)  # 是否完全清空向量数据库
+        clear_all = bool(data.get('clear_all', False))
 
-        if clear_all and auth_required():
-            user = current_user()
-            if not user or user.get('role') != 'super_admin':
+        if auth_required():
+            role = (current_user() or {}).get('role')
+            if clear_all and role != 'super_admin':
                 return jsonify({
                     'success': False,
                     'message': '仅超级管理员可清空全库向量数据',
                 }), 403
+            if role not in ('super_admin', 'admin'):
+                return jsonify({
+                    'success': False,
+                    'message': '仅管理员可重建知识库索引',
+                }), 403
 
-        # 执行重建
         result = knowledge_service.rebuild_knowledge_base(
             vector_db=getattr(current_app, 'vector_db', None),  # type: ignore
-            force=force_rebuild,
             clear_all=clear_all
         )
 

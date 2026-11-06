@@ -30,7 +30,12 @@ def _resolve_vector_store(vector_db):
     return actual
 
 
-def _metadata_scope_satisfied(metadatas: list, *, file_id: int, dept_id: int) -> bool:
+def _metadata_scope_satisfied(
+    metadatas: list,
+    *,
+    file_id: int,
+    dept_id: int,
+) -> bool:
     if not metadatas:
         return False
     for item in metadatas:

@@ -1,5 +1,10 @@
 import { computed, ref, type Ref } from 'vue';
-import { listChatSessions, type ChatSessionRecord } from '@/api/chat';
+import {
+  generateChatSessionTitle,
+  listChatSessions,
+  type ChatSessionRecord,
+  type ChatSessionTitleSource
+} from '@/api/chat';
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error';
 
 export interface ChatSessionPagination {
@@ -83,7 +88,10 @@ export function useChatSessions(options: UseChatSessionsOptions) {
       sessions.value = response.sessions;
       sessionPagination.value = response.pagination;
 
-      if (silent) {
+      const current = sessions.value.find((item) => item.session_id === options.currentSessionId.value);
+      if (current) {
+        options.currentSessionTitle.value = current.title;
+      } else if (silent) {
         ensureSessionVisible(options.currentSessionId.value, options.currentSessionTitle.value);
       }
 
@@ -118,6 +126,36 @@ export function useChatSessions(options: UseChatSessionsOptions) {
     }
   }
 
+  function applySessionTitle(sessionId: string, title: string, titleSource: ChatSessionTitleSource) {
+    const index = sessions.value.findIndex((item) => item.session_id === sessionId);
+    if (index >= 0) {
+      sessions.value[index] = { ...sessions.value[index], title, title_source: titleSource };
+    }
+    if (options.currentSessionId.value === sessionId) {
+      options.currentSessionTitle.value = title;
+    }
+  }
+
+  const pendingTitleRequests = new Set<string>();
+
+  /** 标题未定的会话在回复完成后请求一次标题；失败不提示，下次回复后再试 */
+  async function requestSessionTitle(sessionId: string) {
+    if (!sessionId || pendingTitleRequests.has(sessionId)) return;
+    if (sessions.value.find((item) => item.session_id === sessionId)?.title_source) return;
+    pendingTitleRequests.add(sessionId);
+    try {
+      const record = await generateChatSessionTitle(sessionId);
+      const local = sessions.value.find((item) => item.session_id === sessionId);
+      // 等标题期间用户手动改了名，以手动名称为准
+      if (local?.title_source === 'manual') return;
+      if (record?.title_source) applySessionTitle(sessionId, record.title, record.title_source);
+    } catch {
+      // 标题生成失败不影响对话
+    } finally {
+      pendingTitleRequests.delete(sessionId);
+    }
+  }
+
   async function changeSessionPage(page: number) {
     if (page < 1 || page > (sessionPagination.value.pages || 1)) return;
     await loadSessions(false, page);
@@ -132,6 +170,8 @@ export function useChatSessions(options: UseChatSessionsOptions) {
     loadSessions,
     changeSessionPage,
     findSessionTitle,
-    ensureSessionVisible
+    ensureSessionVisible,
+    applySessionTitle,
+    requestSessionTitle
   };
 }

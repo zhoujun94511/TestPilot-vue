@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section :class="pageRootMarkedClass(pageMarkerDashboard)">
     <BaseState
       v-if="hasPartialError"
@@ -28,14 +28,32 @@
         </div>
       </template>
       <template #actions>
-        <TpButton variant="ghost" size="sm" :loading="bundleExporting" :disabled="bundleExporting" @click="handleExportBundle">
-          {{ bundleExporting ? t('dashboard.actions.bundleExporting') : t('dashboard.actions.bundleExport') }}
+        <TpButton
+          variant="ghost"
+          size="sm"
+          :loading="bundleExporting"
+          :aria-label="bundleExporting ? t('dashboard.actions.bundleExporting') : undefined"
+          @click="handleExportBundle"
+        >
+          {{ t('dashboard.actions.bundleExport') }}
         </TpButton>
-        <TpButton variant="ghost" size="sm" :loading="exporting" :disabled="exporting" @click="handleExportStats">
-          {{ exporting ? t('dashboard.actions.exporting') : t('dashboard.actions.export') }}
+        <TpButton
+          variant="ghost"
+          size="sm"
+          :loading="exporting"
+          :aria-label="exporting ? t('dashboard.actions.exporting') : undefined"
+          @click="handleExportStats"
+        >
+          {{ t('dashboard.actions.export') }}
         </TpButton>
-        <TpButton variant="secondary" size="sm" :loading="refreshing" @click="handleRefresh">
-          {{ refreshing ? t('dashboard.actions.refreshing') : t('dashboard.actions.refresh') }}
+        <TpButton
+          variant="secondary"
+          size="sm"
+          :loading="refreshing"
+          :aria-label="refreshing ? t('dashboard.actions.refreshing') : undefined"
+          @click="handleRefresh"
+        >
+          {{ t('dashboard.actions.refresh') }}
         </TpButton>
       </template>
     </ActionBar>
@@ -45,7 +63,6 @@
         <div :class="flexBetweenStartGap2Class">
           <div>
             <div :class="sectionTitleClass">{{ t('dashboard.shortcuts.title') }}</div>
-            <div :class="sectionSubtitleClass">{{ t('dashboard.shortcuts.subtitle') }}</div>
           </div>
         </div>
       </template>
@@ -55,7 +72,6 @@
           :key="item.key"
           :to="item.to"
           :title="item.title"
-          :description="item.description"
           :icon="item.icon"
         />
       </div>
@@ -65,14 +81,12 @@
       <template #header>
         <div>
           <div :class="sectionTitleClass">{{ t('dashboard.kpi.title') }}</div>
-          <div :class="sectionSubtitleClass">{{ t('dashboard.kpi.subtitle') }}</div>
         </div>
       </template>
       <BaseState
         v-if="overviewLoading && !overview"
         variant="loading"
         :title="t('dashboard.state.loadingOverview')"
-        :message="t('dashboard.state.loadingHint')"
       />
       <div v-else :class="grid12Class">
         <div v-for="card in kpiCards" :key="card.key" :class="colSpan12Md6Min1400_3">
@@ -91,7 +105,6 @@
       <template #header>
         <div>
           <div :class="sectionTitleClass">{{ t('dashboard.system.title') }}</div>
-          <div :class="sectionSubtitleClass">{{ t('dashboard.system.subtitle') }}</div>
         </div>
       </template>
 
@@ -99,7 +112,6 @@
         v-if="systemLoading && !system && !health"
         variant="loading"
         :title="t('dashboard.state.loadingSystem')"
-        :message="t('dashboard.state.loadingHint')"
       />
       <BaseState
         v-else-if="systemError && !system && !health && !hasPartialError"
@@ -128,7 +140,6 @@
           <template #header>
             <div>
               <div :class="sectionTitleClass">{{ t('dashboard.advanced.title') }}</div>
-              <div :class="sectionSubtitleClass">{{ t('dashboard.advanced.subtitle') }}</div>
             </div>
           </template>
 
@@ -136,7 +147,6 @@
             v-if="advancedLoading && !advancedMetricsLoaded"
             variant="loading"
             :title="t('dashboard.state.loadingAdvanced')"
-            :message="t('dashboard.state.loadingHint')"
           />
           <BaseState
             v-else-if="advancedError && !advancedMetricsLoaded"
@@ -149,8 +159,7 @@
           <BaseState
             v-else-if="advancedMetricsLoaded && advancedIsEmpty"
             variant="empty"
-            :title="t('dashboard.advanced.title')"
-            :message="t('dashboard.advanced.emptyCollapsed')"
+            :title="t('dashboard.advanced.badgeNoData')"
           />
           <div v-else :class="dashboardAdvancedListSideClass">
             <DashboardStatTile
@@ -173,9 +182,8 @@
             <div :class="flexBetweenStartGap2Class">
               <div>
                 <div :class="sectionTitleClass">{{ t('dashboard.activities.title') }}</div>
-                <div :class="sectionSubtitleClass">{{ t('dashboard.activities.subtitle') }}</div>
               </div>
-              <TpTag variant="primary">{{ activities.length }}</TpTag>
+              <TpTag variant="primary">{{ activityTotal }}</TpTag>
             </div>
           </template>
 
@@ -183,7 +191,6 @@
             v-if="activitiesLoading && !activities.length"
             variant="loading"
             :title="t('dashboard.state.loadingActivities')"
-            :message="t('dashboard.state.loadingHint')"
           />
           <BaseState
             v-else-if="activitiesError && !activities.length && !hasPartialError"
@@ -197,9 +204,13 @@
             v-else-if="!activities.length"
             variant="empty"
             :title="t('dashboard.activities.emptyTitle')"
-            :message="t('dashboard.activities.emptyMessage')"
           />
-          <DashboardActivityGroups v-else :activities="activities" />
+          <DashboardActivityGroups
+            v-else
+            :activities="activities"
+            :counts="activityCounts"
+            :period-days="activityPeriodDays"
+          />
         </TpCard>
       </div>
     </div>
@@ -249,6 +260,7 @@ import TpCard from '@/components/ui/base/TpCard.vue';
 import TpTag from '@/components/ui/base/TpTag.vue';
 import { refreshAppFeatureFlags } from '@/composables/useFeatureFlags';
 import { useAiResult } from '@/composables/useAiResult';
+import { useAuthStore } from '@/stores/auth';
 import {
   exportBatchZip,
   exportStats,
@@ -273,7 +285,6 @@ import {
   kpiHintClass,
   kpiLabelClass,
   kpiValueClass,
-  sectionSubtitleClass,
   sectionTitleClass
 } from '@/lib/page-typography';
 
@@ -292,24 +303,33 @@ interface ShortcutTile {
   key: string;
   to: string;
   title: string;
-  description: string;
   icon: AppNavIcon;
 }
 
 const { t, locale } = useI18n();
 const dashboardDateLocale = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'));
 const router = useRouter();
+const authStore = useAuthStore();
+const canOpenConfig = computed(() => authStore.canSeeConfigCenter());
 const toast = useToast();
 
 const overview = ref<OverviewStats | null>(null);
 const health = ref<HealthStatus | null>(null);
 const system = ref<SystemStatus | null>(null);
 const activities = ref<RecentActivityRecord[]>([]);
+const activityCounts = ref<Record<string, number> | undefined>();
+const activityPeriodDays = ref(30);
+const activityTotal = computed(() => {
+  const counts = activityCounts.value;
+  if (!counts) return activities.value.length;
+  return Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+});
 const usageStats = ref<UsageStatsResponse | null>(null);
 const tokenStats = ref<TokenStatsResponse | null>(null);
 const logStats = ref<LogStatsResponse | null>(null);
 
 const LOG_STATS_HOURS = 24;
+const OVERVIEW_DAYS = 30;
 
 const overviewLoading = ref(false);
 const systemLoading = ref(false);
@@ -420,55 +440,54 @@ const attentionNotice = computed<PageBannerNotice | null>(() => {
       type: 'danger',
       title: t('dashboard.attention.aiTitle'),
       message: t('dashboard.attention.aiMessage'),
-      actionLabel: t('dashboard.attention.aiAction')
+      actionLabel: canOpenConfig.value ? t('dashboard.attention.aiAction') : undefined
     };
   }
 
   if (!showOfflineMetrics.value && reliabilityScore.value > 0 && reliabilityScore.value < 60) {
     return {
       type: 'warning',
-      title: t('dashboard.attention.reliabilityTitle'),
-      message: t('dashboard.attention.reliabilityMessage'),
-      actionLabel: t('dashboard.attention.aiAction')
+      message: t('dashboard.attention.reliabilityTitle'),
+      actionLabel: canOpenConfig.value ? t('dashboard.attention.aiAction') : undefined
     };
   }
 
   return null;
 });
 
-const shortcutTiles = computed<ShortcutTile[]>(() => [
+const shortcutTiles = computed<ShortcutTile[]>(() => allShortcutTiles.value.filter(
+  (tile) => tile.key !== 'config' || canOpenConfig.value
+));
+
+const allShortcutTiles = computed<ShortcutTile[]>(() => [
   {
     key: 'generate',
     to: '/cases/generate',
     title: t('common.actions.generate'),
-    description: t('dashboard.shortcuts.generateDesc'),
     icon: navIconForModulePath('/cases/generate')
   },
   {
     key: 'upload',
     to: '/documents/upload',
     title: t('common.actions.upload'),
-    description: t('dashboard.shortcuts.uploadDesc'),
     icon: navIconForModulePath('/documents/upload')
   },
   {
     key: 'chat',
     to: '/chat',
     title: t('common.nav.chat'),
-    description: t('dashboard.shortcuts.chatDesc'),
     icon: navIconForModulePath('/chat')
   },
   {
     key: 'config',
     to: '/config',
     title: t('common.nav.configCenter'),
-    description: t('dashboard.shortcuts.configDesc'),
     icon: navIconForModulePath('/config')
   }
 ]);
 
 function handleAttentionAction() {
-  router.push('/config');
+  if (canOpenConfig.value) router.push('/config');
 }
 
 function aiServiceRowHint(): string {
@@ -518,13 +537,17 @@ function runtimeLogsHint(): string {
   });
 }
 
-const systemStatCards = computed<KpiCard[]>(() => [
+const systemStatCards = computed<KpiCard[]>(() => allSystemStatCards.value.filter(
+  (card) => card.key !== 'runtime-logs' || canOpenConfig.value
+));
+
+const allSystemStatCards = computed<KpiCard[]>(() => [
   {
     key: 'ai',
     label: t('dashboard.system.aiService'),
     value: displayStatusLabel(system.value?.system?.ai_service?.status),
     hint: aiServiceRowHint(),
-    to: '/config',
+    to: canOpenConfig.value ? '/config' : undefined,
     icon: navIconForModulePath('/config')
   },
   {
@@ -579,23 +602,22 @@ function formatOverviewKpiValue(raw: number | undefined): string {
 const kpiCards = computed<KpiCard[]>(() => {
   const totals = overview.value?.totals;
   const recent = overview.value?.recent_activity;
+  const days = recent?.period_days ?? OVERVIEW_DAYS;
 
   return [
     {
       key: 'cases',
       label: t('dashboard.kpi.totalCases'),
       value: formatOverviewKpiValue(totals?.test_cases),
-      hint: t('dashboard.kpi.casesHint', { name: t('common.nav.cases') }),
+      hint: recent ? t('dashboard.kpi.recentNew', { days, count: formatNumber(recent.test_cases ?? 0) }) : undefined,
       to: '/cases',
       icon: navIconForModulePath('/cases')
     },
     {
       key: 'documents',
-      label: t('dashboard.kpi.totalDocuments'),
+      label: t('dashboard.kpi.totalRequirements'),
       value: formatOverviewKpiValue(totals?.requirements),
-      hint: recent
-        ? `${t('dashboard.kpi.recentDocuments')}: ${formatNumber(recent.requirements ?? 0)}`
-        : t('dashboard.kpi.documentsHint', { name: t('common.nav.documents') }),
+      hint: recent ? t('dashboard.kpi.recentNew', { days, count: formatNumber(recent.requirements ?? 0) }) : undefined,
       to: '/documents',
       icon: navIconForModulePath('/documents')
     },
@@ -603,7 +625,6 @@ const kpiCards = computed<KpiCard[]>(() => {
       key: 'knowledge',
       label: t('dashboard.kpi.totalKnowledge'),
       value: formatOverviewKpiValue(totals?.knowledge_files),
-      hint: t('dashboard.kpi.knowledgeHint', { name: t('common.nav.knowledgeBase') }),
       to: '/knowledge',
       icon: navIconForModulePath('/knowledge')
     },
@@ -611,9 +632,7 @@ const kpiCards = computed<KpiCard[]>(() => {
       key: 'chat',
       label: t('dashboard.kpi.totalChatSessions'),
       value: formatOverviewKpiValue(totals?.chat_sessions),
-      hint: recent
-        ? `${t('dashboard.kpi.recentChats')}: ${formatNumber(recent.chat_messages ?? 0)}`
-        : t('dashboard.kpi.chatHint', { name: t('common.nav.chat') }),
+      hint: recent ? t('dashboard.kpi.recentMessages', { days, count: formatNumber(recent.chat_messages ?? 0) }) : undefined,
       to: '/chat',
       icon: navIconForModulePath('/chat')
     }
@@ -682,7 +701,6 @@ const advancedStatCards = computed<KpiCard[]>(() => {
       key: 'recent-cases',
       label: t('dashboard.advanced.recentCases', { days: usageDays }),
       value: recentCases > 0 ? formatNumber(recentCases) : noData,
-      hint: t('dashboard.advanced.recentCasesHint'),
       to: '/cases',
       icon: navIconForModulePath('/cases')
     },
@@ -690,7 +708,6 @@ const advancedStatCards = computed<KpiCard[]>(() => {
       key: 'recent-requirements',
       label: t('dashboard.advanced.recentRequirements', { days: usageDays }),
       value: recentRequirements > 0 ? formatNumber(recentRequirements) : noData,
-      hint: t('dashboard.advanced.recentRequirementsHint'),
       to: '/documents',
       icon: navIconForModulePath('/documents')
     },
@@ -698,7 +715,6 @@ const advancedStatCards = computed<KpiCard[]>(() => {
       key: 'recent-chats',
       label: t('dashboard.advanced.recentChats', { days: usageDays }),
       value: recentChats > 0 ? formatNumber(recentChats) : noData,
-      hint: t('dashboard.advanced.recentChatsHint'),
       to: '/chat',
       icon: navIconForModulePath('/chat')
     },
@@ -818,10 +834,6 @@ function buildFallbackActivities() {
   return items;
 }
 
-function dismissErrorNotice() {
-  errorVisible.value = false;
-}
-
 function handlePartialErrorRetry() {
   errorVisible.value = true;
   void handleRefresh();
@@ -831,7 +843,7 @@ async function handleExportStats() {
   if (exporting.value) return;
   exporting.value = true;
   try {
-    const blob = await exportStats({ type: 'overview', format: 'csv', days: 7 });
+    const blob = await exportStats({ type: 'overview', format: 'csv', days: OVERVIEW_DAYS });
     const stamp = new Date().toISOString().slice(0, 10);
     triggerBlobDownload(blob, `stats-overview-${stamp}.csv`);
     toast.success(t('dashboard.message.exportSuccess'));
@@ -877,7 +889,7 @@ async function loadAdvancedMetrics(options: { bustCache?: boolean; requestSeq?: 
 
   try {
     const [usageResult, tokensResult] = await Promise.allSettled([
-      getUsageStats({ days: 30, ...cacheQuery }),
+      getUsageStats({ days: OVERVIEW_DAYS, ...cacheQuery }),
       getTokenStats({ days: 7, ...cacheQuery })
     ]);
 
@@ -925,11 +937,11 @@ async function loadDashboard(options: { bustCache?: boolean } = {}) {
 
   try {
     const [overviewResult, healthResult, systemResult, activitiesResult, logsResult] = await Promise.allSettled([
-      getOverviewStats(cacheQuery),
+      getOverviewStats({ days: OVERVIEW_DAYS, ...cacheQuery }),
       getHealthStatus(cacheQuery),
       getSystemStatus(cacheQuery),
-      getRecentActivities(cacheQuery),
-      getLogStats({ hours: LOG_STATS_HOURS, ...cacheQuery })
+      getRecentActivities({ days: OVERVIEW_DAYS, ...cacheQuery }),
+      canOpenConfig.value ? getLogStats({ hours: LOG_STATS_HOURS, ...cacheQuery }) : Promise.resolve(null)
     ]);
 
     if (requestSeq !== loadDashboardSeq) return;
@@ -959,13 +971,17 @@ async function loadDashboard(options: { bustCache?: boolean } = {}) {
 
     if (activitiesResult.status === 'fulfilled') {
       activities.value = activitiesResult.value.activities;
+      activityCounts.value = activitiesResult.value.counts;
+      activityPeriodDays.value = activitiesResult.value.periodDays || 30;
     } else {
       activities.value = buildFallbackActivities();
+      activityCounts.value = undefined;
       activitiesError.value = getUserFacingErrorMessage(activitiesResult.reason, t('dashboard.message.activitiesFailed'));
     }
 
     if (!activities.value.length) {
       activities.value = buildFallbackActivities();
+      activityCounts.value = undefined;
     }
 
     if (logsResult.status === 'fulfilled') {

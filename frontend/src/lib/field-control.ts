@@ -95,6 +95,12 @@ export const selectCompactVariants = cva(
     'h-9 px-3 py-0 text-sm leading-9 [color-scheme:light] dark:[color-scheme:dark]'
   )
 );
+
+/** 工具栏里的条数选择：文字在框内居中，行高与高度一致，避免被裁切。 */
+export const toolbarCountSelectClass = cn(
+  selectCompactVariants(),
+  'h-8 w-[6.25rem] shrink-0 px-6 text-center leading-8 [text-align-last:center]'
+);
 export const textareaVariants = cva(`${fieldControlBase} min-h-[120px] resize-y py-2`);
 
 /** Provider 快捷面板等紧凑原生 input */

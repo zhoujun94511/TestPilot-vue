@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from models.models import db
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 
 
 class Department(db.Model):
@@ -24,13 +24,49 @@ class Department(db.Model):
     )
 
     def to_dict(self):
-        return {
+        from services.auth_migrations import DEFAULT_DEPT_CODE
+
+        payload = {
             'id': self.id,
             'code': self.code,
             'name': self.name,
             'is_active': bool(self.is_active),
             'created_time': self.created_time.isoformat() if self.created_time else None,
         }
+        if self.code == DEFAULT_DEPT_CODE:
+            payload['name_key'] = 'admin.users.dept.defaultName'
+        return payload
+
+
+class Project(db.Model):
+    """部门下的项目。需求、用例和知识库按项目分开，部门决定谁能进入。"""
+
+    __tablename__ = 'projects'
+    __table_args__ = (
+        UniqueConstraint('dept_id', 'name', name='uq_project_dept_name'),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False, comment='项目名称')
+    dept_id = Column(Integer, ForeignKey('departments.id'), nullable=False, index=True, comment='所属部门')
+    created_time = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        comment='创建时间',
+    )
+
+    def to_dict(self):
+        from services.project_service import DEFAULT_PROJECT_NAME
+
+        payload = {
+            'id': self.id,
+            'name': self.name,
+            'dept_id': self.dept_id,
+            'created_time': self.created_time.isoformat() if self.created_time else None,
+        }
+        if self.name == DEFAULT_PROJECT_NAME:
+            payload['name_key'] = 'common.project.defaultName'
+        return payload
 
 
 class User(db.Model):
@@ -57,6 +93,7 @@ class User(db.Model):
     last_login = Column(DateTime, nullable=True, comment='最近登录')
     failed_login_count = Column(Integer, default=0, comment='连续登录失败次数')
     locked_until = Column(DateTime, nullable=True, comment='账户锁定截止时间')
+    must_change_password = Column(Boolean, default=False, comment='使用公开默认密码，登录后必须先改密码')
 
     def to_public_dict(self, *, include_lock_state: bool = False):
         payload = {
@@ -66,6 +103,7 @@ class User(db.Model):
             'role': self.role,
             'dept_id': self.dept_id,
             'is_active': bool(self.is_active),
+            'must_change_password': bool(self.must_change_password),
             'created_time': self.created_time.isoformat() if self.created_time else None,
             'last_login': self.last_login.isoformat() if self.last_login else None,
         }

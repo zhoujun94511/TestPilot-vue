@@ -21,10 +21,11 @@
           variant="ghost"
           size="sm"
           :loading="exportLoading"
-          :disabled="exportLoading || !currentSessionId"
+          :disabled="!currentSessionId"
+          :aria-label="exportLoading ? t('chat.actions.exporting') : undefined"
           @click="handleExport"
         >
-          {{ exportLoading ? t('chat.actions.exporting') : t('chat.actions.export') }}
+          {{ t('chat.actions.export') }}
         </TpButton>
         <TpButton
           variant="danger"
@@ -388,9 +389,10 @@
                     variant="primary"
                     size="sm"
                     :loading="sendLoading"
-                    :disabled="sendLoading || !draftMessage.trim()"
+                    :disabled="!draftMessage.trim()"
+                    :aria-label="sendLoading ? t('chat.actions.sending') : undefined"
                   >
-                    {{ sendLoading ? t('chat.actions.sending') : t('chat.actions.send') }}
+                    {{ t('chat.actions.send') }}
                   </TpButton>
                 </div>
               </div>
@@ -779,7 +781,7 @@ async function loadConfig() {
   }
 }
 
-let loadHistoryImpl: (sessionId: string, page?: number) => Promise<void> = async () => {};
+let loadHistoryImpl: (sessionId: string, page?: number | 'last') => Promise<void> = async () => {};
 
 async function selectSession(sessionId: string, reloadHistory = true) {
   abortActiveChat();
@@ -789,7 +791,7 @@ async function selectSession(sessionId: string, reloadHistory = true) {
   resetHistoryPage();
   historyError.value = '';
   if (reloadHistory) {
-    await loadHistoryImpl(sessionId, 1);
+    await loadHistoryImpl(sessionId, 'last');
   }
 }
 
@@ -802,7 +804,9 @@ const {
   loadSessions,
   changeSessionPage,
   findSessionTitle,
-  ensureSessionVisible
+  ensureSessionVisible,
+  applySessionTitle,
+  requestSessionTitle
 } = useChatSessions({
   defaultSessionTitle: () => t('chat.sessions.defaultTitle'),
   loadSessionsFailedMessage: () => t('chat.message.loadSessionsFailed'),
@@ -882,7 +886,7 @@ const renameDraft = ref('');
 
 function startRename(session: ChatSessionRecord) {
   renamingSessionId.value = session.session_id;
-  renameDraft.value = session.title || '';
+  renameDraft.value = displaySessionTitle(session.title);
 }
 
 function cancelRename() {
@@ -899,9 +903,7 @@ async function submitRename(sessionId: string) {
   try {
     sessionLoading.value = true;
     await updateChatSession(sessionId, { title });
-    const target = sessions.value.find((item) => item.session_id === sessionId);
-    if (target) target.title = title;
-    if (currentSessionId.value === sessionId) currentSessionTitle.value = title;
+    applySessionTitle(sessionId, title, 'manual');
     cancelRename();
     setNotice('success', t('chat.message.renameSessionSuccess'));
   } catch (error) {
@@ -1019,6 +1021,7 @@ const handleSend = createChatSendHandler({
   resetHistoryPage,
   refreshHistoryPagination,
   loadSessions,
+  requestSessionTitle,
   setNotice
 });
 

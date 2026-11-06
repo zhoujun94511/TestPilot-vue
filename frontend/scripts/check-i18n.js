@@ -31,6 +31,19 @@ const DYNAMIC_MESSAGE_PREFIXES = [
   "configCenter.providerUi.",
   "enums.",
   "ai.",
+  "admin.users.audit.events.",
+  "admin.users.audit.details.fields.",
+  "chat.experimentalTools.risk.",
+  "chat.experimentalTools.fields.",
+  "chat.experimentalTools.tools.",
+  "chat.experimentalTools.toolDesc.",
+  "chat.experimentalTools.placeholders.",
+  "chat.toolMarkdown.scenario.",
+  "chat.toolMarkdown.issue.",
+  "chat.toolMarkdown.trace.",
+  "chat.toolMarkdown.msg.",
+  "dashboard.activities.messages.",
+  "config.form.dedupWeights.",
 ];
 
 function messageNamespaceForFile(fileName) {
@@ -159,6 +172,23 @@ function listSourceFiles(dir, acc = []) {
   return acc;
 }
 
+function listPythonFiles(dir, acc = []) {
+  if (!fs.existsSync(dir)) return acc;
+  for (const name of fs.readdirSync(dir)) {
+    if (name === ".venv" || name === "node_modules" || name === "__pycache__" || name === "dist" || name === ".git") {
+      continue;
+    }
+    const full = path.join(dir, name);
+    const stat = fs.statSync(full);
+    if (stat.isDirectory()) {
+      listPythonFiles(full, acc);
+      continue;
+    }
+    if (name.endsWith(".py")) acc.push(full);
+  }
+  return acc;
+}
+
 function reportPossiblyUnusedKeys(refFiles, refDir, options) {
   const verbose = options?.verbose === true;
   const allKeys = [];
@@ -174,6 +204,10 @@ function reportPossiblyUnusedKeys(refFiles, refDir, options) {
   const sourceFiles = listSourceFiles(SRC_DIR);
   let sourceContent = "";
   for (const sourceFile of sourceFiles) {
+    sourceContent += `${fs.readFileSync(sourceFile, "utf8")}\n`;
+  }
+  const repoRoot = path.resolve(ROOT, "..");
+  for (const sourceFile of listPythonFiles(repoRoot)) {
     sourceContent += `${fs.readFileSync(sourceFile, "utf8")}\n`;
   }
 

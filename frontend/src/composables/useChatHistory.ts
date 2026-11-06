@@ -29,7 +29,7 @@ export function useChatHistory<TMessage>(options: UseChatHistoryOptions<TMessage
 
   let loadHistoryRequestSeq = 0;
 
-  async function loadHistory(sessionId: string, page = historyPagination.value.page || 1) {
+  async function loadHistory(sessionId: string, page: number | 'last' = historyPagination.value.page || 1) {
     const requestSeq = ++loadHistoryRequestSeq;
     try {
       historyLoading.value = true;

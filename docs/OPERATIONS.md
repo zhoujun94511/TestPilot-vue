@@ -379,7 +379,7 @@ python run.py
 #### 实验动作编排（可选，默认关闭）
 实验接口默认可用。显式设置 `ENABLE_EXPERIMENTAL_ACTIONS=false` 后返回 403。
 
-**与聊天通道分离（不兼容旧客户端）**：`/api/chat/message` 与 `/api/chat/stream` 仅支持 `mode=chat`；`mode=action` 一律 **400** `action_mode_not_supported`，响应体含 `experimental_actions.execute` 等指引。对话与智能建议走 LLM；工具请走下方 execute，**必须**显式 `tool_name` + `args`（侧栏「实验工具」页 `/experimental-tools`）。默认 **关闭** NL 推断（无 `tool_name` → 400 `explicit_tool_required`）；脚本调试可设 `EXPERIMENTAL_ACTIONS_ALLOW_NL=true`，此时模糊句可能 `skipped` 而非误执行 list。
+**与聊天通道分离（不兼容旧客户端）**：`/api/chat/message` 与 `POST /api/chat/stream` 仅支持 `mode=chat`；`mode=action` 一律 **400** `action_mode_not_supported`。`GET /api/chat/stream` 不接受，避免消息正文出现在 URL 里。，响应体含 `experimental_actions.execute` 等指引。对话与智能建议走 LLM；工具请走下方 execute，**必须**显式 `tool_name` + `args`（侧栏「实验工具」页 `/experimental-tools`）。默认 **关闭** NL 推断（无 `tool_name` → 400 `explicit_tool_required`）；脚本调试可设 `EXPERIMENTAL_ACTIONS_ALLOW_NL=true`，此时模糊句可能 `skipped` 而非误执行 list。
 
 - `GET /api/experimental-actions/health` - 查询实验动作能力状态与已注册工具
 - `POST /api/experimental-actions/execute` - 执行动作（显式 `tool_name`/`args` 或 NL 推断；高风险默认待确认；`done`/`failed` 且带 `session_id` 时会写入聊天历史）
@@ -789,8 +789,8 @@ python run.py
 
 ### 贡献方式
 
-1.**报告问题**：在 GitLab Issues 中报告 bug 或提出功能请求
-2.**提交代码**：Fork 项目，创建分支，提交 Merge Request
+1.**报告问题**：在 GitHub Issues 中报告 bug 或提出功能请求
+2.**提交代码**：Fork 项目，创建分支，提交 Pull Request
 3.**完善文档**：改进文档、添加示例、翻译内容
 4.**测试反馈**：测试新功能，提供使用反馈
 
@@ -801,7 +801,7 @@ python run.py
 - **构建**：`cd frontend && npm run build`（迁移完成后应无报错）。
 - **总纲 / 迁移 / 发版清单**：见 [frontend/docs/UI-REDESIGN-PLAN.md](../frontend/docs/UI-REDESIGN-PLAN.md)、[frontend/docs/UI-MIGRATION.md](../frontend/docs/UI-MIGRATION.md)、[frontend/docs/RELEASE-CHECKLIST.md](../frontend/docs/RELEASE-CHECKLIST.md)。
 - **配置中心 / 词元**：[CONFIG-CENTER.md](CONFIG-CENTER.md)、[frontend/docs/TOKEN-CONFIG.md](../frontend/docs/TOKEN-CONFIG.md)。
-- **CI 门禁**：GitHub Actions 工作流 `frontend-quality.yml`（`quality:api-contract`、`pytest tests/test_api_get_snapshots.py`、`quality:release:full`）。
+- **质量检查**：发版前在本地运行 `cd frontend && npm run quality:api-contract`、`npm run quality:release:full`，以及根目录 `pytest tests/test_api_get_snapshots.py`。`.github/workflows/frontend-quality.yml` 只在 GitHub 仓库里跑同一组检查，不是 GitLab 的门禁。
 
 ### 开发环境设置
 

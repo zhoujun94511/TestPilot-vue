@@ -14,89 +14,33 @@ from utils.utils_core import error_codes as ec
 
 logger = get_logger(__name__)
 
-# 记录已打印过的 API Key 警告，避免重复刷屏
-_api_key_warning_logged = set()
+_PLACEHOLDER_PREFIXES = (
+    "your_",
+    "your-",
+    "sk-your",
+    "change_me",
+    "change-me",
+    "changeme",
+    "replace_me",
+    "replace-me",
+    "placeholder",
+    "todo_",
+)
+_PLACEHOLDER_EXACT = frozenset({"none", "null", "undefined", "todo", "n/a", "na", "xxx"})
 
 
-def _log_api_key_warning_once(key: str):
-    """同一条 API Key 警告只打印一次"""
-    if key in _api_key_warning_logged:
-        return
-    _api_key_warning_logged.add(key)
-    logger.warning(key)
+def is_placeholder_secret(value) -> bool:
+    """空值、掩码和模板占位符都不是可用密钥。
 
-
-def validate_openai_key(key: str) -> Tuple[bool, str]:
+    只按前缀和整串判断。真实密钥是随机串，中间偶然出现 todo、example 不能被当成占位符。
     """
-    OpenAI API Key 校验
-    支持两种格式：
-    1. 旧版: sk- 后接 32~64 位字母数字
-    2. 新版 project key: sk-proj- 开头，含多段 Base64 风格字符串
-    """
-    if not key or not key.strip():
-        return False, "不存在或不可用"
-
-    # 新版 project 级 key
-    pattern_project = r"^sk-proj-[A-Za-z0-9_\-]{80,200}$"
-    # 旧版 classic key
-    pattern_classic = r"^sk-[A-Za-z0-9]{32,64}$"
-
-    if re.match(pattern_project, key) or re.match(pattern_classic, key):
-        return True, " 可用"
-    else:
-        return False, "不存在或不可用"
-
-
-def validate_deepseek_key(key: str) -> Tuple[bool, str]:
-    """
-     DeepSeek API Key 校验
-    格式: sk- + 32 位十六进制
-    """
-    if not key or not key.strip():
-        return False, "不存在或不可用"
-    pattern = r"^sk-[0-9a-f]{32}$"
-    if re.match(pattern, key):
-        return True, " 可用"
-    else:
-        return False, "不存在或不可用"
-
-
-def validate_gemini_key(key: str) -> Tuple[bool, str]:
-    """
-     Gemini API Key 校验
-    格式: AIza + 35位字母数字和特殊字符
-    """
-    if not key or not key.strip():
-        return False, "不存在或不可用"
-    pattern = r"^AIza[A-Za-z0-9_-]{35}$"
-    if re.match(pattern, key):
-        return True, " 可用"
-    else:
-        return False, "不存在或不可用"
-
-
-def validate_anthropic_key(key: str) -> Tuple[bool, str]:
-    """Anthropic API Key：sk-ant- 开头。"""
-    if not key or not key.strip():
-        return False, "不存在或不可用"
-    if re.match(r'^sk-ant-[A-Za-z0-9_\-]{20,}$', key.strip()):
-        return True, " 可用"
-    return False, "不存在或不可用"
-
-
-def validate_qwen_key(key: str) -> Tuple[bool, str]:
-    """
-     Qwen API Key 校验
-    格式: sk- 后接 32~64 位字母数字（与 OpenAI 兼容格式）
-    """
-    if not key or not key.strip():
-        return False, "不存在或不可用"
-    # Qwen 使用 OpenAI-compatible API，格式与 OpenAI 类似
-    pattern = r"^sk-[A-Za-z0-9]{32,64}$"
-    if re.match(pattern, key):
-        return True, " 可用"
-    else:
-        return False, "不存在或不可用"
+    text = "" if value is None else str(value).strip()
+    if not text or text == "********":
+        return True
+    lowered = text.lower()
+    if lowered in _PLACEHOLDER_EXACT or set(lowered) <= {"x", "*", "-", "_"}:
+        return True
+    return lowered.startswith(_PLACEHOLDER_PREFIXES)
 
 
 def get_api_key_from_config_center(company: str) -> str | None:
@@ -140,166 +84,28 @@ def get_api_key_from_config_center(company: str) -> str | None:
 
 
 def get_api_key_with_fallback(company: str) -> Tuple[str | None, str | None, str]:
-    """
-    获取API Key，支持.env和配置中心的fallback机制
-    
-    参数:
-        company: AI提供商名称 ('OPENAI', 'DEEPSEEK', 'GEMINI', 'QWEN')，会自动转换为大写
-    
-    返回:
-        Tuple[str | None, str | None, str]: (API Key, 来源, 验证结果)
-            - API Key: 实际的API Key值，None表示未找到有效配置
-            - 来源: 'env' 或 'config_center' 或 None
-            - 验证结果: 验证通过的消息或错误信息
-    """
-    # 统一转换为大写进行比较
+    """配置中心的可用密钥优先。.env 里的空值和占位符不参与选择。"""
     company_upper = company.upper() if company else "OPENAI"
-    # 1. 优先从.env文件读取
-    if company_upper == "OPENAI":
-        env_key = os.getenv("OPENAI_API_KEY")
-        env_is_valid = False
-        env_message = ""
-        
-        # 1. 检查 .env 中的 key
-        if env_key and env_key.strip():
-            env_is_valid, env_message = validate_openai_key(env_key.strip())
-            if env_is_valid:
-                return env_key.strip(), "env", env_message
-        
-        # 2. .env 无效或不存在，检查配置中心
-        config_key = get_api_key_from_config_center("OPENAI")
-        if config_key and config_key.strip():
-            config_is_valid, config_message = validate_openai_key(config_key.strip())
-            if config_is_valid:
-                # 配置中心有有效key，不记录.env警告，直接返回
-                return config_key.strip(), "config_center", config_message
-            else:
-                # 配置中心的key也无效，记录两处的警告
-                if env_key and env_key.strip():
-                    _log_api_key_warning_once(f"OpenAI API Key (.env): {env_message}")
-                _log_api_key_warning_once(f"OpenAI API Key (config_center): {config_message}")
-        else:
-            # 配置中心没有key，只有当.env也有问题时才记录警告
-            if env_key and env_key.strip() and not env_is_valid:
-                _log_api_key_warning_once(f"OpenAI API Key (.env): {env_message}")
-        
-        return None, None, f"OpenAI API Key 配置有误，请检查 .env 文件或配置中心"
-    
-    elif company_upper == "DEEPSEEK":
-        env_key = os.getenv("DEEPSEEK_API_KEY")
-        env_is_valid = False
-        env_message = ""
-        
-        # 1. 检查 .env 中的 key
-        if env_key and env_key.strip():
-            env_is_valid, env_message = validate_deepseek_key(env_key.strip())
-            if env_is_valid:
-                return env_key.strip(), "env", env_message
-        
-        # 2. .env 无效或不存在，检查配置中心
-        config_key = get_api_key_from_config_center("DEEPSEEK")
-        if config_key and config_key.strip():
-            config_is_valid, config_message = validate_deepseek_key(config_key.strip())
-            if config_is_valid:
-                # 配置中心有有效key，不记录.env警告，直接返回
-                return config_key.strip(), "config_center", config_message
-            else:
-                # 配置中心的key也无效，记录两处的警告
-                if env_key and env_key.strip():
-                    _log_api_key_warning_once(f"DeepSeek API Key (.env): {env_message}")
-                _log_api_key_warning_once(f"DeepSeek API Key (config_center): {config_message}")
-        else:
-            # 配置中心没有key，只有当.env也有问题时才记录警告
-            if env_key and env_key.strip() and not env_is_valid:
-                _log_api_key_warning_once(f"DeepSeek API Key (.env): {env_message}")
-        
-        return None, None, f"DeepSeek API Key 配置有误，请检查 .env 文件或配置中心"
-    
-    elif company_upper == "GEMINI":
-        env_key = os.getenv("GEMINI_API_KEY")
-        env_is_valid = False
-        env_message = ""
-        
-        # 1. 检查 .env 中的 key
-        if env_key and env_key.strip():
-            env_is_valid, env_message = validate_gemini_key(env_key.strip())
-            if env_is_valid:
-                return env_key.strip(), "env", env_message
-        
-        # 2. .env 无效或不存在，检查配置中心
-        config_key = get_api_key_from_config_center("GEMINI")
-        if config_key and config_key.strip():
-            config_is_valid, config_message = validate_gemini_key(config_key.strip())
-            if config_is_valid:
-                # 配置中心有有效key，不记录.env警告，直接返回
-                return config_key.strip(), "config_center", config_message
-            else:
-                # 配置中心的key也无效，记录两处的警告
-                if env_key and env_key.strip():
-                    _log_api_key_warning_once(f"Gemini API Key (.env): {env_message}")
-                _log_api_key_warning_once(f"Gemini API Key (config_center): {config_message}")
-        else:
-            # 配置中心没有key，只有当.env也有问题时才记录警告
-            if env_key and env_key.strip() and not env_is_valid:
-                _log_api_key_warning_once(f"Gemini API Key (.env): {env_message}")
-        
-        return None, None, f"Gemini API Key 配置有误，请检查 .env 文件或配置中心"
-    
-    elif company_upper == "QWEN":
-        env_key = os.getenv("QWEN_API_KEY")
-        env_is_valid = False
-        env_message = ""
-        
-        # 1. 检查 .env 中的 key
-        if env_key and env_key.strip():
-            env_is_valid, env_message = validate_qwen_key(env_key.strip())
-            if env_is_valid:
-                return env_key.strip(), "env", env_message
-        
-        # 2. .env 无效或不存在，检查配置中心
-        config_key = get_api_key_from_config_center("QWEN")
-        if config_key and config_key.strip():
-            config_is_valid, config_message = validate_qwen_key(config_key.strip())
-            if config_is_valid:
-                # 配置中心有有效key，不记录.env警告，直接返回
-                return config_key.strip(), "config_center", config_message
-            else:
-                # 配置中心的key也无效，记录两处的警告
-                if env_key and env_key.strip():
-                    _log_api_key_warning_once(f"Qwen API Key (.env): {env_message}")
-                _log_api_key_warning_once(f"Qwen API Key (config_center): {config_message}")
-        else:
-            # 配置中心没有key，只有当.env也有问题时才记录警告
-            if env_key and env_key.strip() and not env_is_valid:
-                _log_api_key_warning_once(f"Qwen API Key (.env): {env_message}")
-        
-        return None, None, f"Qwen API Key 配置有误，请检查 .env 文件或配置中心"
-
-    elif company_upper == "ANTHROPIC":
-        env_key = os.getenv("ANTHROPIC_API_KEY")
-        env_is_valid = False
-        env_message = ""
-
-        if env_key and env_key.strip():
-            env_is_valid, env_message = validate_anthropic_key(env_key.strip())
-            if env_is_valid:
-                return env_key.strip(), "env", env_message
-
-        config_key = get_api_key_from_config_center("ANTHROPIC")
-        if config_key and config_key.strip():
-            config_is_valid, config_message = validate_anthropic_key(config_key.strip())
-            if config_is_valid:
-                return config_key.strip(), "config_center", config_message
-            if env_key and env_key.strip():
-                _log_api_key_warning_once(f"Anthropic API Key (.env): {env_message}")
-            _log_api_key_warning_once(f"Anthropic API Key (config_center): {config_message}")
-        elif env_key and env_key.strip() and not env_is_valid:
-            _log_api_key_warning_once(f"Anthropic API Key (.env): {env_message}")
-
-        return None, None, "Anthropic API Key 配置有误，请检查 .env 文件或配置中心"
-    
-    else:
+    env_names = {
+        "OPENAI": "OPENAI_API_KEY",
+        "DEEPSEEK": "DEEPSEEK_API_KEY",
+        "GEMINI": "GEMINI_API_KEY",
+        "QWEN": "QWEN_API_KEY",
+        "ANTHROPIC": "ANTHROPIC_API_KEY",
+    }
+    if company_upper not in env_names:
         return None, None, f"不支持的AI提供商: {company}"
+
+    config_key = get_api_key_from_config_center(company_upper)
+    if config_key and not is_placeholder_secret(config_key):
+        return config_key.strip(), "config_center", "配置中心密钥可用"
+
+    env_key = (os.getenv(env_names[company_upper]) or "").strip()
+    if env_key and not is_placeholder_secret(env_key):
+        return env_key, "env", "环境变量密钥可用"
+
+    return None, None, f"{company_upper} 尚未配置可用 API Key"
+
 
 
 def handle_api_error(response: requests.Response, service_name: str = "API") -> Tuple[bool, str]:
@@ -488,7 +294,7 @@ def check_api_key_configuration(company: str) -> Tuple[bool, str]:
     返回:
         Tuple[bool, str]: (配置是否完整, 错误描述)
     """
-    if company == "ollama":
+    if str(company or "").strip().upper() == "OLLAMA":
         # Ollama是本地服务，不需要API key检查
         return True, ""
     

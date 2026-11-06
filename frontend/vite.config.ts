@@ -40,7 +40,8 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      sourcemap: true,
+      // 生产包默认不带源码映射，排查线上问题时用 VITE_SOURCEMAP=true 重新构建
+      sourcemap: env.VITE_SOURCEMAP === 'true',
       rollupOptions: {
         output: {
           manualChunks(id) {

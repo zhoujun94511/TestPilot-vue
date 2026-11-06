@@ -134,7 +134,7 @@
         <p v-if="noticeMessage" class="tp-auth-notice" role="status">{{ noticeMessage }}</p>
 
         <button class="tp-auth-submit" type="submit" :disabled="submitting || rateLeft > 0">
-          <span v-if="submitting" class="tp-auth-spinner" aria-hidden="true" />
+          <TpSpinner v-if="submitting" size="sm" />
           <span>{{
             submitting ? t('auth.form.working') : mode === 'register'
               ? t('auth.form.submitRegister')
@@ -152,6 +152,7 @@ import { Eye, EyeOff, Moon, Sun } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import BrandMark from '@/components/brand/BrandMark.vue';
+import TpSpinner from '@/components/ui/base/TpSpinner.vue';
 import LanguageSwitcher from '@/components/common/LanguageSwitcher.vue';
 import { registerAccount } from '@/api/auth';
 import { ApiError } from '@/api/http';
@@ -576,21 +577,6 @@ onUnmounted(clearRateLimit);
 .tp-auth-submit:disabled {
   opacity: 0.65;
   cursor: not-allowed;
-}
-
-.tp-auth-spinner {
-  width: 15px;
-  height: 15px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: tp-auth-spin 0.6s linear infinite;
-}
-
-@keyframes tp-auth-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .tp-auth-error {

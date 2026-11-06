@@ -63,6 +63,14 @@ def lock_app(tmp_path, monkeypatch):
     return app
 
 
+def test_login_username_is_case_insensitive(lock_app):
+    resp = lock_app.test_client().post(
+        '/api/auth/login',
+        json={'username': 'LOCK_USER', 'password': 'LockUser@2026'},
+    )
+    assert resp.status_code == 200
+
+
 def test_account_locks_after_repeated_bad_password(lock_app):
     client = lock_app.test_client()
     for _ in range(2):
@@ -76,7 +84,8 @@ def test_account_locks_after_repeated_bad_password(lock_app):
         '/api/auth/login',
         json={'username': 'lock_user', 'password': 'wrong-password'},
     )
-    assert third.status_code == 403
+    # 密码错误时不提示锁定，避免借锁定提示判断账号是否存在
+    assert third.status_code == 401
 
     locked = client.post(
         '/api/auth/login',

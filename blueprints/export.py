@@ -15,6 +15,20 @@ export_bp = Blueprint('export', __name__)
 export_service = ExportService()
 
 
+def _load_full_export_rows(export_config: dict) -> dict:
+    """all_cases / all_requirements 时由服务端按数据范围取全量，避免前端分页上限截断。"""
+    from services.stats_scope import scoped_cases_query, scoped_requirements_query
+
+    cfg = dict(export_config)
+    if cfg.get('export_cases') and cfg.get('all_cases'):
+        cfg['cases'] = [row.to_dict() for row in scoped_cases_query().order_by(TestCase.id.asc()).all()]
+    if cfg.get('export_requirements') and cfg.get('all_requirements'):
+        cfg['requirements'] = [
+            row.to_dict() for row in scoped_requirements_query().order_by(Requirement.id.asc()).all()
+        ]
+    return cfg
+
+
 def _scope_batch_export_config(export_config: dict) -> dict:
     """开启认证时仅保留当前用户可见的用例/需求条目。"""
     from services.auth_service import auth_required
@@ -107,10 +121,11 @@ def _export_case_query(category, priority, status, case_ids, search):
     from services.data_scope import apply_data_scope
 
     query = apply_data_scope(TestCase.query, TestCase, 'cases')
+    from services.case_field_filters import case_category_values, case_priority_values, filter_column_in
     from services.sql_query_helpers import filter_column_eq
 
-    query = filter_column_eq(query, TestCase.category, category)
-    query = filter_column_eq(query, TestCase.priority, priority)
+    query = filter_column_in(query, TestCase.category, case_category_values(category))
+    query = filter_column_in(query, TestCase.priority, case_priority_values(priority))
     query = filter_column_eq(query, TestCase.status, status)
 
     raw_ids = []
@@ -125,10 +140,10 @@ def _export_case_query(category, priority, status, case_ids, search):
     term = str(search or '').strip()
     if term:
         query = query.filter(
-            TestCase.title.contains(term) |
-            TestCase.description.contains(term) |
-            TestCase.case_id.contains(term) |
-            TestCase.display_id.contains(term)
+            TestCase.title.contains(term, autoescape=True) |
+            TestCase.description.contains(term, autoescape=True) |
+            TestCase.case_id.contains(term, autoescape=True) |
+            TestCase.display_id.contains(term, autoescape=True)
         )
     return query.order_by(TestCase.created_time.desc())
 
@@ -465,31 +480,6 @@ def export_chat_history():
 
         # 获取数据
         chat_history = query.order_by(ChatHistory.created_time.asc()).all()
-        
-        # 添加调试日志
-        current_app.logger.info(f"导出聊天记录查询: session_id={session_id}, 找到 {len(chat_history)} 条记录")
-        
-        # 如果没有找到记录，尝试使用与获取历史API完全相同的查询方式
-        if not chat_history and session_id:
-            # 使用与 /api/chat/history 完全相同的查询逻辑
-            verify_query = scoped_chat_history_query().filter(
-                ChatHistory.session_id == session_id
-            )
-            verify_count = verify_query.count()
-            current_app.logger.warning(f"导出查询未找到记录，使用获取历史API的查询方式验证: session_id={session_id}, 找到 {verify_count} 条记录")
-            
-            if verify_count > 0:
-                # 如果验证查询有记录，使用验证查询的结果
-                chat_history = verify_query.order_by(ChatHistory.created_time.asc()).all()
-                current_app.logger.info(f"使用验证查询结果: 找到 {len(chat_history)} 条记录")
-            else:
-                # 检查session_id格式是否正确
-                current_app.logger.error(f"session_id={session_id} 在数据库中不存在任何记录")
-                return jsonify({
-                    'success': False,
-                    'message': f'会话ID {session_id} 没有找到任何聊天记录，请确认会话ID是否正确',
-                    'session_id': session_id
-                }), 404
 
         if not chat_history:
             return jsonify({
@@ -559,7 +549,8 @@ def get_cases_template():
 
         if result['success']:
             # 生成文件名
-            filename = f"test_cases_template.{template_type}"
+            template_extension = {'excel': 'xlsx', 'csv': 'csv'}.get(template_type, 'xlsx')
+            filename = f"test_cases_template.{template_extension}"
             mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' if template_type == 'excel' else 'text/csv'
 
             # 返回文件
@@ -599,7 +590,7 @@ def batch_export():
         if not export_config:
             raise BadRequest("导出配置不能为空")
 
-        export_config = _scope_batch_export_config(export_config)
+        export_config = _scope_batch_export_config(_load_full_export_rows(export_config))
 
         # 执行批量导出
         result = export_service.batch_export(export_config)
