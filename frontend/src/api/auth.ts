@@ -1,4 +1,5 @@
 import { get, post } from '@/api/http';
+import { clearSessionToken, writeSessionToken } from '@/api/sessionToken';
 
 export type UserRole = 'super_admin' | 'admin' | 'user';
 
@@ -62,15 +63,26 @@ export async function fetchCheckAuth() {
 }
 
 export async function login(username: string, password: string) {
-  const raw = await post<{ data?: { user: AuthUser }; user?: AuthUser }>('/auth/login', {
+  const raw = await post<{
+    data?: { user?: AuthUser; session_token?: string };
+    user?: AuthUser;
+    session_token?: string;
+  }>('/auth/login', {
     username,
     password
   });
-  return (raw as { data?: { user: AuthUser } }).data?.user ?? (raw as { user: AuthUser }).user;
+  const data = raw.data ?? raw;
+  const token = typeof data.session_token === 'string' ? data.session_token : '';
+  if (token) writeSessionToken(token);
+  return (data.user ?? (raw as { user: AuthUser }).user) as AuthUser;
 }
 
 export async function logout() {
-  await post('/auth/logout');
+  try {
+    await post('/auth/logout');
+  } finally {
+    clearSessionToken();
+  }
 }
 
 export async function registerAccount(payload: {

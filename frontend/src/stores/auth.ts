@@ -4,6 +4,7 @@ import type { AuthUser, UserRole } from '@/api/auth';
 import { fetchCheckAuth, login as apiLogin, logout as apiLogout } from '@/api/auth';
 import { EXPERIMENTAL_TOOLS_SESSION_STORAGE_KEY } from '@/config/experimentalTools';
 import { setTabProjectId } from '@/lib/current-project';
+import { clearSessionToken } from '@/api/sessionToken';
 
 export const useAuthStore = defineStore('auth', () => {
   const bootstrapped = ref(false);
@@ -35,6 +36,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function clearSession() {
     user.value = null;
+    clearSessionToken();
   }
 
   function markPasswordChangeRequired() {
@@ -50,7 +52,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (error) {
       console.warn('logout request failed', error);
     } finally {
-      user.value = null;
+      clearSession();
       localStorage.removeItem(EXPERIMENTAL_TOOLS_SESSION_STORAGE_KEY);
       setTabProjectId(null);
     }

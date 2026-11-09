@@ -13,8 +13,8 @@ from services.auth_service import (
     client_ip,
     create_session,
     create_user,
-    destroy_session,
     current_user,
+    revoke_request_sessions,
     find_user_by_email_ci,
     find_user_by_username_ci,
     normalize_email,
@@ -214,7 +214,7 @@ def login():
     regenerate = getattr(current_app.session_interface, 'regenerate', None)
     if callable(regenerate):
         regenerate(session)
-    return api_success({'user': user})
+    return api_success({'user': user, 'session_token': token})
 
 
 @auth_bp.post('/logout')
@@ -228,8 +228,7 @@ def logout():
         username=actor.get('username') if actor else None,
         ip_address=_client_ip_key(),
     )
-    destroy_session(session.get('session_token', ''))
-    session.pop('session_token', None)
+    revoke_request_sessions()
     return api_success({'message': '已退出登录'})
 
 
@@ -621,8 +620,6 @@ def change_password():
                 status=400,
             )
         return api_error('VALIDATION_FAILED', message_key='auth.message.weakCredentials', status=400)
-    from flask import session
-
     from services.auth_audit import EVENT_PASSWORD_CHANGED, log_auth_event
 
     actor = current_user()
@@ -632,6 +629,5 @@ def change_password():
         username=actor.get('username') if actor else None,
         ip_address=_client_ip_key(),
     )
-    destroy_session(session.get('session_token', ''))
-    session.pop('session_token', None)
+    revoke_request_sessions()
     return api_success({'message': '密码已修改，请重新登录'})

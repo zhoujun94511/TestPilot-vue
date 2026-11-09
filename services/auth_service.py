@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from flask import g, session
+from flask import g, request, session
 from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -260,6 +260,34 @@ def destroy_session(token: str) -> None:
     db.session.commit()
 
 
+_BEARER_PREFIX = 'Bearer '
+_MAX_SESSION_TOKEN_LENGTH = 128
+
+
+def bearer_token_from_request() -> str:
+    """只认「Bearer 」前缀。空白、超长或中间带空白都当成没有令牌。"""
+    header = request.headers.get('Authorization', '')
+    if not header.startswith(_BEARER_PREFIX):
+        return ''
+    token = header[len(_BEARER_PREFIX):].strip()
+    if not token or len(token) > _MAX_SESSION_TOKEN_LENGTH:
+        return ''
+    if any(character.isspace() for character in token):
+        return ''
+    return token
+
+
+def revoke_request_sessions() -> None:
+    """作废本次请求里的 Bearer 和 cookie 令牌。两处是同一枚时只删一次。"""
+    tokens: list[str] = []
+    for token in (bearer_token_from_request(), str(session.get('session_token') or '')):
+        if token and token not in tokens:
+            tokens.append(token)
+    for token in tokens:
+        destroy_session(token)
+    session.pop('session_token', None)
+
+
 _SESSION_CLEANUP_INTERVAL_SECONDS = 300.0
 _last_expired_session_cleanup = 0.0
 
@@ -299,7 +327,9 @@ def validate_token(token: str) -> Optional[Dict[str, Any]]:
 def current_user() -> Optional[Dict[str, Any]]:
     if hasattr(g, 'current_user'):
         return g.current_user
-    user = validate_token(session.get('session_token', ''))
+    user = validate_token(bearer_token_from_request())
+    if user is None:
+        user = validate_token(str(session.get('session_token') or ''))
     g.current_user = user
     return user
 

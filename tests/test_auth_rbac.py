@@ -84,6 +84,37 @@ def test_login_and_check_auth(auth_app):
     assert ok.status_code == 200
 
 
+def test_embedded_client_uses_bearer_without_cookie(auth_app):
+    login = auth_app.test_client().post(
+        '/api/auth/login',
+        json={'username': 'admin', 'password': 'TestPilot@2026'},
+        headers={'Sec-Fetch-Site': 'cross-site'},
+    )
+    assert login.status_code == 200
+    token = (login.get_json() or {}).get('data', {}).get('session_token')
+    assert token
+
+    client = auth_app.test_client()
+    assert client.get('/api/cases/list').status_code == 401
+    assert client.get(
+        '/api/cases/list',
+        headers={'Authorization': f'Bearer {token}'},
+    ).status_code == 200
+
+    denied = client.post('/api/auth/logout', headers={'Sec-Fetch-Site': 'cross-site'})
+    assert denied.status_code == 403
+
+    logged_out = client.post(
+        '/api/auth/logout',
+        headers={'Authorization': f'Bearer {token}', 'Sec-Fetch-Site': 'cross-site'},
+    )
+    assert logged_out.status_code == 200
+    assert client.get(
+        '/api/cases/list',
+        headers={'Authorization': f'Bearer {token}'},
+    ).status_code == 401
+
+
 def test_overlapping_logins_keep_one_session(auth_app):
     import threading
 

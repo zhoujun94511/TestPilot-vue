@@ -10,6 +10,7 @@ import http, {
   put,
   resolveProjectHeaders
 } from './http';
+import { authorizationHeader } from './sessionToken';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -410,6 +411,7 @@ async function fetchSse(url: string, body: unknown, signal?: AbortSignal): Promi
       'Content-Type': 'application/json',
       'Accept-Language': localStorage.getItem('testpilot_locale') || 'zh-CN',
       'X-Requested-With': 'XMLHttpRequest',
+      ...authorizationHeader(),
       ...(await resolveProjectHeaders())
     },
     credentials: 'include',

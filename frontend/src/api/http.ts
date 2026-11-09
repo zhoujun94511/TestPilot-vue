@@ -1,4 +1,5 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import { authorizationHeader } from '@/api/sessionToken';
 import i18n from '@/i18n';
 import { currentProjectScopeVersion, getTabProjectId, projectHeaders } from '@/lib/current-project';
 import { messageFromApiEnvelope, resolveTransportErrorMessage } from '@/lib/user-facing-error';
@@ -157,6 +158,10 @@ http.interceptors.request.use(async (config) => {
     await ensureCurrentProject();
   }
   Object.assign(config.headers, projectHeaders());
+  const existingAuthorization = config.headers.get?.('Authorization') ?? config.headers.Authorization;
+  if (!existingAuthorization) {
+    Object.assign(config.headers, authorizationHeader());
+  }
 
   if (config.data instanceof FormData) {
     delete (config.headers as Record<string, string>)['Content-Type'];

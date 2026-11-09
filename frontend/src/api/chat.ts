@@ -10,6 +10,7 @@ import http, {
   put,
   resolveProjectHeaders
 } from './http';
+import { authorizationHeader } from './sessionToken';
 import {
   asArray as coreAsArray,
   normalizeError as coreNormalizeError,
@@ -346,6 +347,7 @@ async function fetchSse(url: string, body: ChatMessagePayload, signal?: AbortSig
       'Content-Type': 'application/json',
       'Accept-Language': localStorage.getItem('testpilot_locale') || 'zh-CN',
       'X-Requested-With': 'XMLHttpRequest',
+      ...authorizationHeader(),
       ...(await resolveProjectHeaders())
     },
     credentials: 'include',

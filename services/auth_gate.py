@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from flask import Flask, jsonify, request
 
-from services.auth_service import auth_required, current_user
+from services.auth_service import auth_required, bearer_token_from_request, current_user
 
 _PUBLIC_API_PATHS = frozenset({
     '/api/auth/login',
@@ -21,11 +21,17 @@ _PASSWORD_CHANGE_PATHS = frozenset({
 })
 
 
-def _cross_site_write() -> bool:
-    """浏览器会如实标记跨站请求；跨站来的写操作一律拒绝。"""
+def _cross_site_write_blocked() -> bool:
+    """跨站写操作默认拒绝。登录、注册、检查登录，以及带了 Bearer 的请求放行。"""
     if request.headers.get('Sec-Fetch-Site', '').lower() != 'cross-site':
         return False
-    return request.method not in ('GET', 'HEAD')
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return False
+    if request.path in _PUBLIC_API_PATHS:
+        return False
+    if bearer_token_from_request():
+        return False
+    return True
 
 
 def install_auth_gate(flask_app: Flask) -> None:
@@ -34,7 +40,7 @@ def install_auth_gate(flask_app: Flask) -> None:
         path = request.path
         if not path.startswith('/api/') or request.method == 'OPTIONS':
             return None
-        if _cross_site_write():
+        if _cross_site_write_blocked():
             return jsonify({
                 'success': False,
                 'code': 'FORBIDDEN',
